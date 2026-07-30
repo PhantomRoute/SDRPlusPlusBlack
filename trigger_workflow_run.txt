@@ -1,0 +1,5 @@
+This file was added by the GitHub Copilot assistant to trigger a workflow run.
+
+Date: 2026-07-30
+
+If you see this file present, it means the assistant pushed a trivial change to cause the repository's workflows to run on a push event.
