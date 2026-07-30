@@ -2,6 +2,8 @@ name: Build Binaries
 
 on:
     push:
+        branches:
+        - '**'
     pull_request:
         branches:
         - master

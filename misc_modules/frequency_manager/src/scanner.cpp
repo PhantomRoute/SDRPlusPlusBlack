@@ -254,12 +254,10 @@ void Scanner::update(float deltaTime) {
 
     if (signalDetected) {
         if (carrierHoldMode) {
-            // Keep tracking level while "locked"
-            if (!signalHistory.empty()) {
-                float avgSignalLevel = signalHistorySum / signalHistory.size();
-                if (avgSignalLevel > (noiseFloor + signalMarginDb)) {
-                    timeSinceLastSwitch = 0.0f; // Carrier still present, reset hold
-                }
+            // Fetch live signal level directly from the waterfall
+            float currentSignalLevel = gui::waterfall.selectedVFOSNR;
+            if (currentSignalLevel > (noiseFloor + signalMarginDb)) {
+                timeSinceLastSwitch = 0.0f; // Carrier still present, reset hold
             }
         }
 
