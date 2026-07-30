@@ -60,19 +60,19 @@ build() {
         tail -50 "$LOG_FILE"
         exit 1
     fi
-    
+
     make -j$(nproc) >> "$LOG_FILE" 2>&1
     if [ $? -ne 0 ]; then
         tail -50 "$LOG_FILE"
         exit 1
     fi
-    
+
     make install >> "$LOG_FILE" 2>&1
     if [ $? -ne 0 ]; then
         tail -50 "$LOG_FILE"
         exit 1
     fi
-    
+
     WARNINGS=$(grep -ci "warning:" "$LOG_FILE" 2>/dev/null || true)
     echo "$WARNINGS warnings, log saved in $LOG_FILE"
 }
@@ -82,7 +82,7 @@ list-all() {
         echo "SDR++ is not running. Start with: $0 start"
         exit 1
     fi
-    
+
     python3 << 'PYEOF'
 import json
 import subprocess
@@ -98,15 +98,15 @@ set_value() {
         echo "Example: $0 set /source/type File"
         exit 1
     fi
-    
+
     if ! pgrep -f "sdrpp" > /dev/null 2>&1; then
         echo "SDR++ is not running. Start with: $0 start"
         exit 1
     fi
-    
+
     local path="$1"
     local value="$2"
-    
+
     python3 << PYEOF
 import json
 import subprocess

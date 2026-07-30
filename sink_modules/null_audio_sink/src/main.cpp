@@ -35,7 +35,7 @@ public:
         _stream = stream;
         this->streamName = streamName;
         ns.init(stream->sinkOut);
-        
+
         flog::info("NullAudioSink created for stream: {}", streamName);
     }
 
@@ -77,9 +77,9 @@ private:
     class CountingNull : public dsp::Sink<dsp::stereo_t> {
     public:
         std::atomic<int64_t>* counter;
-        
+
         CountingNull(std::atomic<int64_t>* counter) : counter(counter) {}
-        
+
         int run() override {
             int count = _in->read();
             if (count < 0) { return -1; }
@@ -103,18 +103,18 @@ public:
         provider.ctx = this;
 
         sigpath::sinkManager.registerSinkProvider("NullAudioSink", provider);
-        
+
         // Register procfs endpoints for control and monitoring
-        httpdebug::procfs::registerEndpoint("/null_audio_sink/samples", 
+        httpdebug::procfs::registerEndpoint("/null_audio_sink/samples",
             [this]() -> std::string {
                 if (sink) {
                     return std::to_string((long long)sink->totalSamples.load());
                 }
                 return "0";
-            }, 
-            nullptr, 
+            },
+            nullptr,
             httpdebug::procfs::Type::Int);
-        
+
         httpdebug::procfs::registerEndpoint("/null_audio_sink/sample_rate",
             [this]() -> std::string {
                 if (sink) {
@@ -124,7 +124,7 @@ public:
             },
             nullptr,
             httpdebug::procfs::Type::Float);
-        
+
         httpdebug::procfs::registerEndpoint("/null_audio_sink/status",
             [this]() -> std::string {
                 if (sink) {
@@ -134,7 +134,7 @@ public:
             },
             nullptr,
             httpdebug::procfs::Type::String);
-        
+
         httpdebug::procfs::registerEndpoint("/null_audio_sink/select",
             [this]() -> std::string {
                 // GET returns current stream info

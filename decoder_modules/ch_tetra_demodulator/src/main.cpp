@@ -100,7 +100,7 @@ public:
         osmotetradecoder.init(&symbolExtractor.out);
         osmotetradecoder.setExtractor(&symbolExtractor); // Feed the extractor address
         // ------------------------------------------------------------------------
-        
+
         resamp.init(&osmotetradecoder.out, 8000.0, audioSampleRate);
         outconv.init(&resamp.out);
 

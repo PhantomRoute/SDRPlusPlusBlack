@@ -27,7 +27,7 @@ else ()
 
     target_include_directories(usrp_source PRIVATE ${LIBUHD_INCLUDE_DIRS})
     target_link_directories(usrp_source PRIVATE ${LIBUHD_LIBRARY_DIRS})
-    
+
     # Link with the cleaned list
     target_link_libraries(usrp_source PRIVATE ${CLEANED_UHD_LIBS})
 

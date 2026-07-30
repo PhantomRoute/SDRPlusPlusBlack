@@ -243,7 +243,7 @@ def run_test():
                 tetra_sync = tetra_data.get("sync", False)
                 tetra_quality = float(tetra_data.get("signal_quality", 0))
                 tetra_status = f"sync={'✓' if tetra_sync else '✗'} state={tetra_state} qual={tetra_quality:.3f}"
-                
+
                 # Show more details if available
                 extras = ""
                 if "mcc" in tetra_data:
@@ -301,7 +301,7 @@ def run_test():
             print(f"Possible reasons:")
             print(f"  - Signal might not be TETRA at {TETRA_SIGNAL_HZ} Hz")
             print(f"  - VFO offset may need adjustment (trying nearby frequencies...)")
-            
+
             # Try a few nearby frequencies
             for try_offset in [-684000, -685000, -686597, -688000, -689000]:
                 print(f"\n  Trying offset {try_offset} Hz...")
@@ -316,7 +316,7 @@ def run_test():
                     print(f"    sync={data.get('sync')} state={data.get('decoder_state')} qual={data.get('signal_quality',0):.3f}")
                 except:
                     print(f"    {resp[:60]}")
-            
+
             return False
 
     finally:

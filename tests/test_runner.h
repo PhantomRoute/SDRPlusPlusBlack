@@ -28,7 +28,7 @@ public:
             flog::error("Test '{}' not found", name);
             exit(1);
         }
-        
+
         flog::info("Running test: {}", name);
         it->second();
     }

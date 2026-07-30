@@ -215,23 +215,23 @@ SDR++ provides a /proc-style filesystem-like API for reading and writing to modu
 namespace httpdebug::procfs {
     // Register a custom handler
     int registerHandler(const std::string& path, Handler handler);
-    
+
     // Convenience: register a boolean value (auto GET/POST)
     int registerBool(const std::string& path, bool* value);
-    
+
     // Convenience: register an integer (read-only if readOnly=true)
     int registerInt(const std::string& path, int* value, bool readOnly = false);
-    
+
     // Convenience: register a float (read-only if readOnly=true)
     int registerFloat(const std::string& path, float* value, bool readOnly = false);
-    
+
     // Register a container with dynamic children
     int registerContainer(const std::string& path, ListChildren listChildren, ContainerHandler handler);
-    
+
     // Unregister by path or handle
     void unregister(const std::string& path);
     void unregister(int handle);
-    
+
     // List all registered endpoints
     std::vector<std::string> list();
 }

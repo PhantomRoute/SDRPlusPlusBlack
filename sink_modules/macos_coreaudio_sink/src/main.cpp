@@ -514,7 +514,7 @@ private:
         UInt32 safeFrames = (inNumberFrames > 4096) ? 4096 : inNumberFrames;
 
         // Pristine fixed-size stack allocation. Zero heap locks, zero VLA risk.
-        float stackBuffer[4096]; 
+        float stackBuffer[4096];
 
         AudioBufferList bufferList;
         bufferList.mNumberBuffers = 1;
@@ -629,9 +629,9 @@ private:
             policy.constraint = (uint32_t)((800000.0 * timebaseInfo.denom) / timebaseInfo.numer);
             policy.preemptible = true;
 
-            thread_policy_set(mach_thread_self(), THREAD_TIME_CONSTRAINT_POLICY, 
+            thread_policy_set(mach_thread_self(), THREAD_TIME_CONSTRAINT_POLICY,
                               (thread_policy_t)&policy, THREAD_TIME_CONSTRAINT_POLICY_COUNT);
-            
+
             threadElevated = true;
         }
         // --------------------------------------------------
@@ -665,7 +665,7 @@ private:
         // 2. ATOMIC EVALUATION: Determine how many samples are safely available to play
         int w = _this->writeIndex.load(std::memory_order_acquire);
         int r = _this->readIndex.load(std::memory_order_relaxed);
-        
+
         int available = (w >= r) ? (w - r) : (RING_BUFFER_SIZE - r + w);
         int limit = std::min<int>((int)inNumberFrames, available);
 

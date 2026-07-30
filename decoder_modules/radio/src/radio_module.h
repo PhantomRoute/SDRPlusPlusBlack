@@ -71,7 +71,7 @@ public:
         // Initialize IF DSP chain
         ifChainOutputChanged.ctx = this;
         ifChainOutputChanged.handler = ifChainOutputChangeHandler;
-        
+
         // Insert spectrum capture splitter before IF chain
         ifSplitter.init(vfo->output);
         ifSplitter.bindStream(&ifChainInputStream);
@@ -246,7 +246,7 @@ public:
             } catch (...) {}
             if (numBuckets < 8) numBuckets = 8;
             if (numBuckets > 2048) numBuckets = 2048;
-            
+
             // Capture a snapshot of the spectrum buffer
             std::vector<dsp::complex_t> snap;
             {
@@ -254,27 +254,27 @@ public:
                 snap.resize(SPECTRUM_BUF_SIZE);
                 memcpy(snap.data(), spectrumBuf, SPECTRUM_BUF_SIZE * sizeof(dsp::complex_t));
             }
-            
+
             // Compute FFT on the captured data
             int fftSize = SPECTRUM_BUF_SIZE;
             std::vector<float> window(fftSize);
             for (int i = 0; i < fftSize; i++) {
                 window[i] = 0.5f * (1.0f - cosf(2.0f * M_PI * i / (fftSize - 1))); // Hann
             }
-            
+
             // FFT via simple DFT for buckets (faster: average FFT bins into buckets)
             // Use FFTW if available, otherwise do a simple calculation
             // For bucket averaging: compute FFT, then average into buckets
             float* fftIn = (float*)fftwf_malloc(sizeof(fftwf_complex) * fftSize);
             fftwf_complex* fftOut = (fftwf_complex*)fftwf_malloc(sizeof(fftwf_complex) * fftSize);
             auto plan = fftwf_plan_dft_1d(fftSize, (fftwf_complex*)fftIn, fftOut, FFTW_FORWARD, FFTW_ESTIMATE);
-            
+
             for (int i = 0; i < fftSize; i++) {
                 fftIn[2*i] = snap[i].re * window[i];
                 fftIn[2*i+1] = snap[i].im * window[i];
             }
             fftwf_execute(plan);
-            
+
             // Power spectrum
             std::vector<float> power(fftSize);
             float maxPower = 1e-30f;
@@ -284,7 +284,7 @@ public:
                 power[i] = re*re + im*im;
                 if (power[i] > maxPower) maxPower = power[i];
             }
-            
+
             // Average into buckets
             int binsPerBucket = fftSize / numBuckets;
             std::string json = "{\"spectrum\": [";
@@ -302,11 +302,11 @@ public:
             json += ", \"fft_size\": " + std::to_string(fftSize);
             json += ", \"max_bin\": " + std::to_string(maxPower);
             json += "}";
-            
+
             fftwf_destroy_plan(plan);
             fftwf_free(fftIn);
             fftwf_free(fftOut);
-            
+
             return json;
         }
         return "{\"error\": \"unknown command: " + cmd + "\"}";

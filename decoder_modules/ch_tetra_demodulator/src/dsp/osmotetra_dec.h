@@ -40,9 +40,9 @@ namespace dsp {
 
             // Native Fix: 50ms platform-native sleep bypassing <chrono> and <thread>
             #if defined(_WIN32)
-                ::Sleep(50); 
+                ::Sleep(50);
             #else
-                ::usleep(50000); 
+                ::usleep(50000);
             #endif
 
             // NATIVE FIX: ONLY free the single heap array allocated with malloc
@@ -143,7 +143,7 @@ namespace dsp {
         inline int process(int count, const uint8_t* in, float* out)  {
             int outcnt = 0;
             static int unique_frame_log = -1;
-            
+
             // ------------------------------------------------------------------------
             // ROLLING SIGNAL QUALITY COUNTERS
             // ------------------------------------------------------------------------
@@ -151,7 +151,7 @@ namespace dsp {
             static int successful_crc_frames = 0;
             static float rolling_signal_quality = 100.0f;
             // ------------------------------------------------------------------------
-            
+
             if (trs == nullptr || tms == nullptr || count <= 0 || in == nullptr) {
                 return 0;
             }
@@ -170,7 +170,7 @@ namespace dsp {
             const int SAFE_SLOT_BURST_SIZE = 510;
             for (int off = 0; off < unpacked_bit_count; off += SAFE_SLOT_BURST_SIZE) {
                 int chunk_size = (std::min)(SAFE_SLOT_BURST_SIZE, unpacked_bit_count - off);
-                
+
                 if (chunk_size > 0) {
                     trs->burst_cb_priv = tms;
                     tetra_burst_sync_in(trs, unpacked_bits_buf + off, chunk_size);
@@ -180,7 +180,7 @@ namespace dsp {
                     int active_frame = tms->t_display_st->curr_frame;
                     if (active_frame != unique_frame_log) {
                         unique_frame_log = active_frame;
-                        
+
                         // ------------------------------------------------------------------------
                         // WINDOWS 7 COMPATIBLE TIME STAMPING
                         // Using native lightweight C/OS clocks to eliminate std::chrono
@@ -206,7 +206,7 @@ namespace dsp {
                         // SIGNAL QUALITY MATH: Calculate real-time sliding CRC success window
                         // ------------------------------------------------------------------------
                         bool is_locked = !(tms->t_display_st->last_crc_fail);
-                        
+
                         // ------------------------------------------------------------------------
                         // THE CURE: Read the true physical constellation error vector live
                         // ------------------------------------------------------------------------
@@ -226,9 +226,9 @@ namespace dsp {
                         }
                         // ------------------------------------------------------------------------
 
-                        bool is_voice = (tms->t_display_st->timeslot_content[0] == 4) | 
-                                        (tms->t_display_st->timeslot_content[1] == 4) | 
-                                        (tms->t_display_st->timeslot_content[2] == 4) | 
+                        bool is_voice = (tms->t_display_st->timeslot_content[0] == 4) |
+                                        (tms->t_display_st->timeslot_content[1] == 4) |
+                                        (tms->t_display_st->timeslot_content[2] == 4) |
                                         (tms->t_display_st->timeslot_content[3] == 4);
 
                         // PRINT LOG TICKER: Mirroring the GUI bar with 100% precision
@@ -246,21 +246,21 @@ namespace dsp {
                 outcnt += out_tmp_buff.read(out, out_tmp_buff.getReadable(false));
             }
             outSymsCtr += outcnt;
-            inSymsCtr += (count * 2); 
-            
+            inSymsCtr += (count * 2);
+
             int requiredOut = inSymsCtr * 8 / 36;
             int remainingOut = requiredOut - outSymsCtr;
-            
-            bool decoding = (tms->t_display_st->timeslot_content[0] == 4) | 
-                            (tms->t_display_st->timeslot_content[1] == 4) | 
-                            (tms->t_display_st->timeslot_content[2] == 4) | 
+
+            bool decoding = (tms->t_display_st->timeslot_content[0] == 4) |
+                            (tms->t_display_st->timeslot_content[1] == 4) |
+                            (tms->t_display_st->timeslot_content[2] == 4) |
                             (tms->t_display_st->timeslot_content[3] == 4);
-                            
+
             if(remainingOut > 0 && !decoding) {
                 ::memset(&(out[outcnt]), 0, remainingOut * sizeof(float));
                 outcnt += remainingOut;
             }
-            
+
             outSymsCtr -= (std::min)(outSymsCtr, requiredOut);
             inSymsCtr -= requiredOut * 36 / 8;
             return outcnt;

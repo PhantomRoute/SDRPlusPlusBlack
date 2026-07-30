@@ -221,4 +221,3 @@ runs-on: windows-2022
 * Many warnings may appear during compilation (e.g., from IT++, libmp3lame, deprecated C++ features). For this exercise, they were non-fatal for the selected build configuration. Investigation may be needed if they cause issues with specific functionalities.
 
 IMPORTANT!!! Never change layout and formatting of C/C++ code unrelated to the task you're doing. NO braces edits in unrelated code, no spaces evenly distributed in array initializations. In existing C++ code, each position matter, NEVER change unless you fix bug related to that line. NEVER add changes to source that just alter code layout!
-

@@ -61,23 +61,23 @@ def test_frequency_manager():
     """Test frequency manager debug protocol - all 12 test cases."""
     if not STATS_MODE:
         stats.section("Testing Frequency Manager Debug Protocol")
-    
+
     main_config = get_base_config()
     main_config["moduleInstances"]["Frequency Manager"] = {"module": "frequency_manager", "enabled": True}
     radio_config = get_radio_config(demod_id=0, bandwidth=12500.0, demod_name="FM")
     freq_manager_config = get_freq_manager_config()
-    
+
     all_passed = True
     total_tests = 0
     passed_tests = 0
-    
+
     with SDRPPTestContext() as ctx:
         ctx.write_configs(main_config, radio_config, freq_manager_config)
-        
+
         if not ctx.start():
             stats.final_summary(0, 0, 1)
             return False
-        
+
         # Test 1: Get lists
         stats.subsection("Test 1: get_lists")
         total_tests += 1
@@ -90,7 +90,7 @@ def test_frequency_manager():
         else:
             stats.test_pass("test_1_get_lists")
             passed_tests += 1
-        
+
         # Test 2: Get current list
         stats.subsection("Test 2: get_current_list")
         total_tests += 1
@@ -103,7 +103,7 @@ def test_frequency_manager():
         else:
             stats.test_pass("test_2_get_current_list")
             passed_tests += 1
-        
+
         # Test 3: Get bookmarks
         stats.subsection("Test 3: get_bookmarks")
         total_tests += 1
@@ -117,7 +117,7 @@ def test_frequency_manager():
         else:
             stats.test_pass("test_3_get_bookmarks")
             passed_tests += 1
-        
+
         # Test 4: Add bookmark
         stats.subsection("Test 4: add_bookmark")
         total_tests += 1
@@ -130,7 +130,7 @@ def test_frequency_manager():
         else:
             stats.test_pass("test_4_add_bookmark")
             passed_tests += 1
-        
+
         # Test 5: Verify bookmark was added
         stats.subsection("Test 5: Verify added bookmark")
         total_tests += 1
@@ -146,7 +146,7 @@ def test_frequency_manager():
         else:
             stats.test_pass("test_5_verify_bookmark")
             passed_tests += 1
-        
+
         # Test 6: Apply bookmark
         stats.subsection("Test 6: apply_bookmark")
         total_tests += 1
@@ -159,7 +159,7 @@ def test_frequency_manager():
         else:
             stats.test_pass("test_6_apply_bookmark")
             passed_tests += 1
-        
+
         # Test 7: Set current list
         stats.subsection("Test 7: set_current_list")
         total_tests += 1
@@ -179,7 +179,7 @@ def test_frequency_manager():
             else:
                 stats.test_pass("test_7_set_current_list")
                 passed_tests += 1
-        
+
         # Test 8: Try to start scanner on empty list (should fail)
         stats.subsection("Test 8: start_scanner on empty list (should fail)")
         total_tests += 1
@@ -191,10 +191,10 @@ def test_frequency_manager():
         else:
             stats.test_pass("test_8_start_scanner_empty")
             passed_tests += 1
-        
+
         # Switch back to TestList for remaining tests
         ctx.module_cmd("Frequency Manager", "set_current_list", "TestList")
-        
+
         # Test 9: Get scanner status (not scanning)
         stats.subsection("Test 9: get_scanner_status (not scanning)")
         total_tests += 1
@@ -207,7 +207,7 @@ def test_frequency_manager():
         else:
             stats.test_pass("test_9_scanner_status")
             passed_tests += 1
-        
+
         # Test 10: Remove bookmark
         stats.subsection("Test 10: remove_bookmark")
         total_tests += 1
@@ -228,29 +228,29 @@ def test_frequency_manager():
             else:
                 stats.test_pass("test_10_remove_bookmark")
                 passed_tests += 1
-        
+
         # Test 11: Error cases
         stats.subsection("Test 11: Error cases")
         total_tests += 1
         errors = []
-        
+
         # Invalid list name
         resp = ctx.module_cmd("Frequency Manager", "set_current_list", "NonExistentList")
         if "error" not in resp:
             errors.append("Expected error for non-existent list")
-        
+
         # Invalid bookmark name for apply
         resp = ctx.module_cmd("Frequency Manager", "apply_bookmark", "NonExistentBookmark")
         if "error" not in resp:
             errors.append("Expected error for non-existent bookmark")
-        
+
         if errors:
             stats.test_fail("test_11_error_cases", "; ".join(errors))
             all_passed = False
         else:
             stats.test_pass("test_11_error_cases")
             passed_tests += 1
-        
+
         # Test 12: Unknown command
         stats.subsection("Test 12: Unknown command")
         total_tests += 1
@@ -261,14 +261,14 @@ def test_frequency_manager():
         else:
             stats.test_pass("test_12_unknown_command")
             passed_tests += 1
-        
+
         # Print log before cleanup (only in verbose mode)
         if stats.verbose:
             ctx.print_log_tail(3000)
-        
+
         failed_tests = total_tests - passed_tests
         stats.final_summary(total_tests, passed_tests, failed_tests)
-        
+
         return all_passed
 
 
@@ -276,6 +276,6 @@ if __name__ == "__main__":
     # Enable verbose mode if run directly and not in stats mode
     if not STATS_MODE:
         stats.verbose = True
-    
+
     result = test_frequency_manager()
     sys.exit(0 if result else 1)

@@ -118,7 +118,7 @@ public:
         devId = devices.keyId(serial);
 
         uhd::device_addr_t probe_hints = devices[devId];
-        
+
         // VERIFICATION LOGGING: Verify custom runtime profile parameters mapping pass
         config.acquire();
         if (config.conf["devices"][selectedSer].contains("args")) {
@@ -172,7 +172,7 @@ public:
             double c_start = mcr_range.start();
             double c_stop = mcr_range.stop();
             double c_step = (mcr_range.step() == 0.0) ? 1e6 : mcr_range.step();
-            if (c_step < 100e3) c_step = 2e6; 
+            if (c_step < 100e3) c_step = 2e6;
 
             std::vector<double> calculated_clks;
             for (double clk = c_start; clk <= c_stop; clk += c_step) {
@@ -208,7 +208,7 @@ public:
         auto srRange = dev_ptr->get_rx_rates(chanId);
         double min_sr = srRange.start();
         double max_sr = srRange.stop();
-        
+
         std::vector<double> calculated_rates;
         for (double r = 250e3; r <= 56e6; r += (r < 1e6 ? 250e3 : (r < 10e6 ? 1e6 : 2e6))) {
             if (r >= min_sr && r <= max_sr) {
@@ -230,7 +230,7 @@ public:
             } else {
                 snprintf(rate_buf, sizeof(rate_buf), "%.0f", r / 1e3);
             }
-            
+
             std::string num_str(rate_buf);
             if (num_str.find(".") != std::string::npos) {
                 while (num_str.back() == '0') num_str.pop_back();
@@ -278,7 +278,7 @@ public:
         hasDcOffsetControl = false;
         hasIqBalanceControl = false;
         hasRefLockSensor = false;
-        
+
         flog::info("--- USRP Hardware Property Tree Discovery ---");
         try {
             std::string dc_path = "/modules/0/channels/rx/" + std::to_string(chanId) + "/dc_offset/enabled";
@@ -288,7 +288,7 @@ public:
             } else {
                 flog::info("  [-] DC Offset Calibration Control Found: NOT SUPPORTED");
             }
-            
+
             std::string iq_path = "/modules/0/channels/rx/" + std::to_string(chanId) + "/iq_balance/enabled";
             if (dev_ptr->get_device()->get_tree()->exists(iq_path)) {
                 hasIqBalanceControl = true;
@@ -296,7 +296,7 @@ public:
             } else {
                 flog::info("  [-] IQ Balance Calibration Control Found: NOT SUPPORTED");
             }
-            
+
             auto sensors = dev_ptr->get_mboard_sensor_names(0);
             if (std::find(sensors.begin(), sensors.end(), "ref_locked") != sensors.end()) {
                 hasRefLockSensor = true;
@@ -401,7 +401,7 @@ public:
                 std::complex<float>* dst = circularBufferPool[ringWriteIdx].data();
                 void* ptr[] = { dst };
                 uhd::rx_streamer::buffs_type buffers(ptr, 1);
-                
+
                 int len = streamer->recv(buffers, chunkSize, meta, 1.0);
                 if (len < 0) { break; }
                 if (len > 0) {
@@ -504,7 +504,7 @@ private:
         core::setInputSampleRate(_this->sampleRate);
         _this->dev->set_rx_antenna(_this->antennas.key(_this->antId), _this->chanId);
         _this->dev->set_rx_gain(static_cast<double>(_this->gain), _this->chanId);
-        
+
         double lo_offset = _this->sampleRate / 2.0;
         uhd::tune_request_t tune_req(_this->freq);
         tune_req.rf_freq_policy = uhd::tune_request_t::POLICY_MANUAL;
@@ -543,7 +543,7 @@ private:
         _this->streamer->issue_stream_cmd(uhd::stream_cmd_t::STREAM_MODE_START_CONTINUOUS);
         
         _this->stream.clearWriteStop();
-        
+
         size_t nativeChunkSize = _this->streamer->get_max_num_samps();
         {
             std::unique_lock<std::mutex> lock(*ringMutex);
@@ -567,10 +567,10 @@ private:
         
         _this->stream.stopWriter();
         _this->streamer->issue_stream_cmd(uhd::stream_cmd_t::STREAM_MODE_STOP_CONTINUOUS);
-        
+
         ringCond->notify_all();
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        
+
         if (_this->workerThread.joinable()) { _this->workerThread.join(); }
         if (_this->consumerThread.joinable()) { _this->consumerThread.join(); }
         
@@ -580,7 +580,7 @@ private:
             ringReadIdx = 0;
             ringCount = 0;
         }
-        
+
         _this->stream.clearWriteStop();
         _this->streamer.reset();
         _this->dev.reset();
@@ -798,11 +798,11 @@ private:
     int antId = 0;
     int bwId = 0;
     int csId = 0;
-    int mcrId = 0; 
+    int mcrId = 0;
     std::string selectedSer = "";
     std::string selectedChan = "";
     float gain = 0.0f;
-    
+
     // Probing Feature Flag Cache Properties
     bool hasDcOffsetControl = false;
     bool hasIqBalanceControl = false;
@@ -812,7 +812,7 @@ private:
 
     OptionList<std::string, uhd::device_addr_t> devices;
     OptionList<std::string, std::string> channels;
-    OptionList<double, std::string> samplerates; 
+    OptionList<double, std::string> samplerates;
     OptionList<double, std::string> masterclocks_ui;
     OptionList<std::string, std::string> antennas;
     OptionList<int, double> bandwidths;

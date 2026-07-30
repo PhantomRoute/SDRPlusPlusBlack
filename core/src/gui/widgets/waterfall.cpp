@@ -693,7 +693,7 @@ namespace ImGui {
         double vfoMinFreq = _vfo->centerOffset - (_vfo->bandwidth / 2.0);
         double vfoMaxFreq = _vfo->centerOffset + (_vfo->bandwidth / 2.0);
         double vfoMaxSizeFreq = _vfo->centerOffset + _vfo->bandwidth;
-        
+
         int vfoMinSideOffset = rawFFTIndex(vfoMinSizeFreq);
         int vfoMinOffset = rawFFTIndex(vfoMinFreq);
         int vfoMaxOffset = rawFFTIndex(vfoMaxFreq);
@@ -730,12 +730,12 @@ namespace ImGui {
         if (fftValues.empty() || avgCount <= 0) {
             return false;
         }
-        
+
         std::sort(fftValues.begin(), fftValues.end()); // sorting bins by volume
-        
+
         auto lowerPercentile = fftValues.size() / 4;
         if (lowerPercentile <= 0) { return false; }
-        
+
         auto kth = fftValues[lowerPercentile];
         for (int i = 0; i < fftValues.size(); i++) { // taking 25% most silent bins
             if (fftValues[i] <= kth) {
