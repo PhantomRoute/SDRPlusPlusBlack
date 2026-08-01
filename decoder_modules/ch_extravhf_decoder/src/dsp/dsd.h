@@ -456,8 +456,8 @@ namespace dsp {
         void init(stream<short>* in) {
             memset(dibitBuf, 0, sizeof(int)*200);
             memset(sbuf, 0, sizeof(int)*128);
-            memset(maxbuf, 15000, sizeof(int)*1024);
-            memset(minbuf, -15000, sizeof(int)*1024);
+            std::fill(maxbuf, maxbuf + 1024, 15000);
+            std::fill(minbuf, minbuf + 1024, -15000);
             mbe_initMbeParms(&curMp, &prevMp, &prevMpEnhanced);
 
             base_type::init(in);
