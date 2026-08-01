@@ -620,7 +620,7 @@ namespace dsp {
         // The sync tests read backwards from the write pointer, the longest of
         // them (framesynctest32) by 31 symbols. Start and wrap that far in, or
         // they read off the front of the buffer.
-        static const int FRAMESYNC_LOOKBACK = 32;
+        static constexpr int FRAMESYNC_LOOKBACK = 32;
         char framesynctest_buf[10240] = {};
         char* framesynctest_p = framesynctest_buf + FRAMESYNC_LOOKBACK;
         int framesynclmin = 0;

@@ -4,6 +4,7 @@
 #include "../rds_demod.h"
 #include <gui/widgets/symbol_diagram.h>
 #include <fstream>
+#include <algorithm>
 #include <utils/optionlist.h>
 #include "../rds.h"
 
@@ -15,9 +16,14 @@ namespace demod {
 
     class WFM : public Demodulator {
     public:
-        WFM() : diag(0.5, 4096)  {}
+        // Size of the RDS constellation buffer. The reshaper is set up to emit
+        // exactly this many symbols per block and _diagHandler copies a block
+        // straight into the diagram, so the two must not drift apart.
+        static constexpr int RDS_DIAG_SAMPLES = 4096;
 
-        WFM(std::string name, ConfigManager* config, dsp::stream<dsp::complex_t>* input, double bandwidth, double audioSR) : diag(0.5, 4096) {
+        WFM() : diag(0.5, RDS_DIAG_SAMPLES)  {}
+
+        WFM(std::string name, ConfigManager* config, dsp::stream<dsp::complex_t>* input, double bandwidth, double audioSR) : diag(0.5, RDS_DIAG_SAMPLES) {
             init(name, config, input, bandwidth, audioSR);
         }
 
@@ -76,7 +82,7 @@ namespace demod {
             demod.init(input, bandwidth / 2.0f, getIFSampleRate(), _stereo, _lowPass, _rds);
             rdsDemod.init(&demod.rdsOut, _rdsInfo);
             hs.init(&rdsDemod.out, rdsHandler, this);
-            reshape.init(&rdsDemod.soft, 4096, (1187 / 30) - 4096);
+            reshape.init(&rdsDemod.soft, RDS_DIAG_SAMPLES, (1187 / 30) - RDS_DIAG_SAMPLES);
             diagHandler.init(&reshape.out, _diagHandler, this);
 
             // Init RDS display
@@ -294,7 +300,7 @@ namespace demod {
         static void _diagHandler(float* data, int count, void* ctx) {
             WFM* _this = (WFM*)ctx;
             float* buf = _this->diag.acquireBuffer();
-            memcpy(buf, data, count * sizeof(float));
+            memcpy(buf, data, std::min<int>(count, RDS_DIAG_SAMPLES) * sizeof(float));
             _this->diag.releaseBuffer();
         }
 

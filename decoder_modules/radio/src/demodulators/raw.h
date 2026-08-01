@@ -62,7 +62,11 @@ namespace demod {
         dsp::stream<dsp::stereo_t>* getOutput() { return &c2s.out; }
 
     private:
-        double audioSampleRate;
+        // RadioModule reads the bandwidth getters before calling init(), and for
+        // RAW all three of them return this. It has to hold something sane until
+        // init() sets the real rate, or a garbage bandwidth gets written to the
+        // config and handed to the VFO on the next start.
+        double audioSampleRate = 48000.0;
         dsp::convert::ComplexToStereo c2s;
 
         std::string name;

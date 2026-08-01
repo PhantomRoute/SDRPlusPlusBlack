@@ -87,7 +87,7 @@ namespace demod {
     private:
         dsp::demod::SSB<dsp::stereo_t> demod;
 
-        ConfigManager* _config;
+        ConfigManager* _config = NULL;
 
         float agcAttack = 50.0f;
         float agcDecay = 5.0f;
