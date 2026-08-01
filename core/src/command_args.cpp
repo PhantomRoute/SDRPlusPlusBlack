@@ -95,7 +95,7 @@ int CommandArgsParser::parse(int argc, char* argv[]) {
                 carg.bval = true;
             }
             else if (arg == "false" || arg == "off" || arg == "0") {
-                carg.bval = true;
+                carg.bval = false;
             }
             else {
                 printf("Invalid argument, expected bool (true, false, on, off, 1, 0)\n");
