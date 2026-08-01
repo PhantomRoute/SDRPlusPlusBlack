@@ -1643,6 +1643,9 @@ static TransientBookmarkManager *getTransientBookmarkManager() {
 
 void MobileMainWindow::draw() {
 
+    // Both layouts pass through here, unlike MainWindow::draw().
+    runMainThreadTasks();
+
     auto ctm = currentTimeNanos();
     updateAudioWaterfallPipeline();
 

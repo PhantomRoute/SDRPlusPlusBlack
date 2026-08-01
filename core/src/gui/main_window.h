@@ -73,6 +73,11 @@ public:
         mainThreadTasks.push_back(task);
     }
 
+    // Drains the queue above. Every layout has to call this once a frame: the
+    // transceiver layout does not go through MainWindow::draw(), so tasks
+    // queued from other threads used to sit there forever.
+    void runMainThreadTasks();
+
 
 protected:
     void displayVariousWindows();

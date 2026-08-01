@@ -542,6 +542,19 @@ void MainWindow::displayVariousWindows() {
 }
 
 
+void MainWindow::runMainThreadTasks() {
+    // Take the queue before running anything. Running under the lock deadlocks
+    // the moment a task queues another one, and blocks whoever is trying to.
+    std::vector<std::function<void()>> tasks;
+    {
+        std::lock_guard<std::mutex> lock(mainThreadTasksMutex);
+        tasks.swap(mainThreadTasks);
+    }
+    for (auto& task : tasks) {
+        task();
+    }
+}
+
 void MainWindow::draw() {
     auto ctm = currentTimeNanos();
     ImGui::WaterfallVFO* vfo;
@@ -625,12 +638,7 @@ void MainWindow::draw() {
         }
     }
 
-    mainThreadTasksMutex.lock();
-    for (auto& task : mainThreadTasks) {
-        task();
-    }
-    mainThreadTasks.clear();
-    mainThreadTasksMutex.unlock();
+    runMainThreadTasks();
 
     if (ImGui::IsKeyReleased(ImGuiKey_Space)) {
         spacePressed = false;

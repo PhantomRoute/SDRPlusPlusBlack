@@ -7,6 +7,8 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <future>
+#include <chrono>
 #include <atomic>
 #include <filesystem>
 #include <unordered_map>
@@ -15,6 +17,7 @@
 #include <cstdarg>
 #include <core.h>
 #include <signal_path/signal_path.h>
+#include <gui/gui.h>
 
 #ifdef __cplusplus
 #include "imgui.h"
@@ -660,14 +663,6 @@ struct Response* createResponseForRequest(const struct Request* request, struct 
             }
             instanceName = decoded;
 
-            auto& instances = core::moduleManager.instances;
-            auto it = instances.find(instanceName);
-            if (it == instances.end()) {
-                return responseAllocJSONWithFormat(
-                    "{\"error\": \"instance '%s' not found\"}",
-                    instanceName.c_str());
-            }
-
             std::string cmd = "command";
             std::string args = "";
 
@@ -693,7 +688,29 @@ struct Response* createResponseForRequest(const struct Request* request, struct 
                 free(argsParam);
             }
 
-            std::string result = it->second.instance->handleDebugCommand(cmd, args);
+            // Module commands select demodulators, tear down DSP chains and bind
+            // waterfall handlers, all of which the UI thread is concurrently
+            // using. Doing that from this thread races it -- switching a
+            // demodulator frees one while the UI thread may still be drawing
+            // through it. Hand the whole thing over and wait for the answer.
+            auto reply = std::make_shared<std::promise<std::string>>();
+            auto answer = reply->get_future();
+            gui::mainWindow.addMainThreadTask([instanceName, cmd, args, reply]() {
+                auto& instances = core::moduleManager.instances;
+                auto it = instances.find(instanceName);
+                if (it == instances.end()) {
+                    reply->set_value("{\"error\": \"instance '" + instanceName + "' not found\"}");
+                    return;
+                }
+                reply->set_value(it->second.instance->handleDebugCommand(cmd, args));
+            });
+
+            // Never block a request forever: the UI thread may be shutting down,
+            // or absent entirely in headless mode.
+            if (answer.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+                return responseAllocJSON("{\"error\": \"timed out waiting for the UI thread\"}");
+            }
+            std::string result = answer.get();
             return responseAllocJSON(result.c_str());
         }
     }
