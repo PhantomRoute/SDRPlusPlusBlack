@@ -40,6 +40,10 @@ namespace sourcemenu {
     bool showDelOffsetDialog = false;
     std::string delOffsetName = "";
 
+    // Seconds between device rescans while the source menu is visible and stopped.
+    const double SOURCE_REFRESH_INTERVAL = 2.0;
+    double lastSourceRefresh = 0.0;
+
     // Offset IDs
     enum {
         OFFSET_ID_NONE,
@@ -337,6 +341,17 @@ namespace sourcemenu {
         }
 
         if (running) { style::endDisabled(); }
+
+        // Rescan for devices while the menu is on screen and the radio is stopped,
+        // so plugging an SDR in with the application already open is enough for it
+        // to show up. Sources opt into this, and only the cheap ones do.
+        if (!running) {
+            double now = ImGui::GetTime();
+            if (now - lastSourceRefresh >= SOURCE_REFRESH_INTERVAL) {
+                lastSourceRefresh = now;
+                sigpath::sourceManager.refreshSelected();
+            }
+        }
 
         sigpath::sourceManager.showSelectedMenu();
 

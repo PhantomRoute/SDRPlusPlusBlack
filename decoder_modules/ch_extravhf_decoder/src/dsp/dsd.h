@@ -209,7 +209,7 @@ namespace dsp {
 
         int framesyncSymbolsRead = 0;
         int fss_dibitBufP = 200;
-        char framesynctest_buf[1024];
+        char framesynctest_buf[1024] = {};
         int framesynctest_p = 25;
         int framesynctest_offset = 0;
         #define INV_P25P1_SYNC "333331331133111131311111"
@@ -606,7 +606,7 @@ namespace dsp {
         bool useCosineFilter = true;
         int finflag = 0;
 
-        short inputBuffer[DSD_INPUT_BUFF_SIZE];
+        short inputBuffer[DSD_INPUT_BUFF_SIZE] = {};
         int inputBufReadPtr = 0;
         int inputBufWritePtr = 0;
         int inputBufDataRemains = 0;
@@ -617,13 +617,17 @@ namespace dsp {
         char framesynctest32[33];
         char framesyncmodulation[8];
         int framesynctest_pos = 0;
-        char framesynctest_buf[10240];
-        char* framesynctest_p = framesynctest_buf + 10;
+        // The sync tests read backwards from the write pointer, the longest of
+        // them (framesynctest32) by 31 symbols. Start and wrap that far in, or
+        // they read off the front of the buffer.
+        static const int FRAMESYNC_LOOKBACK = 32;
+        char framesynctest_buf[10240] = {};
+        char* framesynctest_p = framesynctest_buf + FRAMESYNC_LOOKBACK;
         int framesynclmin = 0;
         int framesynclmax = 0;
         int framesynclidx = 0;
-        int framesynclbuf[24];
-        int framesynclbuf2[24];
+        int framesynclbuf[24] = {};
+        int framesynclbuf2[24] = {};
         int framesynclastt = 0;
         int framesyncsync = 0;
 

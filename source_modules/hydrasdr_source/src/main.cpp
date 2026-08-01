@@ -48,6 +48,7 @@ public:
         handler.startHandler = start;
         handler.stopHandler = stop;
         handler.tuneHandler = tune;
+        handler.refreshHandler = deviceRefreshHandler;
         handler.stream = &stream;
 
         refresh();
@@ -244,6 +245,31 @@ private:
         HydraSDRSourceModule* _this = (HydraSDRSourceModule*)ctx;
         core::setInputSampleRate(_this->sampleRate);
         flog::info("HydraSDRSourceModule '{0}': Menu Select!", _this->name);
+    }
+
+    static std::string deviceSignature(HydraSDRSourceModule* _this) {
+        std::string sig;
+        for (int i = 0; i < _this->devices.size(); i++) {
+            sig += _this->devices.key(i);
+            sig += ';';
+        }
+        return sig;
+    }
+
+    // Periodic rescan so a device plugged in after startup shows up by itself.
+    // Only reacts when the device list actually changed, since re-selecting
+    // resets the sample rate and with it the waterfall.
+    static void deviceRefreshHandler(void* ctx) {
+        HydraSDRSourceModule* _this = (HydraSDRSourceModule*)ctx;
+        if (_this->running) { return; }
+        std::string before = deviceSignature(_this);
+        _this->refresh();
+        if (deviceSignature(_this) == before) { return; }
+        config.acquire();
+        std::string devSerial = config.conf["device"];
+        config.release();
+        _this->selectByString(devSerial);
+        core::setInputSampleRate(_this->sampleRate);
     }
 
     static void menuDeselected(void* ctx) {

@@ -48,6 +48,7 @@ public:
         handler.startHandler = start;
         handler.stopHandler = stop;
         handler.tuneHandler = tune;
+        handler.refreshHandler = deviceRefreshHandler;
         handler.stream = &stream;
 
         refresh();
@@ -246,6 +247,22 @@ private:
         AirspyHFSourceModule* _this = (AirspyHFSourceModule*)ctx;
         core::setInputSampleRate(_this->sampleRate * _this->narrowSamplerate());
         flog::info("AirspyHFSourceModule '{0}': Menu Select!", _this->name);
+    }
+
+    // Periodic rescan so a device plugged in after startup shows up by itself.
+    // Only reacts when the device list actually changed, since re-selecting
+    // resets the sample rate and with it the waterfall.
+    static void deviceRefreshHandler(void* ctx) {
+        AirspyHFSourceModule* _this = (AirspyHFSourceModule*)ctx;
+        if (_this->running) { return; }
+        std::string before = _this->devListTxt;
+        _this->refresh();
+        if (_this->devListTxt == before) { return; }
+        config.acquire();
+        std::string devSerial = config.conf["device"];
+        config.release();
+        _this->selectByString(devSerial);
+        updateSampleRate(_this);
     }
 
     static void menuDeselected(void* ctx) {

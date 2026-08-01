@@ -70,6 +70,7 @@ public:
         handler.startHandler = start;
         handler.stopHandler = stop;
         handler.tuneHandler = tune;
+        handler.refreshHandler = deviceRefreshHandler;
         handler.stream = &stream;
 
         strcpy(dbTxt, "--");
@@ -362,6 +363,19 @@ private:
 
     static void propagateInputSampleRate(RTLSDRSourceModule *_this) {
         return core::setInputSampleRate(_this->sampleRate, _this->sampleRate * _this -> usableBw / 100.0);
+    }
+
+    // Periodic rescan so a dongle plugged in after startup shows up by itself.
+    // Only reacts when the device list actually changed, since re-selecting
+    // resets the sample rate and with it the waterfall.
+    static void deviceRefreshHandler(void* ctx) {
+        RTLSDRSourceModule* _this = (RTLSDRSourceModule*)ctx;
+        if (_this->running) { return; }
+        std::string before = _this->devListTxt;
+        _this->refresh();
+        if (_this->devListTxt == before) { return; }
+        _this->selectByName(_this->selectedDevName);
+        propagateInputSampleRate(_this);
     }
 
     static void menuHandler(void* ctx) {

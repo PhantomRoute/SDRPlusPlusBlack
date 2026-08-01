@@ -11,14 +11,22 @@ public:
     SourceManager();
 
     struct SourceHandler {
-        dsp::stream<dsp::complex_t>* stream;
-        void (*menuHandler)(void* ctx);
-        void (*selectHandler)(void* ctx);
-        void (*deselectHandler)(void* ctx);
-        void (*startHandler)(void* ctx);
-        void (*stopHandler)(void* ctx);
-        void (*tuneHandler)(double freq, void* ctx);
-        void* ctx;
+        dsp::stream<dsp::complex_t>* stream = NULL;
+        void (*menuHandler)(void* ctx) = NULL;
+        void (*selectHandler)(void* ctx) = NULL;
+        void (*deselectHandler)(void* ctx) = NULL;
+        void (*startHandler)(void* ctx) = NULL;
+        void (*stopHandler)(void* ctx) = NULL;
+        void (*tuneHandler)(double freq, void* ctx) = NULL;
+
+        // Optional. Re-enumerates the module's devices so one plugged in while
+        // the application is running gets picked up on its own. Called from the
+        // UI thread while the radio is stopped and the source menu is on screen,
+        // so only cheap enumerations should implement it; anything slow should
+        // leave it unset and rely on the module's own refresh button.
+        void (*refreshHandler)(void* ctx) = NULL;
+
+        void* ctx = NULL;
     };
 
     enum TuningMode {
@@ -30,6 +38,7 @@ public:
     void unregisterSource(std::string name);
     void selectSource(std::string name);
     void showSelectedMenu();
+    void refreshSelected();
     void start();
     void stop();
     void tune(double freq);

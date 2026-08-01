@@ -105,10 +105,17 @@ void SourceManager::selectSource(std::string name) {
 }
 
 void SourceManager::showSelectedMenu() {
-    if (selectedHandler == NULL) {
+    if (selectedHandler == NULL || selectedHandler->menuHandler == NULL) {
         return;
     }
     selectedHandler->menuHandler(selectedHandler->ctx);
+}
+
+void SourceManager::refreshSelected() {
+    if (selectedHandler == NULL || selectedHandler->refreshHandler == NULL) {
+        return;
+    }
+    selectedHandler->refreshHandler(selectedHandler->ctx);
 }
 
 void SourceManager::start() {

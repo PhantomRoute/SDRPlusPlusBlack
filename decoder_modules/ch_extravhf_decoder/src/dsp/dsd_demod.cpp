@@ -311,9 +311,13 @@ namespace dsp {
         };
 
         short DSD::getSample() {
+            // The wrap has to happen before the index, not after. Indexing first
+            // touches inputBuffer[DSD_INPUT_BUFF_SIZE], which is one past the end
+            // and lands squarely on inputBufReadPtr, corrupting it into a wild
+            // index on the next call.
             if(inputBufDataRemains > 0) {
-                short ret = inputBuffer[++inputBufReadPtr];
-                if(inputBufReadPtr >= DSD_INPUT_BUFF_SIZE) inputBufReadPtr = 0;
+                if(++inputBufReadPtr >= DSD_INPUT_BUFF_SIZE) inputBufReadPtr = 0;
+                short ret = inputBuffer[inputBufReadPtr];
                 inputBufDataRemains--;
                 inSymsCtr++;
                 return ret;
@@ -325,14 +329,17 @@ namespace dsp {
                 }
                 if(count < DSD_INPUT_BUFF_SIZE) {
                     for(int i = 0; i < count; i++) {
-                        inputBuffer[++inputBufWritePtr] = base_type::_in->readBuf[i];
-                        if(inputBufWritePtr >= DSD_INPUT_BUFF_SIZE) inputBufWritePtr = 0;
+                        if(++inputBufWritePtr >= DSD_INPUT_BUFF_SIZE) inputBufWritePtr = 0;
+                        inputBuffer[inputBufWritePtr] = base_type::_in->readBuf[i];
                         inputBufDataRemains++;
                     }
                     base_type::_in->flush();
                     return getSample();
                 } else {
                     flog::error("ERROR! TOO MUCH DATA FOR DSD BUFFER!");
+                    // Drop it rather than leaving it unread, which would wedge the
+                    // whole chain on a block that can never be consumed.
+                    base_type::_in->flush();
                     return 0;
                 }
             }
@@ -1132,7 +1139,7 @@ namespace dsp {
             framesynctest18[18] = 0;
             framesynctest32[32] = 0;
             framesynctest_pos = 0;
-            framesynctest_p = framesynctest_buf + 10;
+            framesynctest_p = framesynctest_buf + FRAMESYNC_LOOKBACK;
             framesyncsync = 0;
             framesynclmin = 0;
             framesynclmax = 0;
@@ -1639,7 +1646,7 @@ namespace dsp {
             } else {
                 // buffer reset
                 framesynctest_pos = 0;
-                framesynctest_p = framesynctest_buf;
+                framesynctest_p = framesynctest_buf + FRAMESYNC_LOOKBACK;
                 noCarrier();
             }
 
