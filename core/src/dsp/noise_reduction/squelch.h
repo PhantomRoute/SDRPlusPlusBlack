@@ -58,7 +58,7 @@ namespace dsp::noise_reduction {
             volk_32f_accumulator_s32f(&sum, normBuffer, count);
             sum /= (float)count;
 
-            if (10.0f * log10f(sum) >= _level) {
+            if (20.0f * log10f(sum) >= _level) {
                 memcpy(out, in, count * sizeof(complex_t));
             }
             else {
