@@ -36,6 +36,10 @@ public:
 
 
     RadioModule(std::string name) : RadioModuleInterface() {
+        fftRedrawHandler.ctx = this;
+        fftRedrawHandler.handler = fftRedraw;
+        gui::waterfall.onFFTRedraw.bindHandler(&fftRedrawHandler);
+
         this->name = name;
 
         // Initialize option lists
@@ -344,6 +348,8 @@ public:
 
 
     ~RadioModule() {
+        gui::waterfall.onFFTRedraw.unbindHandler(&fftRedrawHandler);
+
         sigpath::txState.unbindHandler(&txHandler);
         core::modComManager.unregisterInterface(name);
         gui::menu.removeEntry(name);
@@ -909,6 +915,15 @@ private:
         }
     }
 
+    static void fftRedraw(ImGui::WaterFall::FFTRedrawArgs args, void* ctx) {
+        RadioModule* _this = (RadioModule*)ctx;
+        if (!_this->squelchEnabled || _this->selectedDemod == nullptr) { return; }
+        double bPos = args.max.y - ((_this->squelchLevel - gui::waterfall.getFFTMin()) * (args.max.y - args.min.y) / (gui::waterfall.getFFTMax() - gui::waterfall.getFFTMin()));
+        if (bPos >= args.min.y && bPos <= args.max.y) {
+            args.window->DrawList->AddLine(ImVec2(args.min.x, roundf(bPos)), ImVec2(args.max.x, roundf(bPos)), ImGui::ColorConvertFloat4ToU32(gui::themeManager.squelchColor), 1.0);
+        }
+    }
+
     static void sampleRateChangeHandler(float sampleRate, void* ctx) {
         RadioModule* _this = (RadioModule*)ctx;
         _this->setAudioSampleRate(sampleRate);
@@ -999,6 +1014,8 @@ private:
     // Handlers
     EventHandler<double> onUserChangedBandwidthHandler;
     EventHandler<int> onUserChangedDemodulatorHandler;
+    EventHandler<ImGui::WaterFall::FFTRedrawArgs> fftRedrawHandler;
+
     EventHandler<float> srChangeHandler;
     EventHandler<std::string> onAddSubstreamHandler;
     EventHandler<std::string> onRemoveSubstreamHandler;

@@ -17,6 +17,11 @@ public:
     ~Scanner();
 
     bool isScanning() const { return scanning; }
+    bool isSquelchEnabled() const { return squelchEnabled; }
+
+    float getNoiseFloor() const { return noiseFloor; }
+    float getSignalMarginDb() const { return signalMarginDb; }
+
     std::string getCurrentStation() const { return currentStation; }
     void startScanner() { start(); }
     void stopScanner() { stop(); }

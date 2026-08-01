@@ -126,6 +126,9 @@ namespace ImGui {
 
         void setWaterfallMax(float max);
         float getWaterfallMax();
+        float getFFTMin() const { return fftMin; }
+        float getFFTMax() const { return fftMax; }
+
 
         void setZoom(double zoomLevel);
         void setOffset(double zoomOffset);
