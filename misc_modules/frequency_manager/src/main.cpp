@@ -780,6 +780,13 @@ private:
         FrequencyManagerModule* _this = (FrequencyManagerModule*)ctx;
 
         _this->rects.clear();
+        if (_this->scanner.isScanning() && _this->scanner.isSquelchEnabled()) {
+            double scanBPos = args.max.y - ((_this->scanner.getNoiseFloor() + _this->scanner.getSignalMarginDb() - gui::waterfall.getFFTMin()) * (args.max.y - args.min.y) / (gui::waterfall.getFFTMax() - gui::waterfall.getFFTMin()));
+            if (scanBPos >= args.min.y && scanBPos <= args.max.y) {
+                args.window->DrawList->AddLine(ImVec2(args.min.x, roundf(scanBPos)), ImVec2(args.max.x, roundf(scanBPos)), ImGui::ColorConvertFloat4ToU32(gui::themeManager.scannerSquelchColor), 1.0);
+            }
+        }
+
 
         if (_this->bookmarkDisplayMode == BOOKMARK_DISP_MODE_OFF) { return; }
 
