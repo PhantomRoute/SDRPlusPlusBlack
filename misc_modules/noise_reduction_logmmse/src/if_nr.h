@@ -76,9 +76,7 @@ namespace dsp {
                 worker1c = npzeros_c(0);
                 params.reset();
             }
-            for (int i = 0; i < count; i++) {
-                worker1c->emplace_back(in[i]);
-            }
+            worker1c->insert(worker1c->end(), in, in + count);
             int noiseFrames = 12;
             int fram = freq / 100;
             int initialDemand = fram * 2;
@@ -144,20 +142,10 @@ namespace dsp {
         }
 
         int run() override {
-            int count = _in->read();
-            if (count < 0) {
-                return -1;
-            }
-
-            //            if (bypass) {
-            //                memcpy(out.writeBuf, _in->readBuf, count * sizeof(complex_t));
-            //                _in->flush();
-            //                if (!out.swap(count)) { return -1; }
-            //                return count;
-            //            }
-            //
-            runMMSE(_in, out);
-            return count;
+            // runMMSE does its own read/flush/swap. Reading here as well only
+            // took the lock twice for the same block, and dropping its return
+            // value left the worker loop spinning once the sink had gone away.
+            return runMMSE(_in, out);
         }
 
         void start() override {

@@ -190,8 +190,9 @@ namespace dsp {
             _in->flush();
 //            flog::info("afnr.omlsa_mcra: input = {}, output = {}", count, wrote);
             if (!out.swap(wrote)) {
-                flog::info("afnr.omlsa_mcra: swap failed");
-                return 0;
+                // The sink is gone. Returning >= 0 here keeps the worker loop
+                // spinning on a swap that can never succeed.
+                return -1;
             }
 
             return 1;
@@ -364,10 +365,10 @@ namespace dsp {
             int wrote;
             process(_in->readBuf, count, out.writeBuf, wrote);
             _in->flush();
-            flog::info("afnr.mmse: input = {}, output = {}", count, wrote);
             if (!out.swap(wrote)) {
-                flog::info("afnr.mmse: swap failed");
-                return 0;
+                // The sink is gone. Returning >= 0 here keeps the worker loop
+                // spinning on a swap that can never succeed.
+                return -1;
             }
 
             return 1;

@@ -165,6 +165,9 @@ public:
         txHandler.ctx = this;
         txHandler.handler = [](bool txActive, void *ctx){
             auto _this = (RadioModule*)ctx;
+            // Bound before the first demodulator is selected, and TX can also be
+            // keyed while one is being swapped out, so there may be none.
+            if (!_this->selectedDemod) { return; }
             _this->selectedDemod->setFrozen(txActive);
         };
         sigpath::txState.bindHandler(&txHandler);
@@ -551,9 +554,11 @@ private:
         if (ImGui::InputInt(("##_radio_snap_" + _this->name).c_str(), &_this->snapInterval, 1, 100)) {
             if (_this->snapInterval < 1) { _this->snapInterval = 1; }
             _this->vfo->setSnapInterval(_this->snapInterval);
-            config.acquire();
-            config.conf[_this->name][_this->selectedDemod->getName()]["snapInterval"] = _this->snapInterval;
-            config.release(true);
+            if (_this->selectedDemod) {
+                config.acquire();
+                config.conf[_this->name][_this->selectedDemod->getName()]["snapInterval"] = _this->snapInterval;
+                config.release(true);
+            }
         }
 
         // Deemphasis mode
@@ -662,8 +667,12 @@ private:
         // Stop currently selected demodulator and select new
         afChain.setInput(&dummyAudioStream, [=](dsp::stream<dsp::stereo_t>* out){ afsplitter.setInput(out); });
         if (selectedDemod) {
-            selectedDemod->stop();
-            delete selectedDemod;
+            // Clear it first: anything reaching in from another thread between the
+            // delete and the assignment would be following a freed pointer.
+            demod::Demodulator* old = selectedDemod;
+            selectedDemod = NULL;
+            old->stop();
+            delete old;
         }
         selectedDemod = demod;
 
@@ -832,6 +841,7 @@ private:
     void setNBLevel(float level) {
         nbLevel = std::clamp<float>(level, MIN_NB, MAX_NB);
         nb.setLevel(nbLevel);
+        if (!selectedDemod) { return; }
 
         // Save config
         config.acquire();
@@ -854,6 +864,7 @@ private:
     void setSquelchLevel(float level) {
         squelchLevel = std::clamp<float>(level, MIN_SQUELCH, MAX_SQUELCH);
         updateSquelchScaling();
+        if (!selectedDemod) { return; }
 
         // Save config
         config.acquire();
