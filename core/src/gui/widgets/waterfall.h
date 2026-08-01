@@ -112,6 +112,11 @@ namespace ImGui {
         void setViewBandwidth(double bandWidth);
         double getViewBandwidth();
 
+        // Raw FFT bins collapsed into a single screen pixel. The display keeps the
+        // loudest of them, which draws everything above its true level, so anything
+        // comparing a measurement against what is on screen has to allow for it.
+        double getRawBinsPerPixel();
+
         void setViewOffset(double offset);
         double getViewOffset();
 

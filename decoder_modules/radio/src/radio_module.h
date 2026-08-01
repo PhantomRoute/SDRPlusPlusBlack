@@ -861,29 +861,49 @@ private:
         config.release(true);
     }
 
-    // The user picks the squelch threshold by eye off the waterfall, so it is in
-    // waterfall units: dB of a single FFT bin. The squelch block however measures
-    // the total power of the channel, which is many bins wide, so the very same
-    // signal measures 10*log10(bins per channel) hotter there. Without correcting
-    // for that, a channel carrying nothing but noise already reads well above any
-    // usable threshold and the squelch simply never closes.
+    // Expected maximum of n independent noise bins, relative to their mean. The
+    // periodogram of noise is exponentially distributed, whose maximum over n
+    // draws averages the nth harmonic number times the mean.
+    static double noiseMaxBias(double n) {
+        if (n <= 1.0) { return 1.0; }
+        if (n < 16.0) {
+            double h = 0.0;
+            for (int k = 1; k <= (int)n; k++) { h += 1.0 / (double)k; }
+            return h;
+        }
+        return log(n) + 0.5772156649 + (1.0 / (2.0 * n));
+    }
+
+    // The user picks the squelch threshold by eye off the waterfall, so the squelch
+    // has to end up on the same scale as what is drawn there. Two things separate
+    // them, both fixed offsets. The squelch's own transform is far coarser than the
+    // display's, so each of its bins collects the power of many display bins. And
+    // the display keeps only the loudest raw bin of each screen pixel, which draws
+    // signal and noise alike above their true level.
     void updateSquelchScaling() {
         double level;
         double sampleRate = sigpath::iqFrontEnd.getEffectiveSamplerate();
         int fftSize = sigpath::iqFrontEnd.getFFTSize();
-        double windowGain = sigpath::iqFrontEnd.getFFTWindowNoiseGain();
+        double displayWindowGain = sigpath::iqFrontEnd.getFFTWindowNoiseGain();
+        double squelchWindowGain = squelch.getWindowNoiseGain();
+        double ifSamplerate = selectedDemod ? selectedDemod->getIFSampleRate() : 0.0;
 
         if (squelchLevel <= MIN_SQUELCH) {
             // Bottom of the slider means "off"; don't let the correction turn it
             // into a threshold that mutes everything.
             level = -INFINITY;
         }
-        else if (sampleRate <= 0.0 || fftSize <= 0 || bandwidth <= 0.0 || windowGain <= 0.0) {
+        else if (sampleRate <= 0.0 || fftSize <= 0 || ifSamplerate <= 0.0 || displayWindowGain <= 0.0 || squelchWindowGain <= 0.0) {
             level = squelchLevel;
         }
         else {
-            double binsPerChannel = std::max<double>(1.0, bandwidth * (double)fftSize / sampleRate);
-            level = squelchLevel + 10.0 * log10(binsPerChannel) - 10.0 * log10(windowGain);
+            double displayBinBw = sampleRate / (double)fftSize;
+            double squelchBinBw = ifSamplerate / (double)dsp::noise_reduction::Squelch::SPECTRUM_SIZE;
+            double offset = 10.0 * log10(displayBinBw / squelchBinBw)
+                            + 10.0 * log10(displayWindowGain)
+                            - 10.0 * log10(squelchWindowGain)
+                            + 10.0 * log10(noiseMaxBias(gui::waterfall.getRawBinsPerPixel()));
+            level = squelchLevel - offset;
         }
 
         // Called on every FFT redraw, so only touch the DSP block on a real change.

@@ -8,6 +8,7 @@
 #include <memory>
 #endif
 
+#include <mutex>
 #include <ctm.h>
 
 long long fftCumulativeTime = 0;
@@ -1196,6 +1197,10 @@ namespace dsp {
 
 
         Arg<FFTPlan> allocateFFTWPlan(bool backward, int buckets) {
+            // Only fftwf_execute is thread safe, planning is not, and plans get
+            // allocated from whichever thread happens to reconfigure a chain.
+            static std::mutex planMtx;
+            std::lock_guard<std::mutex> lck(planMtx);
             FFTPlan *plan;
 #ifdef __APPLE__
             if (enableAcceleratedFFT) {

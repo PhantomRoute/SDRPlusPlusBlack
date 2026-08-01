@@ -1,18 +1,31 @@
 #pragma once
 #include "../processor.h"
+#include "../window/nuttall.h"
+#include <utils/arrays.h>
+#include <algorithm>
 
 namespace dsp::noise_reduction {
-    // Gate that mutes the stream while its level stays below a threshold.
+    // Gate that mutes the stream while the signal stays below a threshold.
     //
-    // The level is the mean power of a block expressed as amplitude dBFS
-    // (0dB == full scale sine), i.e. 20*log10 of the RMS amplitude. For the
-    // complex path that is the total power inside the channel, summed over the
-    // whole VFO bandwidth -- it is NOT the per-FFT-bin level the waterfall
-    // draws. Callers that let the user pick the threshold off the waterfall
-    // have to convert (see RadioModule::updateSquelchScaling).
+    // On the complex path the measured level is the peak of the channel's power
+    // spectrum, normalised exactly the way the waterfall normalises its own FFT
+    // (|X|^2/N^2, with an unnormalised window). That is what the eye reads off
+    // the waterfall: the top of the signal, not its average. It is a per-bin
+    // level though, so a caller comparing it against the waterfall still has to
+    // account for the two FFTs having different resolutions -- see
+    // RadioModule::updateSquelchScaling().
+    //
+    // The stereo path is a plain RMS level in amplitude dBFS. It feeds the mic
+    // squelch, where there is no spectrum on screen to agree with.
     class Squelch : public Processor<complex_t, complex_t> {
         using base_type = Processor<complex_t, complex_t>;
     public:
+        // Resolution of the internal channel spectrum, in bins. Deliberately
+        // coarse: the level only has to track the shape of the channel, and a
+        // small transform lets a single input block average many of them
+        // together, which is what keeps the level steady.
+        static constexpr int SPECTRUM_SIZE = 128;
+
         Squelch() {}
 
         Squelch(stream<complex_t>* in, double level) {}
@@ -20,13 +33,23 @@ namespace dsp::noise_reduction {
         ~Squelch() {
             if (!base_type::_block_init) { return; }
             base_type::stop();
-            buffer::free(normBuffer);
         }
 
         void init(stream<complex_t>* in, double level) {
             _level = level;
 
-            normBuffer = buffer::alloc<float>(STREAM_BUFFER_SIZE);
+            fftPlan = arrays::allocateFFTWPlan(false, SPECTRUM_SIZE);
+            fftIn = arrays::npzeros_c(SPECTRUM_SIZE);
+            accBuf.resize(SPECTRUM_SIZE);
+            specWindow.resize(SPECTRUM_SIZE);
+            specPower.resize(SPECTRUM_SIZE);
+
+            double gain = 0;
+            for (int i = 0; i < SPECTRUM_SIZE; i++) {
+                specWindow[i] = window::nuttall(i, SPECTRUM_SIZE);
+                gain += specWindow[i] * specWindow[i];
+            }
+            _windowNoiseGain = gain / (double)SPECTRUM_SIZE;
 
             base_type::init(in);
         }
@@ -45,6 +68,14 @@ namespace dsp::noise_reduction {
             std::lock_guard<std::recursive_mutex> lck(base_type::ctrlMtx);
             _hysteresis = hysteresis;
         }
+
+        // Sum of the squared spectrum window coefficients over SPECTRUM_SIZE.
+        double getWindowNoiseGain() { return _windowNoiseGain; }
+
+        // Level of the last processed block, in the same units as setLevel().
+        float getMeasuredLevel() { return _lastLevel; }
+
+        bool isOpen() { return _open; }
 
         inline int process(int count, const stereo_t* in, stereo_t* out) {
             if (count <= 0) {
@@ -72,10 +103,7 @@ namespace dsp::noise_reduction {
             if (count <= 0) {
                 return count;
             }
-            float sum;
-            volk_32fc_magnitude_squared_32f(normBuffer, (const lv_32fc_t*)in, count);
-            volk_32f_accumulator_s32f(&sum, normBuffer, count);
-            gate(10.0f * log10f((sum / (float)count) + 1e-30f));
+            gate(measurePeak(count, in));
 
             if (_open) {
                 if (in != out) { memcpy(out, in, count * sizeof(complex_t)); }
@@ -86,11 +114,6 @@ namespace dsp::noise_reduction {
 
             return count;
         }
-
-        // Level of the last processed block, in the same units as setLevel().
-        float getMeasuredLevel() { return _lastLevel; }
-
-        bool isOpen() { return _open; }
 
         //DEFAULT_PROC_RUN();
 
@@ -104,12 +127,58 @@ namespace dsp::noise_reduction {
         }
 
     private:
+        // Averages the periodogram of every whole transform that fits in this
+        // block and returns the level of its loudest bin. Samples left over are
+        // carried into the next call, so short blocks still make progress.
+        float measurePeak(int count, const complex_t* in) {
+            std::fill(specPower.begin(), specPower.end(), 0.0f);
+            int frames = 0;
+
+            for (int pos = 0; pos < count;) {
+                int take = (std::min)(SPECTRUM_SIZE - accPos, count - pos);
+                memcpy(&accBuf[accPos], &in[pos], take * sizeof(complex_t));
+                accPos += take;
+                pos += take;
+                if (accPos < SPECTRUM_SIZE) { break; }
+                accPos = 0;
+
+                complex_t* fin = fftIn->data();
+                for (int i = 0; i < SPECTRUM_SIZE; i++) {
+                    fin[i] = accBuf[i] * specWindow[i];
+                }
+                const complex_t* fout = fftPlan->npfftfft(fftIn)->data();
+                for (int i = 0; i < SPECTRUM_SIZE; i++) {
+                    specPower[i] += (fout[i].re * fout[i].re) + (fout[i].im * fout[i].im);
+                }
+                frames++;
+            }
+
+            if (frames == 0) { return _lastLevel; }
+
+            float peak = 0;
+            for (int i = 0; i < SPECTRUM_SIZE; i++) {
+                if (specPower[i] > peak) { peak = specPower[i]; }
+            }
+
+            // Same scaling the waterfall applies to its own FFT, so the two are
+            // on one scale once the resolution difference is taken out.
+            const float norm = 1.0f / ((float)frames * (float)SPECTRUM_SIZE * (float)SPECTRUM_SIZE);
+            return 10.0f * log10f((peak * norm) + 1e-30f);
+        }
+
         inline void gate(float level) {
             _lastLevel = level;
             _open = _open ? (level >= _level - _hysteresis) : (level >= _level);
         }
 
-        float* normBuffer = nullptr;
+        arrays::Arg<arrays::FFTPlan> fftPlan;
+        arrays::ComplexArray fftIn;
+        std::vector<complex_t> accBuf;
+        std::vector<float> specWindow;
+        std::vector<float> specPower;
+        int accPos = 0;
+        double _windowNoiseGain = 1.0;
+
         float _level = -50.0f;
         float _hysteresis = 1.5f;
         float _lastLevel = -300.0f;

@@ -1413,6 +1413,12 @@ namespace ImGui {
         return viewBandwidth;
     }
 
+    double WaterFall::getRawBinsPerPixel() {
+        if (dataWidth <= 0 || wholeBandwidth <= 0.0 || rawFFTSize <= 0) { return 1.0; }
+        double drawn = (viewBandwidth / wholeBandwidth) * (double)rawFFTSize;
+        return std::max<double>(1.0, drawn / (double)dataWidth);
+    }
+
     void WaterFall::setViewOffset(double offset) {
         MEASURE_LOCK_GUARD(buf_mtx);
         if (offset == viewOffset) {
