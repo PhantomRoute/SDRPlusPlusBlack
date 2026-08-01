@@ -122,6 +122,7 @@ void ConfigManager::load(json def, bool lock) {
     if (lock) { mtx.lock(); }
     if (path == "") {
         flog::error("Config manager tried to load file with no path specified");
+        if (lock) { mtx.unlock(); }
         return;
     }
     if (!std::filesystem::exists(path)) {
@@ -131,6 +132,7 @@ void ConfigManager::load(json def, bool lock) {
     }
     if (!std::filesystem::is_regular_file(path)) {
         flog::error("Config file '{0}' isn't a file", path);
+        if (lock) { mtx.unlock(); }
         return;
     }
 
@@ -154,9 +156,25 @@ void ConfigManager::save(bool lock) {
     auto justpath = wstr::str2wstr(path);
     auto newpath = wstr::str2wstr(path + ".new");
     std::ofstream file(newpath);
-    file << conf.dump(4);
-    file.close();
-    std::filesystem::rename(newpath, justpath);
+    if (file.is_open()) {
+        file << conf.dump(4);
+        file.close();
+    }
+    if (!file) {
+        // A full disk or a read-only directory must not take the application
+        // with it: keep the config we already have on disk and carry on.
+        flog::error("Could not write config file '{}.new', keeping the previous one", path);
+        std::error_code rmec;
+        std::filesystem::remove(newpath, rmec);
+    }
+    else {
+        // Throwing overload would escape the autosave thread and terminate.
+        std::error_code ec;
+        std::filesystem::rename(newpath, justpath, ec);
+        if (ec) {
+            flog::error("Could not replace config file '{}': {}", path, ec.message());
+        }
+    }
     if (lock) { mtx.unlock(); }
 }
 

@@ -912,6 +912,10 @@ int sdrpp_main(int argc, char* argv[]) {
 
     gui::mainWindow.end();
 
+    // Before anything gets torn down: its handlers reach into modules, and the
+    // UI thread has stopped draining the queue they hand work to.
+    httpdebug::stopHttpServer();
+
     // On android, none of this shutdown should happen due to the way the UI works
 #ifndef __ANDROID__
     // Shut down all modules
@@ -924,8 +928,12 @@ int sdrpp_main(int argc, char* argv[]) {
 
     sigpath::iqFrontEnd.stop();
 
-    std::cout << "Save freq: " << core::configManager.conf["frequency"] << std::endl;
+    // Stop the save worker before reading the config, so it isn't serialising
+    // the same object on another thread while we do.
     core::configManager.disableAutoSave();
+    core::configManager.acquire();
+    std::cout << "Save freq: " << core::configManager.conf["frequency"] << std::endl;
+    core::configManager.release();
     core::configManager.save();
 #endif
 
