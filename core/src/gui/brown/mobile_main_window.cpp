@@ -307,9 +307,10 @@ struct Decibelometer {
     }
 
     float getAvg(int len) {
-        if (len > lastMeasures.size()) {
+        if (len > (int)lastMeasures.size()) {
             len = lastMeasures.size();
         }
+        if (len <= 0) { return -1000; }
         float sum = 0;
         for (int i = 0; i < len; i++) {
             sum += lastMeasures[lastMeasures.size() - 1 - i];
@@ -318,7 +319,7 @@ struct Decibelometer {
     }
 
     float getMax(int len) {
-        if (len > lastMeasures.size()) {
+        if (len > (int)lastMeasures.size()) {
             len = lastMeasures.size();
         }
         float maxx = -1000;
@@ -329,6 +330,7 @@ struct Decibelometer {
     }
 
     void addSamples(float *samples, int count) {
+        if (count <= 0) { return; }
         float summ = 0;
         for (int i = 0; i < count; i++) {
             summ += samples[i] * samples[i];
@@ -346,7 +348,8 @@ struct Decibelometer {
     }
 
     void updateMax() {
-        auto mx = *lastMeasures.end();
+        if (lastMeasures.empty()) { return; }
+        auto mx = lastMeasures.back();
         if (mx > maxSignalPeak || maxSignalPeakTime < currentTimeMillis() - 500) {
             maxSignalPeak = mx;
             maxSignalPeakTime = currentTimeMillis();;

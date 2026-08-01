@@ -52,7 +52,14 @@ public:
     double getFFTRate() {
         return _fftRate;
     }
+    inline int getFFTSize() { return _fftSize; }
     void setFFTWindow(FFTWindow fftWindow);
+
+    // Sum of the squared FFT window coefficients over the FFT size. This is the
+    // gain the windowing applies to a noise-like signal, and it is what relates
+    // a wideband power measurement to the per-bin level the waterfall displays
+    // for that same signal.
+    inline double getFFTWindowNoiseGain() { return fftWindowNoiseGain.load(); }
 
     void flushInputBuffer();
 
@@ -80,6 +87,7 @@ protected:
     std::atomic<long long> _currentStreamTime = 0; // unix time millis. 0 means realtime, otherwise simulated time.
     static void handler(dsp::complex_t* data, int count, void* ctx);
     void updateFFTPath(bool updateWaterfall = false);
+    void generateFFTWindow();
 
     static inline double genDCBlockRate(double sampleRate) {
         return 50.0 / sampleRate;
@@ -124,7 +132,8 @@ protected:
 
     // Processing data
     int _nzFFTSize;
-    float* fftWindowBuf;
+    float* fftWindowBuf = nullptr;
+    std::atomic<double> fftWindowNoiseGain = 1.0;
 //    fftwf_complex *fftInBuf, *fftOutBuf;
 //    fftwf_plan fftwPlanImplFFTW;
     dsp::arrays::Arg<dsp::arrays::FFTPlan> fftPlan;

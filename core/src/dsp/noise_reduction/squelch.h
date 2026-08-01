@@ -1,8 +1,15 @@
 #pragma once
 #include "../processor.h"
 
-// TODO: Rewrite better!!!!!
 namespace dsp::noise_reduction {
+    // Gate that mutes the stream while its level stays below a threshold.
+    //
+    // The level is the mean power of a block expressed as amplitude dBFS
+    // (0dB == full scale sine), i.e. 20*log10 of the RMS amplitude. For the
+    // complex path that is the total power inside the channel, summed over the
+    // whole VFO bandwidth -- it is NOT the per-FFT-bin level the waterfall
+    // draws. Callers that let the user pick the threshold off the waterfall
+    // have to convert (see RadioModule::updateSquelchScaling).
     class Squelch : public Processor<complex_t, complex_t> {
         using base_type = Processor<complex_t, complex_t>;
     public:
@@ -30,20 +37,29 @@ namespace dsp::noise_reduction {
             _level = level;
         }
 
+        // Amount the level has to fall back below the threshold before an open
+        // squelch closes again. Keeps a signal sitting right on the limit from
+        // chopping the audio into pieces.
+        void setHysteresis(double hysteresis) {
+            assert(base_type::_block_init);
+            std::lock_guard<std::recursive_mutex> lck(base_type::ctrlMtx);
+            _hysteresis = hysteresis;
+        }
+
         inline int process(int count, const stereo_t* in, stereo_t* out) {
-            if (count == 0) {
-                return 0;
+            if (count <= 0) {
+                return count;
             }
             float sum = 0;
             for(int i=0; i<count; i++) {
                 sum += in[i].l * in[i].l;
                 sum += in[i].r * in[i].r;
             }
-            float power = 20.0 * log10f(sqrt(sum / (count*2)));
+            gate(10.0f * log10f((sum / (float)(count * 2)) + 1e-30f));
 
-//            flog::info("db = {}", power);
-            if (power >= _level) {
-                memcpy(out, in, count * sizeof(stereo_t));
+            if (_open) {
+                // Callers may filter in place, in which case there is nothing to copy.
+                if (in != out) { memcpy(out, in, count * sizeof(stereo_t)); }
             }
             else {
                 memset(out, 0, count * sizeof(stereo_t));
@@ -53,13 +69,16 @@ namespace dsp::noise_reduction {
         }
 
         inline int process(int count, const complex_t* in, complex_t* out) {
+            if (count <= 0) {
+                return count;
+            }
             float sum;
-            volk_32fc_magnitude_32f(normBuffer, (lv_32fc_t*)in, count);
+            volk_32fc_magnitude_squared_32f(normBuffer, (const lv_32fc_t*)in, count);
             volk_32f_accumulator_s32f(&sum, normBuffer, count);
-            sum /= (float)count;
+            gate(10.0f * log10f((sum / (float)count) + 1e-30f));
 
-            if (20.0f * log10f(sum) >= _level) {
-                memcpy(out, in, count * sizeof(complex_t));
+            if (_open) {
+                if (in != out) { memcpy(out, in, count * sizeof(complex_t)); }
             }
             else {
                 memset(out, 0, count * sizeof(complex_t));
@@ -67,6 +86,11 @@ namespace dsp::noise_reduction {
 
             return count;
         }
+
+        // Level of the last processed block, in the same units as setLevel().
+        float getMeasuredLevel() { return _lastLevel; }
+
+        bool isOpen() { return _open; }
 
         //DEFAULT_PROC_RUN();
 
@@ -80,8 +104,16 @@ namespace dsp::noise_reduction {
         }
 
     private:
-        float* normBuffer;
+        inline void gate(float level) {
+            _lastLevel = level;
+            _open = _open ? (level >= _level - _hysteresis) : (level >= _level);
+        }
+
+        float* normBuffer = nullptr;
         float _level = -50.0f;
-                
+        float _hysteresis = 1.5f;
+        float _lastLevel = -300.0f;
+        bool _open = false;
+
     };
 }

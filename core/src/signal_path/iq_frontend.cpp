@@ -52,18 +52,7 @@ void IQFrontEnd::init(dsp::stream<dsp::complex_t>* in, double sampleRate, bool b
     fftSink.init(&reshape.out, handler, this);
     fftIn.origin = "iq_frontend.fft_in";
 
-    fftWindowBuf = dsp::buffer::alloc<float>(_nzFFTSize);
-    switch(_fftWindow) {
-        case FFTWindow::RECTANGULAR:
-            for (int i = 0; i < _nzFFTSize; i++) { fftWindowBuf[i] = 1.0; }
-            break;
-        case FFTWindow::BLACKMAN:
-            for (int i = 0; i < _nzFFTSize; i++) { fftWindowBuf[i] = dsp::window::blackman(i, _nzFFTSize); }
-            break;
-        case FFTWindow::NUTTALL:
-            for (int i = 0; i < _nzFFTSize; i++) { fftWindowBuf[i] = dsp::window::nuttall(i, _nzFFTSize); }
-            break;
-    }
+    generateFFTWindow();
 
 //    fftInBuf = (fftwf_complex*)fftwf_malloc(_fftSize * sizeof(fftwf_complex));
 //    fftOutBuf = (fftwf_complex*)fftwf_malloc(_fftSize * sizeof(fftwf_complex));
@@ -286,6 +275,26 @@ void IQFrontEnd::handler(dsp::complex_t* data, int count, void* ctx) {
     _this->_releaseFFTBuffer(_this->_fftCtx);
 }
 
+// (Re)builds the FFT window. The alternating sign is a half-spectrum shift, it
+// puts DC in the middle of the FFT output where the waterfall expects it.
+void IQFrontEnd::generateFFTWindow() {
+    dsp::buffer::free(fftWindowBuf);
+    fftWindowBuf = dsp::buffer::alloc<float>(_nzFFTSize);
+
+    double noisePower = 0.0;
+    for (int i = 0; i < _nzFFTSize; i++) {
+        float w;
+        switch (_fftWindow) {
+            case FFTWindow::BLACKMAN: w = dsp::window::blackman(i, _nzFFTSize); break;
+            case FFTWindow::NUTTALL:  w = dsp::window::nuttall(i, _nzFFTSize); break;
+            default:                  w = 1.0f; break;
+        }
+        noisePower += (double)w * (double)w;
+        fftWindowBuf[i] = (i % 2) ? -w : w;
+    }
+    fftWindowNoiseGain = noisePower / (double)_fftSize;
+}
+
 void IQFrontEnd::updateFFTPath(bool updateWaterfall) {
     // Temp stop branch
     reshape.tempStop();
@@ -298,17 +307,7 @@ void IQFrontEnd::updateFFTPath(bool updateWaterfall) {
     reshape.setSkip(skip);
 
     // Update window
-    dsp::buffer::free(fftWindowBuf);
-    fftWindowBuf = dsp::buffer::alloc<float>(_nzFFTSize);
-    if (_fftWindow == FFTWindow::RECTANGULAR) {
-        for (int i = 0; i < _nzFFTSize; i++) { fftWindowBuf[i] = 1.0f * ((i % 2) ? -1.0f : 1.0f); }
-    }
-    else if (_fftWindow == FFTWindow::BLACKMAN) {
-        for (int i = 0; i < _nzFFTSize; i++) { fftWindowBuf[i] = dsp::window::blackman(i, _nzFFTSize) * ((i % 2) ? -1.0f : 1.0f); }
-    }
-    else if (_fftWindow == FFTWindow::NUTTALL) {
-        for (int i = 0; i < _nzFFTSize; i++) { fftWindowBuf[i] = dsp::window::nuttall(i, _nzFFTSize) * ((i % 2) ? -1.0f : 1.0f); }
-    }
+    generateFFTWindow();
 
     // Update FFT plan
     fftPlan = dsp::arrays::allocateFFTWPlan(false, _fftSize);

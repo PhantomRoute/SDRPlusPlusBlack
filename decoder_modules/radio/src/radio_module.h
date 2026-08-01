@@ -786,6 +786,7 @@ private:
         if (!selectedDemod) { return; }
         vfo->setBandwidth(bandwidth);
         selectedDemod->setBandwidth(bandwidth);
+        updateSquelchScaling();
 
         config.acquire();
         config.conf[name][selectedDemod->getName()]["bandwidth"] = bandwidth;
@@ -841,6 +842,7 @@ private:
     void setSquelchEnabled(bool enable) {
         squelchEnabled = enable;
         if (!selectedDemod) { return; }
+        updateSquelchScaling();
         ifChain.setBlockEnabled(&squelch, squelchEnabled, [=](dsp::stream<dsp::complex_t>* out){ selectedDemod->setInput(out); });
 
         // Save config
@@ -851,12 +853,43 @@ private:
 
     void setSquelchLevel(float level) {
         squelchLevel = std::clamp<float>(level, MIN_SQUELCH, MAX_SQUELCH);
-        squelch.setLevel(squelchLevel);
+        updateSquelchScaling();
 
         // Save config
         config.acquire();
         config.conf[name][selectedDemod->getName()]["squelchLevel"] = squelchLevel;
         config.release(true);
+    }
+
+    // The user picks the squelch threshold by eye off the waterfall, so it is in
+    // waterfall units: dB of a single FFT bin. The squelch block however measures
+    // the total power of the channel, which is many bins wide, so the very same
+    // signal measures 10*log10(bins per channel) hotter there. Without correcting
+    // for that, a channel carrying nothing but noise already reads well above any
+    // usable threshold and the squelch simply never closes.
+    void updateSquelchScaling() {
+        double level;
+        double sampleRate = sigpath::iqFrontEnd.getEffectiveSamplerate();
+        int fftSize = sigpath::iqFrontEnd.getFFTSize();
+        double windowGain = sigpath::iqFrontEnd.getFFTWindowNoiseGain();
+
+        if (squelchLevel <= MIN_SQUELCH) {
+            // Bottom of the slider means "off"; don't let the correction turn it
+            // into a threshold that mutes everything.
+            level = -INFINITY;
+        }
+        else if (sampleRate <= 0.0 || fftSize <= 0 || bandwidth <= 0.0 || windowGain <= 0.0) {
+            level = squelchLevel;
+        }
+        else {
+            double binsPerChannel = std::max<double>(1.0, bandwidth * (double)fftSize / sampleRate);
+            level = squelchLevel + 10.0 * log10(binsPerChannel) - 10.0 * log10(windowGain);
+        }
+
+        // Called on every FFT redraw, so only touch the DSP block on a real change.
+        if (level == appliedSquelchLevel) { return; }
+        appliedSquelchLevel = level;
+        squelch.setLevel(level);
     }
 
     void setFMIFNREnabled(bool enabled) {
@@ -918,6 +951,9 @@ private:
     static void fftRedraw(ImGui::WaterFall::FFTRedrawArgs args, void* ctx) {
         RadioModule* _this = (RadioModule*)ctx;
         if (!_this->squelchEnabled || _this->selectedDemod == nullptr) { return; }
+        // Cheap place to pick up FFT size / sample rate changes, neither of which
+        // notifies us but both of which move the squelch threshold.
+        _this->updateSquelchScaling();
         double bPos = args.max.y - ((_this->squelchLevel - gui::waterfall.getFFTMin()) * (args.max.y - args.min.y) / (gui::waterfall.getFFTMax() - gui::waterfall.getFFTMin()));
         if (bPos >= args.min.y && bPos <= args.max.y) {
             args.window->DrawList->AddLine(ImVec2(args.min.x, roundf(bPos)), ImVec2(args.max.x, roundf(bPos)), ImGui::ColorConvertFloat4ToU32(gui::themeManager.squelchColor), 1.0);
@@ -1066,6 +1102,7 @@ private:
 
     bool squelchEnabled = false;
     float squelchLevel;
+    double appliedSquelchLevel = NAN; // squelchLevel converted to the squelch block's units
 
     int deempId = 0;
     bool deempAllowed;
