@@ -238,7 +238,6 @@ class MainActivity : NativeActivity(), SensorEventListener {
                     continue
                 Log.w("SDR++", "PERM: Req USB perm: $dev")
                 usbManager!!.requestPermission(dev, permissionIntent);
-                return
             }
             Log.w("SDR++", "PERM: End req all USB perm:")
             permissionsPassed.add(PERMISSION_REQUEST_CODE+1)
@@ -296,6 +295,18 @@ class MainActivity : NativeActivity(), SensorEventListener {
         if (autoPermissionProceed) {
             Log.w("SDR++", "PERM: auto proceed")
             proceedWithPermissions();
+        }
+    }
+
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        Log.w("SDR++", "onNewIntent: ${intent.action}")
+        if (intent.action == UsbManager.ACTION_USB_DEVICE_ATTACHED) {
+            val device = intent.getParcelableExtra<UsbDevice>(UsbManager.EXTRA_DEVICE)
+            if (device != null) {
+                usbManager?.requestPermission(device, makeUsbPermissionIntent())
+            }
         }
     }
 
