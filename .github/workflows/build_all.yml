@@ -6,6 +6,12 @@ on:
         branches:
         - master
 
+# Every job ends in "gh release upload rolling", which needs write access to
+# contents. Without this the default token is read only and the upload fails
+# with HTTP 403 "Resource not accessible by integration".
+permissions:
+    contents: write
+
 env:
     # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
     BUILD_TYPE: Release
