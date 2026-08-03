@@ -1004,8 +1004,10 @@ namespace ImGui {
     void WaterFall::onResize() {
         MEASURE_LOCK_GUARD(latestFFTMtx);
         MEASURE_LOCK_GUARD1(smoothingBufMtx);
-        // return if widget is too small
-        if (widgetSize.x < 100 || widgetSize.y < 100) {
+        // return if widget is too small. The horizontal margin scales with the
+        // UI scale and overtakes the 100px floor past 1.6x, which left dataWidth
+        // negative and turned every allocation below into a huge new[].
+        if (widgetSize.x < 100 || widgetSize.y < 100 || widgetSize.x - (60.0f * style::uiScale) < 1.0f) {
             return;
         }
 

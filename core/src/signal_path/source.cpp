@@ -5,9 +5,129 @@
 #include <core.h>
 #include <http_debug_server.h>
 
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
+
 namespace {
     std::string currentSourceType;
     SourceManager::SourceHandler* selectedHandlerRef = nullptr;
+
+    // How often the connected devices are re-enumerated while the source menu is
+    // on screen and the radio is stopped.
+    const std::chrono::milliseconds PROBE_INTERVAL(2000);
+
+    // Enumerating USB devices costs tens of milliseconds (librtlsdr even opens
+    // every dongle to read its serial), and it used to run straight from the
+    // ImGui draw, which showed up as a stutter every couple of seconds. Do it on
+    // a worker thread instead and only touch the module from the UI thread once
+    // the device list has actually changed.
+    class DeviceProbeWorker {
+    public:
+        DeviceProbeWorker() : workerThread(&DeviceProbeWorker::worker, this) {
+        }
+
+        // Called from the UI thread, cheap enough to call every frame. Returns
+        // true exactly once after the set of connected devices changed.
+        bool poll(SourceManager::SourceHandler* handler) {
+            std::lock_guard<std::mutex> lock(mtx);
+            if (handler != target) {
+                target = handler;
+                signature.clear();
+                haveSignature = false;
+                changed = false;
+                nextProbe = std::chrono::steady_clock::time_point();
+            }
+            auto now = std::chrono::steady_clock::now();
+            lastRequest = now;
+            // Only worth waking the worker when a probe is actually due,
+            // otherwise this notifies once per frame for nothing: while a probe
+            // is pending the worker is already sleeping on that deadline.
+            if (now >= nextProbe) { wakeup.notify_one(); }
+            if (!changed) { return false; }
+            changed = false;
+            return true;
+        }
+
+        // Called from the UI thread before the handler's module goes away.
+        void forget(SourceManager::SourceHandler* handler) {
+            {
+                std::lock_guard<std::mutex> lock(mtx);
+                if (target != handler) { return; }
+                target = nullptr;
+                signature.clear();
+                haveSignature = false;
+                changed = false;
+            }
+            // Wait out a probe already in flight so the module can't be
+            // destroyed while its probe handler is still running.
+            std::lock_guard<std::mutex> probeLock(probeMtx);
+        }
+
+    private:
+        void worker() {
+            SetThreadName("device-probe");
+            std::unique_lock<std::mutex> lock(mtx);
+            while (true) {
+                // Nothing to watch, or the UI stopped asking because the menu was
+                // closed or the radio was started. Either way, stay idle: poll()
+                // wakes us back up.
+                auto now = std::chrono::steady_clock::now();
+                if (!target || now - lastRequest > std::chrono::seconds(1)) {
+                    wakeup.wait(lock);
+                    continue;
+                }
+                if (now < nextProbe) {
+                    wakeup.wait_until(lock, nextProbe);
+                    continue;
+                }
+                nextProbe = now + PROBE_INTERVAL;
+
+                SourceManager::SourceHandler* handler = target;
+                // Taken before dropping mtx so forget() can't slip past us and
+                // let the module be destroyed under the probe handler.
+                probeMtx.lock();
+                lock.unlock();
+                std::string sig;
+                try {
+                    sig = handler->probeHandler(handler->ctx);
+                }
+                catch (...) {
+                    // A device library throwing must not take the worker down.
+                }
+                probeMtx.unlock();
+                lock.lock();
+
+                if (target != handler) { continue; }
+                if (haveSignature && sig != signature) { changed = true; }
+                signature = sig;
+                haveSignature = true;
+            }
+        }
+
+        std::mutex mtx;
+        std::mutex probeMtx;
+        std::condition_variable wakeup;
+        SourceManager::SourceHandler* target = nullptr;
+        std::string signature;
+        bool haveSignature = false;
+        bool changed = false;
+        std::chrono::steady_clock::time_point lastRequest;
+        std::chrono::steady_clock::time_point nextProbe;
+        std::thread workerThread;
+    };
+
+    DeviceProbeWorker& deviceProbeWorker() {
+        // The core library outlives all modules. Keep the worker alive until
+        // process exit so source modules can safely unregister themselves.
+        static DeviceProbeWorker* worker = new DeviceProbeWorker();
+        return *worker;
+    }
+
+    // Rate limit for sources that only provide a refreshHandler: those still run
+    // on the UI thread, so they must not run every frame.
+    std::chrono::steady_clock::time_point nextUnprobedRefresh;
 
     void registerSourceConfigEndpoint(const std::string& sourceName, SourceManager::SourceHandler* handler) {
         httpdebug::procfs::registerEndpoint("/source/" + sourceName + "/config", [sourceName]() -> std::string {
@@ -63,12 +183,22 @@ void SourceManager::unregisterSource(std::string name) {
         return;
     }
     onSourceUnregister.emit(name);
+    // Blocks until any probe in flight has returned, so the module can't be
+    // destroyed while the worker is inside its probe handler.
+    if (sources[name]->probeHandler != NULL) {
+        deviceProbeWorker().forget(sources[name]);
+    }
     if (name == selectedName) {
         if (selectedHandler != NULL) {
             sources[selectedName]->deselectHandler(sources[selectedName]->ctx);
         }
         sigpath::iqFrontEnd.setInput(&nullSource);
         selectedHandler = NULL;
+        // Leaving these behind made the manager report a source that no longer
+        // exists, both to the debug endpoint and to the next selectSource().
+        selectedName.clear();
+        currentSourceType.clear();
+        selectedHandlerRef = nullptr;
     }
     sources.erase(name);
     onSourceUnregistered.emit(name);
@@ -111,18 +241,32 @@ void SourceManager::showSelectedMenu() {
     selectedHandler->menuHandler(selectedHandler->ctx);
 }
 
-void SourceManager::refreshSelected() {
+void SourceManager::pollDeviceChanges() {
     if (selectedHandler == NULL || selectedHandler->refreshHandler == NULL) {
         return;
     }
+
+    if (selectedHandler->probeHandler != NULL) {
+        if (!deviceProbeWorker().poll(selectedHandler)) { return; }
+    }
+    else {
+        auto now = std::chrono::steady_clock::now();
+        if (now < nextUnprobedRefresh) { return; }
+        nextUnprobedRefresh = now + PROBE_INTERVAL;
+    }
+
     selectedHandler->refreshHandler(selectedHandler->ctx);
 }
 
-void SourceManager::start() {
+bool SourceManager::start() {
     if (selectedHandler == NULL) {
-        return;
+        return false;
     }
     selectedHandler->startHandler(selectedHandler->ctx);
+    if (selectedHandler->runningHandler == NULL) {
+        return true;
+    }
+    return selectedHandler->runningHandler(selectedHandler->ctx);
 }
 
 void SourceManager::stop() {

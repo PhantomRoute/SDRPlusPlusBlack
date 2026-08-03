@@ -71,6 +71,10 @@ public:
         handler.stopHandler = stop;
         handler.tuneHandler = tune;
         handler.refreshHandler = deviceRefreshHandler;
+#ifndef __ANDROID__
+        handler.probeHandler = deviceProbeHandler;
+#endif
+        handler.runningHandler = isRunning;
         handler.stream = &stream;
 
         strcpy(dbTxt, "--");
@@ -162,7 +166,11 @@ public:
     void selectFirst() {
         if (devCount > 0) {
             selectById(0);
+            return;
         }
+        // Nothing plugged in. Clearing the name is what stops start() from
+        // trying to open a device that isn't there anymore.
+        selectedDevName = "";
     }
 
     void selectByName(std::string name) {
@@ -177,6 +185,9 @@ public:
 
     void selectById(int id) {
         selectedDevName = devNames[id];
+        // start() opens devId, so leaving it behind opened the wrong dongle
+        // whenever the device was picked by name rather than from the combo.
+        devId = id;
 
 #ifndef __ANDROID__
         int oret = rtlsdr_open(&openDev, id);
@@ -250,7 +261,10 @@ public:
             gainId = config.conf["devices"][selectedDevName]["gain"];
         }
 
-        if (gainId >= gainList.size()) { gainId = gainList.size() - 1; }
+        // Signed/unsigned: with an empty gain list this used to leave gainId at
+        // -1 and every gainList[gainId] below read out of bounds.
+        if (gainId >= (int)gainList.size()) { gainId = (int)gainList.size() - 1; }
+        if (gainId < 0) { gainId = 0; }
         updateGainTxt();
 
         config.release(created);
@@ -312,13 +326,13 @@ private:
         rtlsdr_set_direct_sampling(_this->openDev, _this->directSamplingMode);
         rtlsdr_set_bias_tee(_this->openDev, _this->biasT);
         rtlsdr_set_agc_mode(_this->openDev, _this->rtlAgc);
-        rtlsdr_set_tuner_gain(_this->openDev, _this->gainList[_this->gainId]);
+        _this->applyTunerGain();
         if (_this->tunerAgc) {
             rtlsdr_set_tuner_gain_mode(_this->openDev, 0);
         }
         else {
             rtlsdr_set_tuner_gain_mode(_this->openDev, 1);
-            rtlsdr_set_tuner_gain(_this->openDev, _this->gainList[_this->gainId]);
+            _this->applyTunerGain();
         }
         rtlsdr_set_offset_tuning(_this->openDev, _this->offsetTuning);
 
@@ -365,9 +379,31 @@ private:
         return core::setInputSampleRate(_this->sampleRate, _this->sampleRate * _this -> usableBw / 100.0);
     }
 
-    // Periodic rescan so a dongle plugged in after startup shows up by itself.
-    // Only reacts when the device list actually changed, since re-selecting
-    // resets the sample rate and with it the waterfall.
+    static bool isRunning(void* ctx) {
+        RTLSDRSourceModule* _this = (RTLSDRSourceModule*)ctx;
+        return _this->running;
+    }
+
+#ifndef __ANDROID__
+    // Runs on the device probe thread, so it touches nothing but librtlsdr and
+    // its own locals. Deliberately skips rtlsdr_get_device_usb_strings, which
+    // opens every dongle in turn and is what made the full refresh too
+    // expensive to repeat on a timer.
+    static std::string deviceProbeHandler(void* ctx) {
+        std::string sig;
+        char buf[1024];
+        int count = rtlsdr_get_device_count();
+        for (int i = 0; i < count; i++) {
+            snprintf(buf, sizeof buf, "%d:%s;", i, rtlsdr_get_device_name(i));
+            sig += buf;
+        }
+        return sig;
+    }
+#endif
+
+    // Rescan triggered when the probe saw the device list change. Only reacts
+    // when the list really did change, since re-selecting resets the sample rate
+    // and with it the waterfall.
     static void deviceRefreshHandler(void* ctx) {
         RTLSDRSourceModule* _this = (RTLSDRSourceModule*)ctx;
         if (_this->running) { return; }
@@ -431,7 +467,7 @@ private:
                     }
                     else {
                         rtlsdr_set_tuner_gain_mode(_this->openDev, 1);
-                        rtlsdr_set_tuner_gain(_this->openDev, _this->gainList[_this->gainId]);
+                        _this->applyTunerGain();
                     }
                 }
             }
@@ -463,10 +499,10 @@ private:
         SmGui::ForceSync();
         // TODO: FIND ANOTHER WAY
         if (_this->serverMode) {
-            if (SmGui::SliderInt(CONCAT("##_rtlsdr_gain_", _this->name), &_this->gainId, 0, _this->gainList.size() - 1, SmGui::FMT_STR_NONE)) {
+            if (SmGui::SliderInt(CONCAT("##_rtlsdr_gain_", _this->name), &_this->gainId, 0, (std::max)(0, (int)_this->gainList.size() - 1), SmGui::FMT_STR_NONE)) {
                 _this->updateGainTxt();
                 if (_this->running) {
-                    rtlsdr_set_tuner_gain(_this->openDev, _this->gainList[_this->gainId]);
+                    _this->applyTunerGain();
                 }
                 if (_this->selectedDevName != "") {
                     config.acquire();
@@ -476,10 +512,10 @@ private:
             }
         }
         else {
-            if (ImGui::SliderInt(CONCAT("##_rtlsdr_gain_", _this->name), &_this->gainId, 0, _this->gainList.size() - 1, _this->dbTxt)) {
+            if (ImGui::SliderInt(CONCAT("##_rtlsdr_gain_", _this->name), &_this->gainId, 0, (std::max)(0, (int)_this->gainList.size() - 1), _this->dbTxt)) {
                 _this->updateGainTxt();
                 if (_this->running) {
-                    rtlsdr_set_tuner_gain(_this->openDev, _this->gainList[_this->gainId]);
+                    _this->applyTunerGain();
                 }
                 if (_this->selectedDevName != "") {
                     config.acquire();
@@ -543,7 +579,7 @@ private:
                 }
                 else {
                     rtlsdr_set_tuner_gain_mode(_this->openDev, 1);
-                    rtlsdr_set_tuner_gain(_this->openDev, _this->gainList[_this->gainId]);
+                    _this->applyTunerGain();
                 }
             }
             if (_this->selectedDevName != "") {
@@ -569,7 +605,22 @@ private:
         if (!_this->stream.swap(sampCount)) { return; }
     }
 
+    // Some tuners, and clones set up for direct sampling only, report no gains
+    // at all. Every gainList[gainId] has to cope with that.
+    bool hasGain() {
+        return gainId >= 0 && gainId < (int)gainList.size();
+    }
+
+    void applyTunerGain() {
+        if (!hasGain()) { return; }
+        rtlsdr_set_tuner_gain(openDev, gainList[gainId]);
+    }
+
     void updateGainTxt() {
+        if (!hasGain()) {
+            strcpy(dbTxt, "--");
+            return;
+        }
         snprintf(dbTxt, sizeof dbTxt, "%.1f dB", (float)gainList[gainId] / 10.0f);
     }
 

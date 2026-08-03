@@ -922,7 +922,14 @@ void MainWindow::setPlayState(bool _playing) {
     if (_playing == playing) { return; }
     if (_playing) {
         sigpath::iqFrontEnd.flushInputBuffer();
-        sigpath::sourceManager.start();
+        if (!sigpath::sourceManager.start()) {
+            // The device isn't there or wouldn't open. Staying stopped keeps the
+            // source menu usable instead of latching into a running state that
+            // never produces a sample.
+            sigpath::iqFrontEnd.flushInputBuffer();
+            ImGui::InsertNotification({ ImGuiToastType_Error, 5000, "Could not start the source. Is the device connected?" });
+            return;
+        }
         sigpath::sourceManager.tune(gui::waterfall.getCenterFrequency());
         playing = true;
         onPlayStateChange.emit(true);
@@ -1007,6 +1014,11 @@ void MainWindow::performDetectedLLMAction(const std::string& whisperResult, std:
         }
     }
 
+    if (parts.empty()) {
+        flog::info("Invalid LLM reply, empty command: {}", command);
+        return;
+    }
+
     if (parts[0] == "VOLUME_UP") {
         if (sigpath::sinkManager.recentStreeam) {
             auto volume = sigpath::sinkManager.recentStreeam->getVolume();
@@ -1055,7 +1067,7 @@ void MainWindow::performDetectedLLMAction(const std::string& whisperResult, std:
             sigpath::sinkManager.recentStreeam->volumeAjust.setMuted(!sigpath::sinkManager.recentStreeam->volumeAjust.getMuted());
         }
     }
-    if (parts[0] == "FREQ") {
+    if (parts[0] == "FREQ" && parts.size() > 1) {
         float freq = atof(parts[1].c_str());
         float mult = 1;
         if (parts.size() > 2) {

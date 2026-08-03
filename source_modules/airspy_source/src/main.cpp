@@ -42,6 +42,10 @@ public:
         handler.stopHandler = stop;
         handler.tuneHandler = tune;
         handler.refreshHandler = deviceRefreshHandler;
+#ifndef __ANDROID__
+        handler.probeHandler = deviceProbeHandler;
+#endif
+        handler.runningHandler = isRunning;
         handler.stream = &stream;
 
         refresh();
@@ -110,7 +114,11 @@ public:
     void selectFirst() {
         if (devList.size() != 0) {
             selectBySerial(devList[0]);
+            return;
         }
+        // Nothing plugged in. Clearing the serial is what stops start() from
+        // trying to open a device that isn't there anymore.
+        selectedSerial = 0;
     }
 
     void selectByString(std::string serial) {
@@ -253,9 +261,30 @@ private:
         flog::info("AirspySourceModule '{0}': Menu Select!", _this->name);
     }
 
-    // Periodic rescan so a device plugged in after startup shows up by itself.
-    // Only reacts when the device list actually changed, since re-selecting
-    // resets the sample rate and with it the waterfall.
+    static bool isRunning(void* ctx) {
+        AirspySourceModule* _this = (AirspySourceModule*)ctx;
+        return _this->running;
+    }
+
+#ifndef __ANDROID__
+    // Runs on the device probe thread: enumeration into locals only, no module
+    // state, no config, no GUI.
+    static std::string deviceProbeHandler(void* ctx) {
+        std::string sig;
+        uint64_t serials[256];
+        int n = airspy_list_devices(serials, 256);
+        char buf[1024];
+        for (int i = 0; i < n; i++) {
+            snprintf(buf, sizeof buf, "%016" PRIX64 ";", serials[i]);
+            sig += buf;
+        }
+        return sig;
+    }
+#endif
+
+    // Rescan triggered when the probe saw the device list change. Only reacts
+    // when the list really did change, since re-selecting resets the sample rate
+    // and with it the waterfall.
     static void deviceRefreshHandler(void* ctx) {
         AirspySourceModule* _this = (AirspySourceModule*)ctx;
         if (_this->running) { return; }

@@ -3,6 +3,7 @@
 #include <gui/gui.h>
 #include <gui/style.h>
 #include <signal_path/signal_path.h>
+#include <atomic>
 #include <chrono>
 
 SDRPP_MOD_INFO{
@@ -123,13 +124,18 @@ private:
 
     void start() {
         if (running) { return; }
+        // The worker gives up on its own when there is no VFO to tune, so the
+        // previous thread can still be joinable here even though running is
+        // false. Assigning over a joinable thread calls std::terminate.
+        if (workerThread.joinable()) {
+            workerThread.join();
+        }
         current = startFreq;
         running = true;
         workerThread = std::thread(&ScannerModule::worker, this);
     }
 
     void stop() {
-        if (!running) { return; }
         running = false;
         if (workerThread.joinable()) {
             workerThread.join();
@@ -153,7 +159,6 @@ private:
 
                 // Check if we are waiting for a tune
                 if (tuning) {
-                    flog::warn("Tuning");
                     if ((std::chrono::duration_cast<std::chrono::milliseconds>(now - lastTuneTime)).count() > tuningTime) {
                         tuning = false;
                     }
@@ -175,8 +180,6 @@ private:
                 double vfoWidth = sigpath::vfoManager.getBandwidth(gui::waterfall.selectedVFO);
 
                 if (receiving) {
-                    flog::warn("Receiving");
-                
                     float maxLevel = getMaxLevel(data, current, vfoWidth, dataWidth, wfStart, wfWidth);
                     if (maxLevel >= level) {
                         lastSignalTime = now;
@@ -186,7 +189,6 @@ private:
                     }
                 }
                 else {
-                    flog::warn("Seeking signal");
                     double bottomLimit = current;
                     double topLimit = current;
                     
@@ -270,7 +272,8 @@ private:
     std::string name;
     bool enabled = true;
     
-    bool running = false;
+    // Written by the worker when it gives up, read by the UI thread.
+    std::atomic<bool> running{ false };
     //std::string selectedVFO = "Radio";
     double startFreq = 88000000.0;
     double stopFreq = 108000000.0;

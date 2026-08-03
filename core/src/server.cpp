@@ -572,8 +572,14 @@ namespace server {
                 }
             }
             if (startAllowed) {
-                sigpath::sourceManager.start();
-                running = true;
+                // Reporting running when the device never opened left the client
+                // waiting forever for samples that were never coming.
+                if (sigpath::sourceManager.start()) {
+                    running = true;
+                }
+                else {
+                    flog::error("Could not start the source, staying stopped");
+                }
                 maybeSendTransmitterState();
             }
         }

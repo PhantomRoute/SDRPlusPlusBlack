@@ -26,6 +26,19 @@ public:
         // leave it unset and rely on the module's own refresh button.
         void (*refreshHandler)(void* ctx) = NULL;
 
+        // Optional. Returns a string that changes whenever the set of connected
+        // devices changes. Called from a background thread, so it must only read
+        // the device library into local storage: no module state, no config, no
+        // GUI. When set, the far more expensive refreshHandler only runs once
+        // this has reported an actual change.
+        std::string (*probeHandler)(void* ctx) = NULL;
+
+        // Optional. Reports whether the source is really streaming once
+        // startHandler has run. Sources that can fail to open their device
+        // should set this, otherwise the UI latches into a running state with no
+        // data and no way to tell why.
+        bool (*runningHandler)(void* ctx) = NULL;
+
         void* ctx = NULL;
     };
 
@@ -38,8 +51,15 @@ public:
     void unregisterSource(std::string name);
     void selectSource(std::string name);
     void showSelectedMenu();
-    void refreshSelected();
-    void start();
+
+    // Picks up devices plugged in while the application is running. Safe to call
+    // every frame: the rate limiting and the device enumeration both live below
+    // this call, off the UI thread whenever the source provides a probeHandler.
+    void pollDeviceChanges();
+
+    // Returns whether the source actually started. Sources that don't implement
+    // runningHandler are assumed to have succeeded.
+    bool start();
     void stop();
     void tune(double freq);
     void setTuningOffset(double offset);
@@ -64,8 +84,8 @@ private:
     std::map<std::string, SourceHandler*> sources;
     std::string selectedName;
     SourceHandler* selectedHandler = NULL;
-    double tuneOffset;
-    double currentFreq;
+    double tuneOffset = 0.0;
+    double currentFreq = 0.0;
     double ifFreq = 0.0;
     TuningMode tuneMode = TuningMode::NORMAL;
     dsp::stream<dsp::complex_t> nullSource;

@@ -97,6 +97,10 @@ public:
         handler.stopHandler = stop;
         handler.tuneHandler = tune;
         handler.refreshHandler = deviceRefreshHandler;
+#ifndef __ANDROID__
+        handler.probeHandler = deviceProbeHandler;
+#endif
+        handler.runningHandler = isRunning;
         handler.stream = &stream;
 
         refresh();
@@ -231,9 +235,31 @@ private:
         flog::info("HackRFSourceModule '{0}': Menu Select!", _this->name);
     }
 
-    // Periodic rescan so a device plugged in after startup shows up by itself.
-    // Only reacts when the device list actually changed, since re-selecting
-    // resets the sample rate and with it the waterfall.
+    static bool isRunning(void* ctx) {
+        HackRFSourceModule* _this = (HackRFSourceModule*)ctx;
+        return _this->running;
+    }
+
+#ifndef __ANDROID__
+    // Runs on the device probe thread: enumeration into locals only, no module
+    // state, no config, no GUI.
+    static std::string deviceProbeHandler(void* ctx) {
+        std::string sig;
+        hackrf_device_list_t* list = hackrf_device_list();
+        if (list == NULL) { return sig; }
+        for (int i = 0; i < list->devicecount; i++) {
+            if (list->serial_numbers[i] == NULL) { continue; }
+            sig += list->serial_numbers[i];
+            sig += ';';
+        }
+        hackrf_device_list_free(list);
+        return sig;
+    }
+#endif
+
+    // Rescan triggered when the probe saw the device list change. Only reacts
+    // when the list really did change, since re-selecting resets the sample rate
+    // and with it the waterfall.
     static void deviceRefreshHandler(void* ctx) {
         HackRFSourceModule* _this = (HackRFSourceModule*)ctx;
         if (_this->running) { return; }

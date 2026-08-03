@@ -40,10 +40,6 @@ namespace sourcemenu {
     bool showDelOffsetDialog = false;
     std::string delOffsetName = "";
 
-    // Seconds between device rescans while the source menu is visible and stopped.
-    const double SOURCE_REFRESH_INTERVAL = 2.0;
-    double lastSourceRefresh = 0.0;
-
     // Offset IDs
     enum {
         OFFSET_ID_NONE,
@@ -197,8 +193,13 @@ namespace sourcemenu {
         iqCorrection = core::configManager.conf["iqCorrection"];
         invertIQ = core::configManager.conf["invertIQ"];
 
+        // config.json is hand-editable and writable over the debug endpoint, so
+        // the stored callsign can be longer than the buffer. Truncate, and leave
+        // room for the terminator std::copy would not have written.
         std::string opcs = core::configManager.conf["operatorCallsign"];
+        opcs.resize((std::min)(opcs.size(), sizeof(operatorCallsignRaw) - 1));
         std::copy(opcs.begin(), opcs.end(), operatorCallsignRaw);
+        operatorCallsignRaw[opcs.size()] = '\0';
         callsignFound = utils::globalCty.findCallsign(operatorCallsignRaw);
 
         if (core::configManager.conf.contains("secondsAdjustment")) {
@@ -344,13 +345,10 @@ namespace sourcemenu {
 
         // Rescan for devices while the menu is on screen and the radio is stopped,
         // so plugging an SDR in with the application already open is enough for it
-        // to show up. Sources opt into this, and only the cheap ones do.
+        // to show up. The rate limiting and the enumeration itself live in the
+        // source manager, which keeps the expensive part off this thread.
         if (!running) {
-            double now = ImGui::GetTime();
-            if (now - lastSourceRefresh >= SOURCE_REFRESH_INTERVAL) {
-                lastSourceRefresh = now;
-                sigpath::sourceManager.refreshSelected();
-            }
+            sigpath::sourceManager.pollDeviceChanges();
         }
 
         sigpath::sourceManager.showSelectedMenu();

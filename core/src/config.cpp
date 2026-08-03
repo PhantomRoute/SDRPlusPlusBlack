@@ -112,6 +112,9 @@ ConfigManager::ConfigManager() : saveJob(std::make_shared<SaveJob>()) {
 
 ConfigManager::~ConfigManager() {
     disableAutoSave();
+    // disableAutoSave() does nothing when autosave was never switched on, but
+    // the job has to lose its back pointer to us either way.
+    configSaveWorker().cancel(saveJob);
 }
 
 void ConfigManager::setPath(std::string file) {
@@ -142,7 +145,7 @@ void ConfigManager::load(json def, bool lock) {
         file >> conf;
         file.close();
     }
-    catch (const std::exception e) {
+    catch (const std::exception& e) {
         flog::error("Config file '{}' with size={} is corrupted ({}), resetting it", path, (int64_t)filesize, e.what());
         usleep(3000000);
         conf = def;
@@ -198,13 +201,17 @@ void ConfigManager::acquire() {
 }
 
 void ConfigManager::release(bool modified) {
-    bool queueSave = false;
+    // Copied while the lock is still held: the manager can be destroyed the
+    // moment it is dropped, and reading the member after that is a use after
+    // free. The job itself outlives the manager and knows to do nothing once
+    // the destructor has cleared its back pointer.
+    std::shared_ptr<SaveJob> job;
     if (modified) {
         changed = true;
-        queueSave = autoSaveEnabled;
+        if (autoSaveEnabled) { job = saveJob; }
     }
     mtx.unlock();
-    if (queueSave) {
-        configSaveWorker().enqueue(saveJob);
+    if (job) {
+        configSaveWorker().enqueue(job);
     }
 }
