@@ -8,9 +8,12 @@
 
     Values MUST be decimal. android.hardware.usb.DeviceFilter.read() parses these
     with radix 10 unless the value carries an explicit 0x prefix, and it swallows
-    the NumberFormatException, leaving the field at -1 -- which matches() treats as
+    the NumberFormatException, leaving the field at -1, which matches() treats as
     a wildcard. Bare hex like vendor-id="1d50" therefore silently becomes "any",
     which is how this file used to claim every USB device attached to the phone.
+
+    No padding inside the quotes either: Integer.parseInt does not trim, so a
+    trailing space throws and produces the same silent wildcard.
 -->
 <resources>
 
