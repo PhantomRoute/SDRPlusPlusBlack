@@ -32,6 +32,16 @@ std::unordered_map<int, std::string> demodModeList;
 std::unordered_map<std::string, int> demodModeListRev;
 std::string demodModeListTxt;
 
+// demodModeList only holds the modes currently registered, so a bookmark saved
+// against a module that is since disabled - the DSD modes come and go with
+// ch_extravhf_decoder - will miss. Looking that up with operator[] inserts a blank
+// entry into the shared map while drawing and shows an empty mode; say what
+// actually happened instead.
+static std::string demodModeName(int demodId) {
+    auto it = demodModeList.find(demodId);
+    return (it != demodModeList.end()) ? it->second : "Unknown";
+}
+
 enum {
     BOOKMARK_DISP_MODE_OFF,
     BOOKMARK_DISP_MODE_TOP,
@@ -694,7 +704,7 @@ private:
                     ImGui::SameLine();
                     ImGui::TextColored(ImVec4(1.0f, 0.25f, 0.25f, 1.0f), "X");
                 } else {
-                    ImGui::Text("%s %s", utils::formatFreq(bm.frequency).c_str(), (radio != nullptr) ? demodModeList[radio->getDemodByIndex(bm.modeIndex)].c_str() : "");
+                    ImGui::Text("%s %s", utils::formatFreq(bm.frequency).c_str(), (radio != nullptr) ? demodModeName(radio->getDemodByIndex(bm.modeIndex)).c_str() : "");
                 }
 //		std::string modeStr = (radio != nullptr && bm.modeIndex >= 0) ? demodModeList[radio->getDemodByIndex(bm.modeIndex)] : "DIGITAL";
 //		ImGui::Text("%s %s", utils::formatFreq(bm.frequency).c_str(), modeStr.c_str());
@@ -853,7 +863,12 @@ again:
                 clampedRectMin = newRect.Min;
                 rectMin.y = clampedRectMin.y;
                 rectMax.y = clampedRectMax.y;
-                if (clampedRectMin.y < args.min.y || clampedRectMax.y >= args.max.y) {
+                // Inclusive at the bottom edge: in BOTTOM mode the first label sits
+                // flush against args.max.y, so an exclusive test culled every
+                // bookmark. Culled labels never reach _this->rects either, so the
+                // next one started at the same y and was culled in turn, which is
+                // why the whole set vanished rather than just the bottom row.
+                if (clampedRectMin.y < args.min.y || clampedRectMax.y > args.max.y) {
                     continue; // dont draw at all.
                 }
                 args.window->DrawList->AddRectFilled(clampedRectMin, clampedRectMax, bm.worked ? IM_COL32(0, 255, 0, 255) : (vfoMissing ? IM_COL32(255, 80, 80, 255) : IM_COL32(255, 255, 0, 255)));
@@ -934,7 +949,7 @@ again:
         if (!hoveredBookmark.bookmark.vfoName.empty() && !sigpath::vfoManager.vfoExists(hoveredBookmark.bookmark.vfoName)) {
             ImGui::TextColored(ImVec4(1.0f, 0.25f, 0.25f, 1.0f), "Radio \"%s\" is not available", hoveredBookmark.bookmark.vfoName.c_str());
         } else {
-            ImGui::Text("Mode: %s", (radio != nullptr) ? demodModeList[radio->getDemodByIndex(hoveredBookmark.bookmark.modeIndex)].c_str() : "");
+            ImGui::Text("Mode: %s", (radio != nullptr) ? demodModeName(radio->getDemodByIndex(hoveredBookmark.bookmark.modeIndex)).c_str() : "");
         }
         ImGui::EndTooltip();
     }
