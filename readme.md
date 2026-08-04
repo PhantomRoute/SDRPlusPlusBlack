@@ -1,17 +1,20 @@
-# SDR++Brown (fork), is not the original bloat-free SDR software
+# SDR++Black
 
+![Build Status](https://img.shields.io/github/actions/workflow/status/sannysanoff/SDRPlusPlusBrown/build_all.yml?branch=master)
+
+Welcome to **SDR++Black**, my personal take on what SDR++ should be!
+
+I originally built this fork for myself because the existing versions didn't have everything I wanted (such as built-in NXDN, P25, and DMR protocol selection within the DSD demodulator, and a cleaner dropdown UI).
+
+*This is a fork of SDR++Brown, which itself is a fork of the original SDR++.*
+
+**Please do not report bugs in this fork to the original author.**
+If you find issues with SDR++Black, please file an issue on this repository's ISSUES page.
+
+* Be sure to check out [SDR++Brown](https://github.com/sannysanoff/SDRPlusPlusBrown) for the intermediate fork features.
+* Check out the [original upstream project page](https://github.com/AlexandreRouma/SDRPlusPlus) for the original application.
 
 [Changelog](changelog.md)
-
-**Please do not report bugs in this fork to original author. Use original application, it works better.**
-
-**Report bugs in this fork on this page, in ISSUES.** 
-
-Please see [upstream project page](https://github.com/AlexandreRouma/SDRPlusPlus) for the basic list of its features.
-
-Last merge: 2025-06-11
-
-Please see [brown fork page](https://sdrpp-brown.san.systems) for list of fork features.
 
 WINDOWS INSTALL TROUBLESHOOTING: https://youtu.be/Q3CV5U-2IIU
 
@@ -19,7 +22,7 @@ WINDOWS INSTALL TROUBLESHOOTING: https://youtu.be/Q3CV5U-2IIU
 
 Thanks and due respect to:
  
-* original author, Alexandre Rouma, for his great [work](https://github.com/AlexandreRouma/SDRPlusPlus). Due credits go to all contributors in the upstream project. 
+* The original author, Alexandre Rouma, for his great [work](https://github.com/AlexandreRouma/SDRPlusPlus). Due credits go to all contributors in the upstream project.
 * MSHV author, LZ2HV, for his great [work](http://lz2hv.org/mshv).
 * logmmse/python authors for their great [work](https://github.com/wilsonchingg/logmmse).
 * OMLSA authors for their great [idea](https://github.com/yuzhouhe2000/OMLSA-IMCRA) and [implementation](https://github.com/xiaochunxin/OMLSA-MCRA).
@@ -32,7 +35,7 @@ Thanks and due respect to:
 
 ## Feedback
 
-Found an issue? Fork is worse than original? File an [issue](https://github.com/sannysanoff/SDRPlusPlusBrown/issues).
+Found an issue? File an [issue](https://github.com/sannysanoff/SDRPlusPlusBrown/issues).
 
 ## Debugging reminders
 
@@ -54,4 +57,3 @@ Found an issue? Fork is worse than original? File an [issue](https://github.com/
   * use this filename (debug2.keystore) in app/build.gradle along with passwords in the signingConfigs -> debug section.
 
 Good luck.
-

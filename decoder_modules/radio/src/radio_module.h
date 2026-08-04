@@ -503,22 +503,29 @@ private:
         std::sort(sortedModes.begin(), sortedModes.end(),
                   [](const auto& a, const auto& b) { return a.second < b.second; });
 
-        std::string columnsId = "RadioModeColumns##_" + _this->name;
-        ImGui::Columns(numCols, columnsId.c_str(), false);
-
-        for (int i = 0; i < numModes; i++) {
-            const auto& mode = sortedModes[i];
-            int modeId = mode.second;
-            std::string label = mode.first + "##_radio_mode_" + _this->name + "_" + std::to_string(modeId);
-            if (ImGui::RadioButton(label.c_str(), _this->selectedDemodID == modeId) && _this->selectedDemodID != modeId) {
-                _this->selectDemodByID((DemodID)modeId);
-            }
-            if (i < numModes - 1) {
-                ImGui::NextColumn();
+        ImGui::LeftLabel("Mode");
+        std::string currentModeLabel = "";
+        for (const auto& mode : sortedModes) {
+            if (mode.second == _this->selectedDemodID) {
+                currentModeLabel = mode.first;
+                break;
             }
         }
-
-        ImGui::Columns(1);
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+        if (ImGui::BeginCombo(("##_radio_mode_combo_" + _this->name).c_str(), currentModeLabel.c_str())) {
+            for (const auto& mode : sortedModes) {
+                bool isSelected = (_this->selectedDemodID == mode.second);
+                if (ImGui::Selectable(mode.first.c_str(), isSelected)) {
+                    if (!isSelected) {
+                        _this->selectDemodByID((DemodID)mode.second);
+                    }
+                }
+                if (isSelected) {
+                    ImGui::SetItemDefaultFocus();
+                }
+            }
+            ImGui::EndCombo();
+        }
 
         ImGui::EndGroup();
 

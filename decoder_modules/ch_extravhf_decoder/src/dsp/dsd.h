@@ -587,6 +587,7 @@ namespace dsp {
         int scoperate = 3;
         int split = 0;
         int playoffset = 0;
+    public:
         int frameDstar = 1;
         int frameX2tdma = 1;
         int frameP25p1 = 1;
@@ -594,6 +595,7 @@ namespace dsp {
         int frameNxdn96 = 0;
         int frameDmr = 1;
         int frameProvoice = 1;
+    private:
         int modC4fm = 1;
         int modQpsk = 1;
         int modGfsk = 1;

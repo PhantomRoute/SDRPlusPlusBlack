@@ -73,6 +73,26 @@ namespace demod {
         }
 
         void showMenu() {
+            float menuWidth = ImGui::GetContentRegionAvail().x;
+            ImGui::SetNextItemWidth(menuWidth);
+            if (ImGui::BeginCombo("##_olddsd_protocol_selector", "Protocols", ImGuiComboFlags_None)) {
+                bool p25 = dsdDec.frameP25p1 == 1;
+                if (ImGui::Checkbox("P25p1", &p25)) { dsdDec.frameP25p1 = p25 ? 1 : 0; }
+                bool provoice = dsdDec.frameProvoice == 1;
+                if (ImGui::Checkbox("ProVoice", &provoice)) { dsdDec.frameProvoice = provoice ? 1 : 0; }
+                bool x2tdma = dsdDec.frameX2tdma == 1;
+                if (ImGui::Checkbox("X2-TDMA", &x2tdma)) { dsdDec.frameX2tdma = x2tdma ? 1 : 0; }
+                bool dmr = dsdDec.frameDmr == 1;
+                if (ImGui::Checkbox("DMR", &dmr)) { dsdDec.frameDmr = dmr ? 1 : 0; }
+                bool nxdn48 = dsdDec.frameNxdn48 == 1;
+                if (ImGui::Checkbox("NXDN48", &nxdn48)) { dsdDec.frameNxdn48 = nxdn48 ? 1 : 0; }
+                bool nxdn96 = dsdDec.frameNxdn96 == 1;
+                if (ImGui::Checkbox("NXDN96", &nxdn96)) { dsdDec.frameNxdn96 = nxdn96 ? 1 : 0; }
+                bool dstar = dsdDec.frameDstar == 1;
+                if (ImGui::Checkbox("D-STAR", &dstar)) { dsdDec.frameDstar = dstar ? 1 : 0; }
+                ImGui::EndCombo();
+            }
+
             ImVec4 color;
             if(dsdDec.status_sync) {
                 color = ImVec4(0.0f, 1.0f, 0.0f, 1.0f);
