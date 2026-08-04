@@ -249,8 +249,7 @@ namespace dsp {
         // DMR filter
         #define DMR_FILT_ZEROS 60
         constexpr static const float dmrFiltGain = 7.423339364f;
-        float dmrFiltV[DMR_FILT_ZEROS+1];
-        constexpr static const float dmrFiltTaps[DMR_FILT_ZEROS+1] = { 
+        constexpr static const float dmrFiltTaps[DMR_FILT_ZEROS+1] = {
             -0.0083649323f, -0.0265444850f, -0.0428141462f, -0.0537571943f,
             -0.0564141052f, -0.0489161045f, -0.0310068662f, -0.0043393881f,
             +0.0275375106f, +0.0595423283f, +0.0857543325f, +0.1003565948f,
@@ -272,7 +271,6 @@ namespace dsp {
         // NXDN filter
         #define NXDN_FILT_ZEROS 134
         constexpr static const float nxdnFiltGain = 15.95930463f;
-        float nxdnFiltV[NXDN_FILT_ZEROS+1];
         constexpr static const float nxdnFiltTaps[NXDN_FILT_ZEROS+1] = {
             +0.031462429f, +0.031747267f, +0.030401148f, +0.027362877f,
             +0.022653298f, +0.016379869f, +0.008737200f, +0.000003302f,
@@ -1663,6 +1661,7 @@ namespace dsp {
         }
 
         short DSD::dmrFilter(short sample) {
+            static_assert(sizeof(dmrFiltV) / sizeof(float) == DMR_FILT_ZEROS + 1, "dmrFiltV size must match the tap count");
             float sum; int i;
             for (i = 0; i < DMR_FILT_ZEROS; i++)
                 dmrFiltV[i] = dmrFiltV[i+1];
@@ -1677,6 +1676,7 @@ namespace dsp {
         }
 
         short DSD::nxdnFilter(short sample) {
+            static_assert(sizeof(nxdnFiltV) / sizeof(float) == NXDN_FILT_ZEROS + 1, "nxdnFiltV size must match the tap count");
             float sum; int i;
             for (i = 0; i < NXDN_FILT_ZEROS; i++)
                 nxdnFiltV[i] = nxdnFiltV[i+1];

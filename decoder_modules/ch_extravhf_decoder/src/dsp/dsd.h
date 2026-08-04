@@ -559,6 +559,12 @@ namespace dsp {
         char slot1light[8] = " slot1 ";
         int samplesPerSymbol = 10;
         int symbolCenter = 4;
+        // Cosine filter delay lines. These have to be per instance - as file scope
+        // globals two radios both running oldDSD fed each other's samples through
+        // the same filter state. Sizes are checked against the tap counts in
+        // dsd_demod.cpp.
+        float dmrFiltV[61] = {};
+        float nxdnFiltV[135] = {};
         char algid[9] = "________";
         char keyid[17] = "________________";
         int currentslot = 0;
@@ -598,10 +604,21 @@ namespace dsp {
         int frameDstar = 1;
         int frameX2tdma = 1;
         int frameP25p1 = 1;
-        int frameNxdn48 = 1;
-        int frameNxdn96 = 0;
+        int frameNxdn48 = 0;
+        int frameNxdn96 = 1;
         int frameDmr = 1;
         int frameProvoice = 1;
+
+        // NXDN48 is 2400 baud where every other protocol here is 4800, so it needs
+        // twice as many samples per symbol out of the 48kHz input. The decoder only
+        // runs at one rate at a time, which is why upstream dsd makes NXDN48 an
+        // exclusive mode rather than something you can search for alongside the
+        // rest. Without this the NXDN48 sync search runs at the 4800 baud rate and
+        // can only ever match an NXDN96 signal.
+        void setNxdn48SymbolRate(bool enabled) {
+            samplesPerSymbol = enabled ? 20 : 10;
+            symbolCenter = enabled ? 10 : 4;
+        }
     private:
         int modC4fm = 1;
         int modQpsk = 1;

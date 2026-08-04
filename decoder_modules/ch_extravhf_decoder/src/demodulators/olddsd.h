@@ -53,6 +53,15 @@ namespace demod {
             }
             _config->release();
 
+            // A hand edited config could have NXDN48 on alongside the rest, which
+            // the decoder cannot do - see setNxdn48SymbolRate. NXDN48 wins.
+            if (dsdDec.frameNxdn48 == 1) {
+                for (const auto& proto : protocols) {
+                    if (!proto.exclusive) { dsdDec.*proto.flag = 0; }
+                }
+            }
+            dsdDec.setNxdn48SymbolRate(dsdDec.frameNxdn48 == 1);
+
             // Define structure
 
             fmdemod.init(input, getIFSampleRate(), bandwidth, true, false);
@@ -92,16 +101,17 @@ namespace demod {
                 for (const auto& proto : protocols) {
                     bool enabled = dsdDec.*proto.flag == 1;
                     if (ImGui::Checkbox((std::string(proto.label) + "##_olddsd_proto_" + name).c_str(), &enabled)) {
-                        dsdDec.*proto.flag = enabled ? 1 : 0;
-                        _config->acquire();
-                        _config->conf[name][getName()][proto.key] = enabled;
-                        _config->release(true);
+                        setProtocolEnabled(proto, enabled);
+                        saveProtocols();
                     }
                 }
                 ImGui::EndCombo();
             }
             if (protoSummary == "None") {
                 ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "No protocols selected");
+            }
+            if (dsdDec.frameNxdn48 == 1) {
+                ImGui::TextWrapped("NXDN48 decodes on its own, at half the symbol rate. Set bandwidth to ~7000.");
             }
 
             ImVec4 color;
@@ -175,34 +185,58 @@ namespace demod {
 
     private:
 
-        // Frame sync detectors the decoder will attempt, in menu order
+        // Frame sync detectors the decoder will attempt, in menu order. An
+        // exclusive protocol needs its own symbol rate and so cannot be searched
+        // for alongside the others.
         struct Protocol {
             const char* label;
             const char* key;
             int dsp::DSD::* flag;
+            bool exclusive;
         };
 
         inline static const Protocol protocols[] = {
-            { "P25p1", "p25p1", &dsp::DSD::frameP25p1 },
-            { "ProVoice", "provoice", &dsp::DSD::frameProvoice },
-            { "X2-TDMA", "x2tdma", &dsp::DSD::frameX2tdma },
-            { "DMR", "dmr", &dsp::DSD::frameDmr },
-            { "NXDN48", "nxdn48", &dsp::DSD::frameNxdn48 },
-            { "NXDN96", "nxdn96", &dsp::DSD::frameNxdn96 },
-            { "D-STAR", "dstar", &dsp::DSD::frameDstar }
+            { "P25p1", "p25p1", &dsp::DSD::frameP25p1, false },
+            { "ProVoice", "provoice", &dsp::DSD::frameProvoice, false },
+            { "X2-TDMA", "x2tdma", &dsp::DSD::frameX2tdma, false },
+            { "DMR", "dmr", &dsp::DSD::frameDmr, false },
+            { "NXDN48", "nxdn48", &dsp::DSD::frameNxdn48, true },
+            { "NXDN96", "nxdn96", &dsp::DSD::frameNxdn96, false },
+            { "D-STAR", "dstar", &dsp::DSD::frameDstar, false }
         };
+
+        void setProtocolEnabled(const Protocol& proto, bool enabled) {
+            dsdDec.*proto.flag = enabled ? 1 : 0;
+            if (enabled) {
+                for (const auto& other : protocols) {
+                    if (other.flag == proto.flag) { continue; }
+                    if (proto.exclusive || other.exclusive) { dsdDec.*other.flag = 0; }
+                }
+            }
+            dsdDec.setNxdn48SymbolRate(dsdDec.frameNxdn48 == 1);
+        }
+
+        void saveProtocols() {
+            _config->acquire();
+            for (const auto& proto : protocols) {
+                _config->conf[name][getName()][proto.key] = (dsdDec.*proto.flag == 1);
+            }
+            _config->release(true);
+        }
 
         std::string getProtocolSummary() {
             int enabledCount = 0;
+            int sharedCount = 0;
             std::string summary;
             for (const auto& proto : protocols) {
+                if (!proto.exclusive) { sharedCount++; }
                 if (dsdDec.*proto.flag != 1) { continue; }
                 enabledCount++;
                 if (!summary.empty()) { summary += ", "; }
                 summary += proto.label;
             }
             if (enabledCount == 0) { return "None"; }
-            if (enabledCount == IM_ARRAYSIZE(protocols)) { return "All"; }
+            if (enabledCount == sharedCount && dsdDec.frameNxdn48 != 1) { return "Auto (all except NXDN48)"; }
             return summary;
         }
 
