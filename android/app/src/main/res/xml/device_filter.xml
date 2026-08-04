@@ -1,15 +1,79 @@
 <?xml version="1.0" encoding="utf-8"?>
 
+<!--
+    Generated from the VID/PID tables in core/backends/android/backend.cpp.
+    Keep the two in sync: this file decides which devices Android offers to open
+    SDR++ for (and auto-grants permission to), backend.cpp decides which module
+    is allowed to claim the resulting file descriptor.
+
+    Values MUST be decimal. android.hardware.usb.DeviceFilter.read() parses these
+    with radix 10 unless the value carries an explicit 0x prefix, and it swallows
+    the NumberFormatException, leaving the field at -1 -- which matches() treats as
+    a wildcard. Bare hex like vendor-id="1d50" therefore silently becomes "any",
+    which is how this file used to claim every USB device attached to the phone.
+-->
 <resources>
-    <usb-device vendor-id="03eb" product-id="800c"  /> <!-- Airspy HF+ Discovery -->
-    <usb-device vendor-id="1d50" product-id="60a1"  /> <!--  Airspy  -->
-    <usb-device vendor-id="1df7" product-id="2500"  /> <!-- SDRRlay RSP1 -->
-    <usb-device vendor-id="1df7" product-id="3000"  /> <!-- SDRRlay RSP1a -->
-    <usb-device vendor-id="1df7" product-id="3010"  /> <!-- SDRRlay RSP2/pro -->
-    <usb-device vendor-id="1df7" product-id="3020"  /> <!-- SDRRlay RSPduo  -->
-    <usb-device vendor-id="1df7" product-id="3030"  /> <!-- SDRRlay RSPdx  -->
-    <usb-device vendor-id="1d50" product-id="6089"  /> <!--  hackrf  -->
-    <usb-device vendor-id="1d50" product-id="6108"  /> <!--  Myriad-RF LimeSDR  -->
-    <usb-device vendor-id="0bda" product-id="2838"  /> <!--  RTL-SDR  -->
-    <usb-device vendor-id="05da" product-id="2838"  /> <!--  RTL-SDR ? -->
+
+    <!-- AIRSPYHF_VIDPIDS -->
+    <usb-device vendor-id="1003" product-id="32780" /> <!-- 0x03eb:0x800c Airspy HF+ / HF+ Discovery -->
+
+    <!-- AIRSPY_VIDPIDS -->
+    <usb-device vendor-id="7504" product-id="24737" /> <!-- 0x1d50:0x60a1 Airspy R2 / Mini, HydraSDR RFOne -->
+
+    <!-- HACKRF_VIDPIDS -->
+    <usb-device vendor-id="7504" product-id="24651" /> <!-- 0x1d50:0x604b HackRF Jawbreaker -->
+    <usb-device vendor-id="7504" product-id="24713" /> <!-- 0x1d50:0x6089 HackRF One -->
+    <usb-device vendor-id="7504" product-id="52245" /> <!-- 0x1d50:0xcc15 rad1o -->
+
+    <!-- HYDRASDR_VIDPIDS -->
+    <!--  7504 24737 already listed above (0x1d50:0x60a1) -->
+    <usb-device vendor-id="14511" product-id="1" />  <!-- 0x38af:0x0001 HydraSDR RFOne -->
+
+    <!-- RTL_SDR_VIDPIDS -->
+    <usb-device vendor-id="3034" product-id="10290" /> <!-- 0x0bda:0x2832 Generic RTL2832U -->
+    <usb-device vendor-id="3034" product-id="10296" /> <!-- 0x0bda:0x2838 Generic RTL2832U OEM -->
+    <usb-device vendor-id="1043" product-id="26240" /> <!-- 0x0413:0x6680 DigitalNow Quad DVB-T PCI-E -->
+    <usb-device vendor-id="1043" product-id="28431" /> <!-- 0x0413:0x6f0f Leadtek WinFast DTV Dongle mini D -->
+    <usb-device vendor-id="1112" product-id="28799" /> <!-- 0x0458:0x707f Genius TVGo DVB-T03 (rev B) -->
+    <usb-device vendor-id="3277" product-id="169" /> <!-- 0x0ccd:0x00a9 Terratec Cinergy T Stick Black (rev 1) -->
+    <usb-device vendor-id="3277" product-id="179" /> <!-- 0x0ccd:0x00b3 Terratec NOXON DAB/DAB+ (rev 1) -->
+    <usb-device vendor-id="3277" product-id="180" /> <!-- 0x0ccd:0x00b4 Terratec NOXON DAB/DAB+ (rev 2) -->
+    <usb-device vendor-id="3277" product-id="181" /> <!-- 0x0ccd:0x00b5 Terratec NOXON DAB/DAB+ (rev 3) -->
+    <usb-device vendor-id="3277" product-id="183" /> <!-- 0x0ccd:0x00b7 Terratec NOXON DAB/DAB+ (rev 4) -->
+    <usb-device vendor-id="3277" product-id="184" /> <!-- 0x0ccd:0x00b8 Terratec NOXON DAB/DAB+ (rev 5) -->
+    <usb-device vendor-id="3277" product-id="185" /> <!-- 0x0ccd:0x00b9 Terratec NOXON DAB/DAB+ (rev 6) -->
+    <usb-device vendor-id="3277" product-id="192" /> <!-- 0x0ccd:0x00c0 Terratec NOXON DAB/DAB+ (rev 7) -->
+    <usb-device vendor-id="3277" product-id="198" /> <!-- 0x0ccd:0x00c6 Terratec NOXON DAB/DAB+ (rev 8) -->
+    <usb-device vendor-id="3277" product-id="211" /> <!-- 0x0ccd:0x00d3 Terratec Cinergy T Stick RC (rev 3) -->
+    <usb-device vendor-id="3277" product-id="215" /> <!-- 0x0ccd:0x00d7 Terratec T Stick PLUS -->
+    <usb-device vendor-id="3277" product-id="224" /> <!-- 0x0ccd:0x00e0 Terratec NOXON DAB/DAB+ (rev 2, OEM) -->
+    <usb-device vendor-id="5460" product-id="20512" /> <!-- 0x1554:0x5020 PixelView PV-DT235U(RN) -->
+    <usb-device vendor-id="5620" product-id="305" /> <!-- 0x15f4:0x0131 Astrometa DVB-T/DVB-T2 -->
+    <usb-device vendor-id="5620" product-id="307" /> <!-- 0x15f4:0x0133 HanfTek DAB+FM+DVB-T -->
+    <usb-device vendor-id="6235" product-id="1568" /> <!-- 0x185b:0x0620 Compro Videomate U620F -->
+    <usb-device vendor-id="6235" product-id="1616" /> <!-- 0x185b:0x0650 Compro Videomate U650F -->
+    <usb-device vendor-id="6235" product-id="1664" /> <!-- 0x185b:0x0680 Compro Videomate U680F -->
+    <usb-device vendor-id="7040" product-id="54163" /> <!-- 0x1b80:0xd393 GIGABYTE GT-U7300 -->
+    <usb-device vendor-id="7040" product-id="54164" /> <!-- 0x1b80:0xd394 DIKOM USB-DVBT HD -->
+    <usb-device vendor-id="7040" product-id="54165" /> <!-- 0x1b80:0xd395 Peak 102569AGPK -->
+    <usb-device vendor-id="7040" product-id="54167" /> <!-- 0x1b80:0xd397 KWorld KW-UB450-T -->
+    <usb-device vendor-id="7040" product-id="54168" /> <!-- 0x1b80:0xd398 Zaapa ZT-MINDVBZP -->
+    <usb-device vendor-id="7040" product-id="54173" /> <!-- 0x1b80:0xd39d SVEON STV20 DVB-T USB & FM -->
+    <usb-device vendor-id="7040" product-id="54180" /> <!-- 0x1b80:0xd3a4 Twintech UT-40 -->
+    <usb-device vendor-id="7040" product-id="54184" /> <!-- 0x1b80:0xd3a8 ASUS U3100MINI_PLUS_V2 -->
+    <usb-device vendor-id="7040" product-id="54191" /> <!-- 0x1b80:0xd3af SVEON STV27 DVB-T USB & FM -->
+    <usb-device vendor-id="7040" product-id="54192" /> <!-- 0x1b80:0xd3b0 SVEON STV21 DVB-T USB & FM -->
+    <usb-device vendor-id="7449" product-id="4353" /> <!-- 0x1d19:0x1101 Dexatek DK DVB-T (Logilink VG0002A) -->
+    <usb-device vendor-id="7449" product-id="4354" /> <!-- 0x1d19:0x1102 Dexatek DK DVB-T (MSI DigiVox mini II v3) -->
+    <usb-device vendor-id="7449" product-id="4355" /> <!-- 0x1d19:0x1103 Dexatek DK 5217 DVB-T -->
+    <usb-device vendor-id="7449" product-id="4356" /> <!-- 0x1d19:0x1104 MSI DigiVox Micro HD -->
+    <usb-device vendor-id="8013" product-id="43011" /> <!-- 0x1f4d:0xa803 Sweex DVB-T USB -->
+    <usb-device vendor-id="8013" product-id="47107" /> <!-- 0x1f4d:0xb803 GTek T803 -->
+    <usb-device vendor-id="8013" product-id="51203" /> <!-- 0x1f4d:0xc803 Lifeview LV5TDeluxe -->
+    <usb-device vendor-id="8013" product-id="53894" /> <!-- 0x1f4d:0xd286 MyGica TD312 -->
+    <usb-device vendor-id="8013" product-id="55299" /> <!-- 0x1f4d:0xd803 PROlectrix DV107669 -->
+
+    <!-- SDRplay and LimeSDR were listed here but have no Android USB path in
+         backend.cpp, so the app could only offer to open devices it cannot
+         drive. Re-add them alongside a getDeviceFD() table. -->
 </resources>

@@ -39,13 +39,13 @@ import android.view.inputmethod.InputMethodManager
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.PermissionChecker
+import org.xmlpull.v1.XmlPullParser
 import java.io.BufferedReader
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
-import java.util.Locale
 import java.util.concurrent.LinkedBlockingQueue
 
 
@@ -65,44 +65,157 @@ class MainActivity : NativeActivity(), SensorEventListener {
     public var density: Float = 1.0f;
     var batteryManager: BatteryManager? = null;
 
+    // Registered once in onCreate and torn down in onDestroy. It used to unregister
+    // itself after the very first permission answer, which meant the app got exactly
+    // one attempt at one device per launch.
+    private var usbReceiverRegistered = false;
+
     private val usbReceiver = object : BroadcastReceiver() {
-        var devList: HashMap<String, UsbDevice> = HashMap<String, UsbDevice>();
-        var devListRequested = 1;
-
         override fun onReceive(context: Context, intent: Intent) {
-            Log.w("SDR++", intent.action.toString())
-            if (ACTION_USB_PERMISSION == intent.action) {
-                Log.w("SDR++", "USB Permission on receive")
-                synchronized(this) {
-                    var _this = context as MainActivity;
-//                _this.SDR_device = intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
-                    _this.SDR_device = intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
-                    if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) {
-                        Log.w("SDR++", "USB Permission granted")
-                        _this.SDR_conn = _this.usbManager!!.openDevice(_this.SDR_device);
-
-                        // Save SDR info
-                        _this.SDR_VID = _this.SDR_device!!.getVendorId();
-                        _this.SDR_PID = _this.SDR_device!!.getProductId()
-                        _this.SDR_FD = _this.SDR_conn!!.getFileDescriptor();
-                    } else {
-                        Log.w("SDR++", "USB Permission non-granted")
+            Log.w("SDR++", "USB broadcast: " + intent.action.toString())
+            val dev: UsbDevice? = intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
+            when (intent.action) {
+                ACTION_USB_PERMISSION -> {
+                    synchronized(this@MainActivity) {
+                        if (!intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) {
+                            Log.w("SDR++", "USB permission denied for $dev")
+                        } else if (dev == null) {
+                            Log.w("SDR++", "USB permission granted but no device in the intent")
+                        } else {
+                            Log.w("SDR++", "USB permission granted for $dev")
+                            claimSdrDevice(dev)
+                        }
                     }
-
-                    // Whatever the hell this does
-                    context.unregisterReceiver(this);
-
-                    // Hide again the system bars
-                    _this.hideSystemBars();
+                    hideSystemBars()
                 }
 
-//                devListRequested++;
-//                if (devListRequested <= devList.size) {
-//                    usbManager!!.requestPermission(devList[devListRequested-1], makePermissionIntent());
-//                }
+                UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
+                    // Hot plug while we are already running. The launcher intent only
+                    // covers the case where attaching started the app.
+                    if (dev != null) { offerDevice(dev) }
+                }
 
+                UsbManager.ACTION_USB_DEVICE_DETACHED -> {
+                    synchronized(this@MainActivity) {
+                        if (dev != null && dev.deviceName == SDR_device?.deviceName) {
+                            Log.w("SDR++", "SDR detached, releasing fd")
+                            releaseSdrDevice()
+                        }
+                    }
+                }
             }
         }
+    }
+
+    // The set of devices this build can actually open, read back from the same
+    // resource Android uses to decide whether to offer us the device at all, so
+    // there is only one list to keep up to date.
+    private var cachedUsbIds: Set<Pair<Int, Int>>? = null
+
+    private fun knownUsbIds(): Set<Pair<Int, Int>> {
+        cachedUsbIds?.let { return it }
+        val ids = HashSet<Pair<Int, Int>>()
+        try {
+            val parser = resources.getXml(R.xml.device_filter)
+            var event = parser.eventType
+            while (event != XmlPullParser.END_DOCUMENT) {
+                if (event == XmlPullParser.START_TAG && parser.name == "usb-device") {
+                    val vid = parseFilterInt(parser.getAttributeValue(null, "vendor-id"))
+                    val pid = parseFilterInt(parser.getAttributeValue(null, "product-id"))
+                    if (vid != null && pid != null) { ids.add(Pair(vid, pid)) }
+                }
+                event = parser.next()
+            }
+            parser.close()
+        } catch (e: Exception) {
+            Log.e(TAG, "Could not read device_filter.xml: ${e.message}")
+        }
+        Log.w("SDR++", "USB: know ${ids.size} device ids")
+        cachedUsbIds = ids
+        return ids
+    }
+
+    // Mirrors android.hardware.usb.DeviceFilter.read(): decimal unless 0x prefixed.
+    private fun parseFilterInt(value: String?): Int? {
+        if (value == null) { return null }
+        return try {
+            if (value.length > 2 && value[0] == '0' && (value[1] == 'x' || value[1] == 'X')) {
+                value.substring(2).toInt(16)
+            } else {
+                value.toInt(10)
+            }
+        } catch (e: NumberFormatException) {
+            Log.e(TAG, "Bad number in device_filter.xml: '$value'")
+            null
+        }
+    }
+
+    private fun isKnownSdr(dev: UsbDevice): Boolean {
+        return knownUsbIds().contains(Pair(dev.vendorId, dev.productId))
+    }
+
+    // Takes ownership of a device we already hold permission for.
+    private fun claimSdrDevice(dev: UsbDevice): Boolean {
+        if (!isKnownSdr(dev)) {
+            Log.w("SDR++", "Ignoring non-SDR device $dev")
+            return false
+        }
+        if (SDR_FD != -1) {
+            if (dev.deviceName == SDR_device?.deviceName) { return true }
+            // Already driving another SDR. Leave it alone rather than pull the file
+            // descriptor out from under libusb on the native side.
+            Log.w("SDR++", "Already using ${SDR_device?.deviceName}, ignoring $dev")
+            return false
+        }
+        val conn: UsbDeviceConnection? = usbManager?.openDevice(dev)
+        if (conn == null) {
+            Log.e(TAG, "openDevice failed for $dev")
+            return false
+        }
+        SDR_device = dev
+        SDR_conn = conn
+        SDR_VID = dev.vendorId
+        SDR_PID = dev.productId
+        SDR_FD = conn.fileDescriptor
+        Log.w("SDR++", "Using SDR " + dev.deviceName + " " +
+            Integer.toHexString(SDR_VID) + ":" + Integer.toHexString(SDR_PID) + " fd=" + SDR_FD)
+        return true
+    }
+
+    private fun releaseSdrDevice() {
+        try {
+            SDR_conn?.close()
+        } catch (e: Exception) {
+            Log.e(TAG, "Closing USB connection: ${e.message}")
+        }
+        SDR_conn = null
+        SDR_device = null
+        SDR_FD = -1
+        SDR_VID = -1
+        SDR_PID = -1
+    }
+
+    // Claims the device if we may, asks for it if we may not, ignores it if it
+    // isn't something we can drive. Asking about hubs, docks and mice is what used
+    // to burn the app's single permission request on the wrong device.
+    private fun offerDevice(dev: UsbDevice) {
+        if (!isKnownSdr(dev)) { return }
+        if (usbManager?.hasPermission(dev) == true) {
+            claimSdrDevice(dev)
+        } else {
+            Log.w("SDR++", "Requesting USB permission for $dev")
+            usbManager?.requestPermission(dev, makeUsbPermissionIntent())
+        }
+    }
+
+    // Android hands the device straight to us, already granted, when attaching it
+    // is what launched the app. Dropping that intent on the floor is what forced
+    // the old code down the guess-a-device path.
+    private fun handleUsbIntent(intent: Intent?) {
+        if (intent?.action != UsbManager.ACTION_USB_DEVICE_ATTACHED) { return }
+        val dev: UsbDevice? = intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)
+        Log.w("SDR++", "Launched by USB attach: $dev")
+        if (dev != null) { offerDevice(dev) }
     }
 
     val REQUIRED_PERMISSIONS = arrayOf(
@@ -197,6 +310,35 @@ class MainActivity : NativeActivity(), SensorEventListener {
     override fun onDestroy() {
         super.onDestroy()
         sensorManager.unregisterListener(this)
+        if (usbReceiverRegistered) {
+            try {
+                unregisterReceiver(usbReceiver)
+            } catch (e: IllegalArgumentException) {
+                // Already gone, nothing to do.
+            }
+            usbReceiverRegistered = false
+        }
+    }
+
+    private fun registerUsbReceiver() {
+        if (usbReceiverRegistered) { return }
+        val filter = IntentFilter(ACTION_USB_PERMISSION)
+        filter.addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
+        filter.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            // Required once the app targets 34; harmless before that.
+            registerReceiver(usbReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(usbReceiver, filter)
+        }
+        usbReceiverRegistered = true
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        Log.w("SDR++", "onNewIntent: ${intent.action}")
+        handleUsbIntent(intent)
     }
 
     fun proceedWithPermissions() {
@@ -207,41 +349,28 @@ class MainActivity : NativeActivity(), SensorEventListener {
             Log.w("SDR++", "PERM: All REQUIRED_PERMISSIONS passed..")
             this.permissionsPassed.add(PERMISSION_REQUEST_CODE);
         }
-        if (permissionsPassed.contains(PERMISSION_REQUEST_CODE)) {
+        if (!permissionsPassed.contains(PERMISSION_REQUEST_CODE)) {
+            // Marked before asking, not after. REQUIRED_PERMISSIONS contains entries a
+            // normal app can never hold (BATTERY_STATS is signature|privileged), so
+            // waiting for them all to be granted loops the dialog forever.
+            permissionsPassed.add(PERMISSION_REQUEST_CODE);
             Log.w("SDR++", "PERM: Requesting REQUIRED_PERMISSIONS..")
             ActivityCompat.requestPermissions(this, REQUIRED_PERMISSIONS, PERMISSION_REQUEST_CODE);
             return;
         }
         if (!permissionsPassed.contains(PERMISSION_REQUEST_CODE+1)) {
+            permissionsPassed.add(PERMISSION_REQUEST_CODE+1)
             Log.w("SDR++", "PERM: Requesting USB permissions..")
-            // USB stuff
-            usbManager = getSystemService(USB_SERVICE) as UsbManager;
-            val filter = IntentFilter(ACTION_USB_PERMISSION)
-            registerReceiver(usbReceiver, filter)
 
-
-            // Get permission for all USB devices
-            usbReceiver.devList = usbManager!!.deviceList;
-            Log.w("SDR++", "PERM: Dev list size: " + usbReceiver.devList.size.toString())
-
-            val permissionIntent = makeUsbPermissionIntent()
-
-            for ((name, dev) in usbReceiver.devList) {
+            // Ask about every SDR that is already plugged in, not just whichever one
+            // happened to come first out of an unordered HashMap.
+            val devList = usbManager!!.deviceList
+            Log.w("SDR++", "PERM: Dev list size: " + devList.size.toString())
+            for ((name, dev) in devList) {
                 Log.w("SDR++", "PERM: Dev list item: $name $dev")
-                val prodName = dev.productName?.toUpperCase(Locale.US) ?: ""
-                if (prodName.indexOf("Network") != -1
-                    || prodName.indexOf("LAN") != -1
-                    || prodName.indexOf("KEYBOARD") != -1
-                    || prodName.indexOf("MOUSE") != -1
-                )
-                // ignore LAN device.
-                    continue
-                Log.w("SDR++", "PERM: Req USB perm: $dev")
-                usbManager!!.requestPermission(dev, permissionIntent);
-                return
+                offerDevice(dev)
             }
             Log.w("SDR++", "PERM: End req all USB perm:")
-            permissionsPassed.add(PERMISSION_REQUEST_CODE+1)
         }
 
         if (!permissionsPassed.contains(PERMISSION_REQUEST_CODE+2)) {
@@ -348,6 +477,13 @@ class MainActivity : NativeActivity(), SensorEventListener {
 
         scanAudioDevices()
 
+        usbManager = getSystemService(USB_SERVICE) as UsbManager
+        registerUsbReceiver()
+
+        // If attaching the SDR is what started us, Android has already granted us
+        // that device and passed it in. Take it before falling back to asking.
+        handleUsbIntent(getIntent())
+
         proceedWithPermissions();
     }
 
@@ -431,22 +567,18 @@ class MainActivity : NativeActivity(), SensorEventListener {
         return response
     }
 
-    private fun makeUsbPermissionIntent(): PendingIntent? {
-        try {
-            return PendingIntent.getBroadcast(
-                this@MainActivity,
-                PERMISSION_REQUEST_CODE+1,
-                Intent(ACTION_USB_PERMISSION),
-                0
-            )
-        } catch (e: Exception) {
-            return PendingIntent.getBroadcast(
-                this@MainActivity,
-                PERMISSION_REQUEST_CODE+1,
-                Intent(ACTION_USB_PERMISSION),
-                FLAG_MUTABLE
-            )
-        }
+    private fun makeUsbPermissionIntent(): PendingIntent {
+        // setPackage makes the intent explicit. Android 14 refuses to create a mutable
+        // PendingIntent around an implicit one, and the system needs it mutable so it
+        // can attach EXTRA_DEVICE to the broadcast.
+        val intent = Intent(ACTION_USB_PERMISSION).setPackage(packageName)
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) FLAG_MUTABLE else 0
+        return PendingIntent.getBroadcast(
+            this@MainActivity,
+            PERMISSION_REQUEST_CODE+1,
+            intent,
+            flags
+        )
     }
 
     fun getThisCacheDir(): String {
