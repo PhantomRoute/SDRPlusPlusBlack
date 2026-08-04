@@ -2,14 +2,25 @@
 set -e
 cd /root
 
+# GitHub's runners are Azure VMs, and archive.ubuntu.com has repeatedly dropped
+# connections from them mid index fetch. Use the mirror inside Azure instead.
+# Handles both the classic sources.list and the deb822 layout used from 24.04.
+for src in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do
+    if [ -f "$src" ]; then
+        sed -i 's|http://archive.ubuntu.com|http://azure.archive.ubuntu.com|g' "$src"
+    fi
+done
+
+# Retry dropped connections rather than giving up on the first one.
+printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\n' > /etc/apt/apt.conf.d/80-ci-retries
+
 # Update repos to get a more recent cmake version
-apt update
+apt update -o APT::Update::Error-Mode=any
 apt install -y unzip gpg wget
 wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | gpg --dearmor - | tee /usr/share/keyrings/kitware-archive-keyring.gpg >/dev/null
 echo 'deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ bionic main' | tee /etc/apt/sources.list.d/kitware.list >/dev/null
-apt update
+apt update -o APT::Update::Error-Mode=any
 
-# Install dependencies and tools
 apt install -y unzip build-essential cmake git libfftw3-dev libglfw3-dev libvolk1-dev libzstd-dev libairspy-dev \
             libiio-dev libad9361-dev librtaudio-dev libhackrf-dev librtlsdr-dev libbladerf-dev liblimesuite-dev p7zip-full wget portaudio19-dev \
             libcodec2-dev libudev-dev autoconf libtool xxd libspdlog-dev liborc-0.4-dev
