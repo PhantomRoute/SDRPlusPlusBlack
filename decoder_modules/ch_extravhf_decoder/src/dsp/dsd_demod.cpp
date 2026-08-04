@@ -1162,9 +1162,14 @@ namespace dsp {
                                      inverted ? INV_NXDN_MS_DATA_SYNC : NXDN_MS_DATA_SYNC };
             int voiceErrors = NXDN_FSW_LEN * 2;
             int dataErrors = NXDN_FSW_LEN * 2;
+            // Plain comparisons rather than std::min: windows.h defines min as a
+            // macro here, which is why NewDSD::process above has to pick between the
+            // two, and std::min in this file expands to std::(...) under MSVC.
             for (int i = 0; i < 2; i++) {
-                voiceErrors = std::min (voiceErrors, syncErrors (test, voice[i], NXDN_FSW_LEN));
-                dataErrors = std::min (dataErrors, syncErrors (test, data[i], NXDN_FSW_LEN));
+                int voiceFit = syncErrors (test, voice[i], NXDN_FSW_LEN);
+                int dataFit = syncErrors (test, data[i], NXDN_FSW_LEN);
+                if (voiceFit < voiceErrors) { voiceErrors = voiceFit; }
+                if (dataFit < dataErrors) { dataErrors = dataFit; }
             }
             if (dataErrors < voiceErrors) { return inverted ? 17 : 16; }
             return inverted ? 9 : 8;
