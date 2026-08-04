@@ -601,23 +601,47 @@ namespace dsp {
         int split = 0;
         int playoffset = 0;
     public:
+        // Defaults follow upstream dsd's initOpts, except D-STAR which this fork
+        // has always had on. ProVoice is off because it cannot decode in the shared
+        // 4800 baud mode at all - see setDemodMode.
         int frameDstar = 1;
         int frameX2tdma = 1;
         int frameP25p1 = 1;
         int frameNxdn48 = 0;
         int frameNxdn96 = 1;
         int frameDmr = 1;
-        int frameProvoice = 1;
+        int frameProvoice = 0;
 
-        // NXDN48 is 2400 baud where every other protocol here is 4800, so it needs
-        // twice as many samples per symbol out of the 48kHz input. The decoder only
-        // runs at one rate at a time, which is why upstream dsd makes NXDN48 an
-        // exclusive mode rather than something you can search for alongside the
-        // rest. Without this the NXDN48 sync search runs at the 4800 baud rate and
-        // can only ever match an NXDN96 signal.
-        void setNxdn48SymbolRate(bool enabled) {
-            samplesPerSymbol = enabled ? 20 : 10;
-            symbolCenter = enabled ? 10 : 4;
+        // Upstream dsd's -fi/-fn/-fp are demodulator modes, not just extra sync
+        // patterns to compare against. Each one pins the modulation to GFSK, and
+        // NXDN48/ProVoice also change the symbol rate. Enabling them purely as a
+        // sync search - which is all this port did - cannot work: the modulation
+        // auto-detect sits on C4FM or QPSK, so getSymbol picks the wrong sample
+        // window and runs the wrong timing recovery, and the sync never matches.
+        //
+        // MODE_AUTO is upstream's default: 4800 baud with the modulation detected
+        // from the symbol transitions, which is what the C4FM protocols want.
+        enum DemodMode {
+            MODE_AUTO,
+            MODE_NXDN48,
+            MODE_NXDN96,
+            MODE_PROVOICE
+        };
+
+        void setDemodMode(DemodMode mode) {
+            switch (mode) {
+                case MODE_NXDN48:   samplesPerSymbol = 20; symbolCenter = 10; break;
+                case MODE_PROVOICE: samplesPerSymbol = 5;  symbolCenter = 2;  break;
+                default:            samplesPerSymbol = 10; symbolCenter = 4;  break;
+            }
+
+            // Clearing the other two stops the numflips heuristic in getFrameSync
+            // from moving rfMod off GFSK, the same way the -fn/-fi/-fp cases do.
+            bool forceGfsk = (mode != MODE_AUTO);
+            modC4fm = forceGfsk ? 0 : 1;
+            modQpsk = forceGfsk ? 0 : 1;
+            modGfsk = 1;
+            if (forceGfsk) { rfMod = 2; }
         }
     private:
         int modC4fm = 1;

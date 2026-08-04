@@ -53,14 +53,7 @@ namespace demod {
             }
             _config->release();
 
-            // A hand edited config could have NXDN48 on alongside the rest, which
-            // the decoder cannot do - see setNxdn48SymbolRate. NXDN48 wins.
-            if (dsdDec.frameNxdn48 == 1) {
-                for (const auto& proto : protocols) {
-                    if (!proto.exclusive) { dsdDec.*proto.flag = 0; }
-                }
-            }
-            dsdDec.setNxdn48SymbolRate(dsdDec.frameNxdn48 == 1);
+            dsdDec.setDemodMode(getSelectedMode());
 
             // Define structure
 
@@ -110,8 +103,11 @@ namespace demod {
             if (protoSummary == "None") {
                 ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "No protocols selected");
             }
-            if (dsdDec.frameNxdn48 == 1) {
-                ImGui::TextWrapped("NXDN48 decodes on its own, at half the symbol rate. Set bandwidth to ~7000.");
+            if (getSelectedMode() == dsp::DSD::MODE_AUTO) {
+                for (const auto& proto : protocols) {
+                    if (dsdDec.*proto.flag != 1 || !proto.ownRate) { continue; }
+                    ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.4f, 1.0f), "Untick the rest to decode %s", proto.label);
+                }
             }
 
             ImVec4 color;
@@ -185,35 +181,47 @@ namespace demod {
 
     private:
 
-        // Frame sync detectors the decoder will attempt, in menu order. An
-        // exclusive protocol needs its own symbol rate and so cannot be searched
-        // for alongside the others.
+        // Frame sync detectors the decoder will attempt, in menu order. Protocols
+        // with a mode other than MODE_AUTO reconfigure the demodulator, so they
+        // only get that configuration when nothing else is selected - the same
+        // trade upstream dsd makes between its default search set and -fi/-fn/-fp.
+        // ownRate marks the ones that additionally change the symbol rate, which
+        // means they cannot sync at all unless they are the only selection.
         struct Protocol {
             const char* label;
             const char* key;
             int dsp::DSD::* flag;
-            bool exclusive;
+            dsp::DSD::DemodMode mode;
+            bool ownRate;
         };
 
         inline static const Protocol protocols[] = {
-            { "P25p1", "p25p1", &dsp::DSD::frameP25p1, false },
-            { "ProVoice", "provoice", &dsp::DSD::frameProvoice, false },
-            { "X2-TDMA", "x2tdma", &dsp::DSD::frameX2tdma, false },
-            { "DMR", "dmr", &dsp::DSD::frameDmr, false },
-            { "NXDN48", "nxdn48", &dsp::DSD::frameNxdn48, true },
-            { "NXDN96", "nxdn96", &dsp::DSD::frameNxdn96, false },
-            { "D-STAR", "dstar", &dsp::DSD::frameDstar, false }
+            { "P25p1", "p25p1", &dsp::DSD::frameP25p1, dsp::DSD::MODE_AUTO, false },
+            { "ProVoice", "provoice", &dsp::DSD::frameProvoice, dsp::DSD::MODE_PROVOICE, true },
+            { "X2-TDMA", "x2tdma", &dsp::DSD::frameX2tdma, dsp::DSD::MODE_AUTO, false },
+            { "DMR", "dmr", &dsp::DSD::frameDmr, dsp::DSD::MODE_AUTO, false },
+            { "NXDN48", "nxdn48", &dsp::DSD::frameNxdn48, dsp::DSD::MODE_NXDN48, true },
+            { "NXDN96", "nxdn96", &dsp::DSD::frameNxdn96, dsp::DSD::MODE_NXDN96, false },
+            { "D-STAR", "dstar", &dsp::DSD::frameDstar, dsp::DSD::MODE_AUTO, false }
         };
+
+        // The pinned protocol's mode when exactly one is selected, MODE_AUTO
+        // otherwise.
+        dsp::DSD::DemodMode getSelectedMode() {
+            const Protocol* only = NULL;
+            int enabledCount = 0;
+            for (const auto& proto : protocols) {
+                if (dsdDec.*proto.flag != 1) { continue; }
+                enabledCount++;
+                only = &proto;
+            }
+            if (enabledCount == 1) { return only->mode; }
+            return dsp::DSD::MODE_AUTO;
+        }
 
         void setProtocolEnabled(const Protocol& proto, bool enabled) {
             dsdDec.*proto.flag = enabled ? 1 : 0;
-            if (enabled) {
-                for (const auto& other : protocols) {
-                    if (other.flag == proto.flag) { continue; }
-                    if (proto.exclusive || other.exclusive) { dsdDec.*other.flag = 0; }
-                }
-            }
-            dsdDec.setNxdn48SymbolRate(dsdDec.frameNxdn48 == 1);
+            dsdDec.setDemodMode(getSelectedMode());
         }
 
         void saveProtocols() {
@@ -226,17 +234,15 @@ namespace demod {
 
         std::string getProtocolSummary() {
             int enabledCount = 0;
-            int sharedCount = 0;
             std::string summary;
             for (const auto& proto : protocols) {
-                if (!proto.exclusive) { sharedCount++; }
                 if (dsdDec.*proto.flag != 1) { continue; }
                 enabledCount++;
                 if (!summary.empty()) { summary += ", "; }
                 summary += proto.label;
             }
             if (enabledCount == 0) { return "None"; }
-            if (enabledCount == sharedCount && dsdDec.frameNxdn48 != 1) { return "Auto (all except NXDN48)"; }
+            if (enabledCount == IM_ARRAYSIZE(protocols)) { return "All"; }
             return summary;
         }
 
