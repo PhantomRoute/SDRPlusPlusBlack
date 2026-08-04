@@ -52,9 +52,20 @@ ModuleManager::Module_t ModuleManager::loadModule(std::string path) {
 #endif
 #ifdef _WIN32
     auto wide = wstr::str2wstr(path);
-    wchar_t wideBuf[1024];
-    GetShortPathNameW(wide.c_str(), wideBuf, sizeof(wideBuf)/sizeof(TCHAR));
-    mod.handle = LoadLibraryExW(wideBuf, NULL, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS | LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR);
+    const size_t shortBufLen = 1024;
+    wchar_t shortBuf[shortBufLen];
+    // GetShortPathNameW writes nothing at all when it fails, and nothing when the
+    // buffer is too small either, so an unchecked call hands LoadLibraryExW a
+    // stack buffer that was never initialised. The old size argument divided by
+    // sizeof(TCHAR), which is 1 here because UNICODE is not defined, claiming
+    // twice the space the buffer actually has. LoadLibraryExW takes the wide path
+    // natively, so falling back to it costs nothing.
+    const wchar_t* loadPath = wide.c_str();
+    DWORD shortLen = GetShortPathNameW(wide.c_str(), shortBuf, shortBufLen);
+    if (shortLen > 0 && shortLen < shortBufLen) {
+        loadPath = shortBuf;
+    }
+    mod.handle = LoadLibraryExW(loadPath, NULL, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS | LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR);
 
 
     if (mod.handle == NULL) {
@@ -62,10 +73,12 @@ ModuleManager::Module_t ModuleManager::loadModule(std::string path) {
         LPWSTR errorMessageBuffer = NULL;
         size_t size = FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
                                      NULL, err, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPWSTR)&errorMessageBuffer, 0, NULL);
-        auto narrow = wstr::wstr2str(errorMessageBuffer);
+        // FormatMessageW leaves the pointer null when it fails, and building a
+        // std::wstring from null turned a failed module load into a crash.
+        std::string narrow = (size && errorMessageBuffer) ? wstr::wstr2str(errorMessageBuffer) : "unknown error";
 
         flog::error("Couldn't LoadLibraryExW {0}. Error: {1} - {2}", path.c_str(), (int64_t)err, narrow.c_str());
-        LocalFree(errorMessageBuffer);
+        if (errorMessageBuffer) { LocalFree(errorMessageBuffer); }
         mod.handle = NULL;
         return mod;
     }

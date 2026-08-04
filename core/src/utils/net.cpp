@@ -279,13 +279,27 @@ namespace net {
         // Pre-allocate buffer
         ULONG size = sizeof(IP_ADAPTER_ADDRESSES);
         PIP_ADAPTER_ADDRESSES addresses = (PIP_ADAPTER_ADDRESSES)malloc(size);
+        if (!addresses) {
+            throw std::runtime_error("Out of memory listing network interfaces");
+        }
 
-        // Reallocate to real size
-        if (GetAdaptersAddresses(AF_INET, 0, NULL, addresses, &size) == ERROR_BUFFER_OVERFLOW) {
-            addresses = (PIP_ADAPTER_ADDRESSES)realloc(addresses, size);
-            if (GetAdaptersAddresses(AF_INET, 0, NULL, addresses, &size)) {
-                throw std::exception("Could not list network interfaces");
+        // Reallocate to real size. Anything other than success leaves the buffer
+        // uninitialised, and only ERROR_BUFFER_OVERFLOW used to be noticed, so
+        // any other failure fell through to walking freshly malloc'd memory as
+        // though it held adapters.
+        ULONG ret = GetAdaptersAddresses(AF_INET, 0, NULL, addresses, &size);
+        if (ret == ERROR_BUFFER_OVERFLOW) {
+            PIP_ADAPTER_ADDRESSES grown = (PIP_ADAPTER_ADDRESSES)realloc(addresses, size);
+            if (!grown) {
+                free(addresses);
+                throw std::runtime_error("Out of memory listing network interfaces");
             }
+            addresses = grown;
+            ret = GetAdaptersAddresses(AF_INET, 0, NULL, addresses, &size);
+        }
+        if (ret != NO_ERROR) {
+            free(addresses);
+            throw std::runtime_error("Could not list network interfaces");
         }
 
         // Save data
@@ -295,7 +309,13 @@ namespace net {
             auto ip = iface->FirstUnicastAddress;
             if (!ip || ip->Address.lpSockaddr->sa_family != AF_INET) { continue; }
             info.address = ntohl(*(uint32_t*)&ip->Address.lpSockaddr->sa_data[2]);
-            info.netmask = ~((1 << (32 - ip->OnLinkPrefixLength)) - 1);
+            // A zero prefix length would shift by the full width of the type,
+            // which is undefined and on x86 wraps round to a shift of zero,
+            // producing 255.255.255.255 instead of 0.0.0.0.
+            ULONG prefix = ip->OnLinkPrefixLength;
+            if (prefix == 0) { info.netmask = 0; }
+            else if (prefix >= 32) { info.netmask = 0xFFFFFFFF; }
+            else { info.netmask = ~((1u << (32 - prefix)) - 1u); }
             info.broadcast = info.address | (~info.netmask);
             ifaces[utfConv.to_bytes(iface->FriendlyName)] = info;
         }
@@ -355,6 +375,7 @@ namespace net {
 
         // Enable listening
         if (::listen(s, SOMAXCONN) != 0) {
+            closeSocket(s);
             throw std::runtime_error("Could start listening for connections");
             return NULL;
         }
@@ -419,22 +440,44 @@ namespace net {
             closeSocket(s);
             throw std::runtime_error("Connection timeout");
         }
+
+        // Becoming writable is not the same as having connected: a refused or
+        // unreachable peer reports POLLOUT too. Only the socket knows.
+        int sockErr = 0;
+        socklen_t sockErrLen = sizeof(sockErr);
+        if (getsockopt(s, SOL_SOCKET, SO_ERROR, &sockErr, &sockErrLen) < 0 || sockErr != 0) {
+            closeSocket(s);
+            throw std::runtime_error("Could not connect: " + std::string(strerror(sockErr)));
+        }
 #else
-        fd_set set;
+        // Winsock signals a failed connect in exceptfds and a successful one in
+        // writefds. Passing a single set for both made them indistinguishable,
+        // so a dead endpoint handed back a socket that never delivered anything.
+        // The except set is also what stops a refused connect from sitting here
+        // for the full timeout, since it never becomes writable.
+        fd_set writeSet, exceptSet;
 
-
-        FD_ZERO(&set);
-        FD_SET(s, &set);
+        FD_ZERO(&writeSet);
+        FD_SET(s, &writeSet);
+        FD_ZERO(&exceptSet);
+        FD_SET(s, &exceptSet);
 
         // Set timeout
         timeval tv;
         tv.tv_sec = 5;
         tv.tv_usec = 0;
         // Wait for data
-        int err = select(s+1, NULL, &set, &set, &tv);
+        int err = select(s+1, NULL, &writeSet, &exceptSet, &tv);
         if (err <= 0) {
             closeSocket(s);
             throw std::runtime_error("Connection timeout");
+        }
+        if (FD_ISSET(s, &exceptSet) || !FD_ISSET(s, &writeSet)) {
+            int sockErr = 0;
+            int sockErrLen = sizeof(sockErr);
+            getsockopt(s, SOL_SOCKET, SO_ERROR, (char*)&sockErr, &sockErrLen);
+            closeSocket(s);
+            throw std::runtime_error("Could not connect: error " + std::to_string(sockErr));
         }
 #endif
 
@@ -453,13 +496,13 @@ namespace net {
         // Create socket
         SockHandle_t s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 
-        // If the remote address is multicast, allow multicast connections
-        #ifdef _WIN32
-                const char enable = allowBroadcast;
-        #else
-                int enable = allowBroadcast;
-        #endif
-        if (setsockopt(s, SOL_SOCKET, SO_BROADCAST, &enable, sizeof(int)) < 0) {
+        // If the remote address is multicast, allow multicast connections.
+        // Both platforms want a four byte value here and only the pointer type
+        // differs, so keep one int and cast at the call. Declaring a char on
+        // Windows while still passing sizeof(int) read three bytes of whatever
+        // happened to sit next to it on the stack.
+        int enable = allowBroadcast;
+        if (setsockopt(s, SOL_SOCKET, SO_BROADCAST, (const char*)&enable, sizeof(enable)) < 0) {
             closeSocket(s);
             throw std::runtime_error("Could not enable broadcast on socket");
             return NULL;
