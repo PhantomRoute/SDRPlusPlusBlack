@@ -1,22 +1,15 @@
 # SDR++Black
 
-![Build Status](https://img.shields.io/github/actions/workflow/status/PhantomRoute/SDRPlusPlusBlack/build_all.yml?branch=master)
+![Build Status](https://img.shields.io/github/actions/workflow/status/sannysanoff/SDRPlusPlusBrown/build_all.yml?branch=master)
 
 Welcome to **SDR++Black**, my personal take on what SDR++ should be!
 
-I originally built this fork for myself because the existing versions didn't have everything I wanted (such as being able to pick which protocols the DSD demodulators sync on, and a cleaner dropdown UI).
-
-Both digital voice modes in the Radio module now have a **Protocols** dropdown. Leave everything ticked and it auto-detects; untick a protocol to stop it syncing on that one.
-
-* **DSD** - P25p1, DMR
-* **oldDSD** - P25p1, DMR, NXDN48, NXDN96, D-STAR, X2-TDMA, ProVoice
-
-Your selection is saved per VFO, so NXDN96 (which is off by default) stays on once you enable it.
+I originally built this fork for myself because the existing versions didn't have everything I wanted (such as built-in NXDN, P25, and DMR protocol selection within the DSD demodulator, and a cleaner dropdown UI).
 
 *This is a fork of SDR++Brown, which itself is a fork of the original SDR++.*
 
 **Please do not report bugs in this fork to the original author.**
-If you find issues with SDR++Black, please file an [issue](https://github.com/PhantomRoute/SDRPlusPlusBlack/issues) on this repository.
+If you find issues with SDR++Black, please file an issue on this repository's ISSUES page.
 
 * Be sure to check out [SDR++Brown](https://github.com/sannysanoff/SDRPlusPlusBrown) for the intermediate fork features.
 * Check out the [original upstream project page](https://github.com/AlexandreRouma/SDRPlusPlus) for the original application.
@@ -42,7 +35,7 @@ Thanks and due respect to:
 
 ## Feedback
 
-Found an issue? File an [issue](https://github.com/PhantomRoute/SDRPlusPlusBlack/issues).
+Found an issue? File an [issue](https://github.com/sannysanoff/SDRPlusPlusBrown/issues).
 
 ## Debugging reminders
 

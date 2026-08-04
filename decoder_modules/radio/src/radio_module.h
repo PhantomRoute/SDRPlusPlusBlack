@@ -493,6 +493,11 @@ private:
         float menuWidth = ImGui::GetContentRegionAvail().x;
         ImGui::BeginGroup();
 
+        // Dynamically render radio buttons from radioModes vector
+        // Layout: 4 per row, order by id ascending (row-by-row)
+        int numModes = (int)_this->radioModes.size();
+        int numCols = 4;
+
         // Sort modes by id for consistent display order
         std::vector<std::pair<std::string, int>> sortedModes = _this->radioModes;
         std::sort(sortedModes.begin(), sortedModes.end(),

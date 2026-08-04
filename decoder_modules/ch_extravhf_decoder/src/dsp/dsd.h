@@ -53,6 +53,14 @@ namespace dsp {
     class NewDSD : public Processor<uint8_t, short> {
         using base_type = Processor<uint8_t, short>;
     public:
+        int frameDstar = 1;
+        int frameX2tdma = 1;
+        int frameP25p1 = 1;
+        int frameNxdn48 = 1;
+        int frameNxdn96 = 0;
+        int frameDmr = 1;
+        int frameProvoice = 1;
+
         NewDSD() {}
 
         NewDSD(stream<uint8_t>* in) { init(in); }
@@ -134,13 +142,6 @@ namespace dsp {
         P25_status getP25Status() {
             return p25_status;
         }
-
-        // Frame syncs the decoder will search for. Both enabled (the default) is
-        // auto-detect: whichever sync pattern matches first selects the decoder.
-        // These are the only two protocols this decoder implements; the wider set
-        // (NXDN, D-STAR, X2-TDMA, ProVoice) only exists in the old DSD decoder.
-        int frameP25p1 = 1;
-        int frameDmr = 1;
 
     private:
 
@@ -559,12 +560,6 @@ namespace dsp {
         char slot1light[8] = " slot1 ";
         int samplesPerSymbol = 10;
         int symbolCenter = 4;
-        // Cosine filter delay lines. These have to be per instance - as file scope
-        // globals two radios both running oldDSD fed each other's samples through
-        // the same filter state. Sizes are checked against the tap counts in
-        // dsd_demod.cpp.
-        float dmrFiltV[61] = {};
-        float nxdnFiltV[135] = {};
         char algid[9] = "________";
         char keyid[17] = "________________";
         int currentslot = 0;
@@ -600,50 +595,13 @@ namespace dsp {
         int scoperate = 3;
         int split = 0;
         int playoffset = 0;
-    public:
-        // Defaults follow upstream dsd's initOpts, except D-STAR which this fork
-        // has always had on. ProVoice is off because it cannot decode in the shared
-        // 4800 baud mode at all - see setDemodMode.
         int frameDstar = 1;
         int frameX2tdma = 1;
         int frameP25p1 = 1;
-        int frameNxdn48 = 0;
-        int frameNxdn96 = 1;
+        int frameNxdn48 = 1;
+        int frameNxdn96 = 0;
         int frameDmr = 1;
-        int frameProvoice = 0;
-
-        // Upstream dsd's -fi/-fn/-fp are demodulator modes, not just extra sync
-        // patterns to compare against. Each one pins the modulation to GFSK, and
-        // NXDN48/ProVoice also change the symbol rate. Enabling them purely as a
-        // sync search - which is all this port did - cannot work: the modulation
-        // auto-detect sits on C4FM or QPSK, so getSymbol picks the wrong sample
-        // window and runs the wrong timing recovery, and the sync never matches.
-        //
-        // MODE_AUTO is upstream's default: 4800 baud with the modulation detected
-        // from the symbol transitions, which is what the C4FM protocols want.
-        enum DemodMode {
-            MODE_AUTO,
-            MODE_NXDN48,
-            MODE_NXDN96,
-            MODE_PROVOICE
-        };
-
-        void setDemodMode(DemodMode mode) {
-            switch (mode) {
-                case MODE_NXDN48:   samplesPerSymbol = 20; symbolCenter = 10; break;
-                case MODE_PROVOICE: samplesPerSymbol = 5;  symbolCenter = 2;  break;
-                default:            samplesPerSymbol = 10; symbolCenter = 4;  break;
-            }
-
-            // Clearing the other two stops the numflips heuristic in getFrameSync
-            // from moving rfMod off GFSK, the same way the -fn/-fi/-fp cases do.
-            bool forceGfsk = (mode != MODE_AUTO);
-            modC4fm = forceGfsk ? 0 : 1;
-            modQpsk = forceGfsk ? 0 : 1;
-            modGfsk = 1;
-            if (forceGfsk) { rfMod = 2; }
-        }
-    private:
+        int frameProvoice = 1;
         int modC4fm = 1;
         int modQpsk = 1;
         int modGfsk = 1;

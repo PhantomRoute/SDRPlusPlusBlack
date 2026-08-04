@@ -162,7 +162,7 @@ namespace dsp {
                 char framesynctest[25];
                 framesynctest[24] = 0;
                 strncpy (framesynctest, &(framesynctest_buf[framesynctest_p - 23]), 24);
-                if (frameDmr == 1 && ((strcmp (framesynctest, DMR_MS_DATA_SYNC) == 0) || (strcmp (framesynctest, DMR_BS_DATA_SYNC) == 0) || (strcmp (framesynctest, DMR_DIRECT_MODE_TS1_DATA_SYNC) == 0) || (strcmp (framesynctest, DMR_DIRECT_MODE_TS2_DATA_SYNC) == 0))) {
+                if ((strcmp (framesynctest, DMR_MS_DATA_SYNC) == 0) || (strcmp (framesynctest, DMR_BS_DATA_SYNC) == 0) || (strcmp (framesynctest, DMR_DIRECT_MODE_TS1_DATA_SYNC) == 0) || (strcmp (framesynctest, DMR_DIRECT_MODE_TS2_DATA_SYNC) == 0)) {
                     //DMR DATA FRAME SYNC FOUND!
                     framesynctest_offset = framesynctest_p;
                     curr_state = STATE_FSFND_DMR_DATA;
@@ -170,7 +170,7 @@ namespace dsp {
                     frame_status.lasttype = Frame_status::LAST_DMR;
                     break;
                 }
-                if (frameDmr == 1 && ((strcmp (framesynctest, DMR_MS_VOICE_SYNC) == 0) || (strcmp (framesynctest, DMR_BS_VOICE_SYNC) == 0) || (strcmp (framesynctest, DMR_DIRECT_MODE_TS1_VOICE_SYNC) == 0) || (strcmp (framesynctest, DMR_DIRECT_MODE_TS2_VOICE_SYNC) == 0))) {
+                if ((strcmp (framesynctest, DMR_MS_VOICE_SYNC) == 0) || (strcmp (framesynctest, DMR_BS_VOICE_SYNC) == 0) || (strcmp (framesynctest, DMR_DIRECT_MODE_TS1_VOICE_SYNC) == 0) || (strcmp (framesynctest, DMR_DIRECT_MODE_TS2_VOICE_SYNC) == 0)) {
                     //DMR VOICE FRAME SYNC FOUND!
                     framesynctest_offset = framesynctest_p;
                     curr_state = STATE_FSFND_DMR_VOICE;
@@ -180,7 +180,7 @@ namespace dsp {
                     frame_status.lasttype = Frame_status::LAST_DMR;
                     break;
                 }
-                if (frameP25p1 == 1 && strcmp (framesynctest, P25P1_SYNC) == 0) {
+                if (strcmp (framesynctest, P25P1_SYNC) == 0) {
                     //P25p1+ FRAME SYNC FOUND!
                     framesynctest_offset = framesynctest_p;
                     curr_state = STATE_FSFND_P25;
@@ -188,7 +188,7 @@ namespace dsp {
                     frame_status.lasttype = Frame_status::LAST_P25;
                     break;
                 }
-                if (frameP25p1 == 1 && strcmp (framesynctest, INV_P25P1_SYNC) == 0) {
+                if (strcmp (framesynctest, INV_P25P1_SYNC) == 0) {
                     //P25p1- FRAME SYNC FOUND!
                     framesynctest_offset = framesynctest_p;
                     curr_state = STATE_FSFND_P25;
@@ -249,6 +249,7 @@ namespace dsp {
         // DMR filter
         #define DMR_FILT_ZEROS 60
         constexpr static const float dmrFiltGain = 7.423339364f;
+        float dmrFiltV[DMR_FILT_ZEROS+1];
         constexpr static const float dmrFiltTaps[DMR_FILT_ZEROS+1] = {
             -0.0083649323f, -0.0265444850f, -0.0428141462f, -0.0537571943f,
             -0.0564141052f, -0.0489161045f, -0.0310068662f, -0.0043393881f,
@@ -271,6 +272,7 @@ namespace dsp {
         // NXDN filter
         #define NXDN_FILT_ZEROS 134
         constexpr static const float nxdnFiltGain = 15.95930463f;
+        float nxdnFiltV[NXDN_FILT_ZEROS+1];
         constexpr static const float nxdnFiltTaps[NXDN_FILT_ZEROS+1] = {
             +0.031462429f, +0.031747267f, +0.030401148f, +0.027362877f,
             +0.022653298f, +0.016379869f, +0.008737200f, +0.000003302f,
@@ -1661,7 +1663,6 @@ namespace dsp {
         }
 
         short DSD::dmrFilter(short sample) {
-            static_assert(sizeof(dmrFiltV) / sizeof(float) == DMR_FILT_ZEROS + 1, "dmrFiltV size must match the tap count");
             float sum; int i;
             for (i = 0; i < DMR_FILT_ZEROS; i++)
                 dmrFiltV[i] = dmrFiltV[i+1];
@@ -1676,7 +1677,6 @@ namespace dsp {
         }
 
         short DSD::nxdnFilter(short sample) {
-            static_assert(sizeof(nxdnFiltV) / sizeof(float) == NXDN_FILT_ZEROS + 1, "nxdnFiltV size must match the tap count");
             float sum; int i;
             for (i = 0; i < NXDN_FILT_ZEROS; i++)
                 nxdnFiltV[i] = nxdnFiltV[i+1];

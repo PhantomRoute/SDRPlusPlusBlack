@@ -2,11 +2,8 @@
 set -e
 cd /root
 
-# Retry dropped connections rather than giving up on the first one.
-printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\n' > /etc/apt/apt.conf.d/80-ci-retries
-
 # Install dependencies and tools
-apt update -o APT::Update::Error-Mode=any
+apt update
 apt install -y unzip build-essential cmake git libfftw3-dev libglfw3-dev libvolk2-dev libzstd-dev libairspyhf-dev libairspy-dev \
             libiio-dev libad9361-dev librtaudio-dev libhackrf-dev librtlsdr-dev libbladerf-dev liblimesuite-dev p7zip-full wget portaudio19-dev \
             libcodec2-dev autoconf libtool xxd libspdlog-dev liborc-0.4-dev
