@@ -569,12 +569,30 @@ jobs:
           working-directory: ${{runner.workspace}}
           run: git clone https://github.com/sannysanoff/android-sdr-kit
 
+        - name: Point the container build at the Azure apt mirror
+          working-directory: ${{runner.workspace}}/android-sdr-kit
+          run: |
+            # archive.ubuntu.com keeps refusing connections from GitHub's Azure
+            # runners and failing this image build in apt. android-sdr-kit is a
+            # separate repository, so patch it here rather than carrying a fork.
+            # Appended after every FROM so a multi stage build is covered, and
+            # tolerant of a base image with no sources.list.
+            sed -i '/^FROM /a RUN sed -i "s|http://archive.ubuntu.com|http://azure.archive.ubuntu.com|g; s|http://security.ubuntu.com|http://azure.archive.ubuntu.com|g" /etc/apt/sources.list || true' Dockerfile
+            sed -i '/^FROM /a RUN echo "Acquire::Retries \\"5\\";" > /etc/apt/apt.conf.d/80-ci-retries && echo "Acquire::http::Timeout \\"30\\";" >> /etc/apt/apt.conf.d/80-ci-retries || true' Dockerfile
+            cat Dockerfile
+
         - name: Build container
           working-directory: ${{runner.workspace}}/android-sdr-kit
-          run: docker build --progress=plain -t android-sdr-kit .
+          run: |
+            # One retry, because the mirror change cannot help the parts of this
+            # image that fetch from somewhere else.
+            docker build --progress=plain -t android-sdr-kit . && exit 0
+            echo "Container build failed, retrying once in 60s"
+            sleep 60
+            docker build --progress=plain -t android-sdr-kit .
 
         - name: Build
-          run: docker run --name build -v $GITHUB_WORKSPACE:/root/SDRPlusPlus android-sdr-kit /bin/bash -l -c "apt-get update && apt-get install -y unzip && cd /root/SDRPlusPlus/android && gradle -PsdrKitRoot=/sdr-kit --info assembleDebug"
+          run: docker run --name build -v $GITHUB_WORKSPACE:/root/SDRPlusPlus android-sdr-kit /bin/bash -l -c "printf 'Acquire::Retries \"5\";\n' > /etc/apt/apt.conf.d/80-ci-retries && apt-get update && apt-get install -y unzip && cd /root/SDRPlusPlus/android && gradle -PsdrKitRoot=/sdr-kit --info assembleDebug"
 
         - name: Recover APK
           working-directory: ${{runner.workspace}}

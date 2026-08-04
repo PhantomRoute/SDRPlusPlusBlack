@@ -146,6 +146,32 @@ namespace demod {
             ImGui::TextColored(dmr_color, "Last DMR S0: %s S1: %s", dsdDec.status_last_dmr_slot0_burst.c_str(), dsdDec.status_last_dmr_slot1_burst.c_str());
             ImGui::TextColored(nxdn_color, "Last NXDN type: %s", dsdDec.status_last_nxdn_type.c_str());
             ImGui::TextColored(bar_color, "Voice err: %s", dsdDec.status_errorbar.c_str());
+
+            const char* modNames[] = { "C4FM", "QPSK", "GFSK" };
+            int rfMod = dsdDec.getRfMod();
+            ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "Demod: %s %d sps, sync %s",
+                               (rfMod >= 0 && rfMod <= 2) ? modNames[rfMod] : "?",
+                               dsdDec.getSamplesPerSymbol(),
+                               getSyncTypeName(dsdDec.getLastSyncType()));
+        }
+
+        // Names getFrameSync's return codes. A protocol showing up here without
+        // "Mode:" filling in means its sync pattern was matched once but the
+        // second, confirming match never arrived.
+        static const char* getSyncTypeName(int syncType) {
+            switch (syncType) {
+                case 0: case 1:   return "P25p1";
+                case 2: case 3:
+                case 4: case 5:   return "X2-TDMA";
+                case 6: case 7:   return "D-STAR";
+                case 8: case 9:   return "NXDN voice";
+                case 10: case 11:
+                case 12: case 13: return "DMR";
+                case 14: case 15: return "ProVoice";
+                case 16: case 17: return "NXDN data";
+                case 18: case 19: return "D-STAR HD";
+                default:          return "none";
+            }
         }
 
         void setBandwidth(double bandwidth) {

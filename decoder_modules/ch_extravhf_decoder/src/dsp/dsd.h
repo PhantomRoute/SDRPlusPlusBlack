@@ -628,6 +628,14 @@ namespace dsp {
             MODE_PROVOICE
         };
 
+        // Demodulator state for the menu. Whether a protocol fails to sync because
+        // the modulation was detected wrong, because the symbol rate is wrong, or
+        // because the sync pattern is seen once but never confirmed, are three very
+        // different problems that look identical from outside.
+        int getRfMod() { return rfMod; }
+        int getSamplesPerSymbol() { return samplesPerSymbol; }
+        int getLastSyncType() { return lastsynctype; }
+
         void setDemodMode(DemodMode mode) {
             switch (mode) {
                 case MODE_NXDN48:   samplesPerSymbol = 20; symbolCenter = 10; break;
