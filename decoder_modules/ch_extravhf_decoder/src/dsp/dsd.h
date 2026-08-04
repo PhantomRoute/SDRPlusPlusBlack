@@ -723,6 +723,16 @@ namespace dsp {
         #define INV_NXDN_BS_VOICE_SYNC "131311331313331331"
         #define NXDN_BS_VOICE_SYNC     "313133113131113113"
 
+        // Only the first 10 symbols of those patterns are the frame sync word, and
+        // all eight share it - "3131331131", or "1313113313" inverted. The 8 symbols
+        // after it are the LICH, which carries the RF channel type, functional
+        // channel type, option bits and direction, so it changes from transmission to
+        // transmission. Requiring it to equal one of four hardcoded values means any
+        // call whose LICH differs can never sync, at any error tolerance, because the
+        // mismatch is data rather than error. f4exb/dsdcc matches the 10 symbol FSW
+        // on its own for this reason and reads the LICH afterwards.
+        #define NXDN_FSW_LEN 10
+
         #define DMR_BS_DATA_SYNC  "313333111331131131331131"
         #define DMR_BS_VOICE_SYNC "131111333113313313113313"
         #define DMR_MS_DATA_SYNC  "311131133313133331131113"
@@ -804,15 +814,27 @@ namespace dsp {
         void resetFrameSync();
         int getFrameSync();
 
-        // Compares a sync string allowing up to maxErrors mismatched symbols.
-        // maxErrors of 0 is equivalent to strcmp == 0.
-        static bool syncMatches(const char* test, const char* pattern, int maxErrors) {
+        // Compares the first length symbols of a sync string, or all of it when
+        // length is 0, allowing up to maxErrors mismatches. maxErrors 0 with length
+        // 0 is equivalent to strcmp == 0.
+        static bool syncMatches(const char* test, const char* pattern, int maxErrors, int length = 0) {
             int errors = 0;
-            for (int i = 0; pattern[i] != '\0'; i++) {
+            for (int i = 0; pattern[i] != '\0' && (length == 0 || i < length); i++) {
                 if (test[i] != pattern[i] && ++errors > maxErrors) { return false; }
             }
             return true;
         }
+
+        // Counts mismatched symbols over pattern[from] onwards.
+        static int syncErrors(const char* test, const char* pattern, int from) {
+            int errors = 0;
+            for (int i = from; pattern[i] != '\0'; i++) {
+                if (test[i] != pattern[i]) { errors++; }
+            }
+            return errors;
+        }
+
+        static int nxdnFrameSyncType(const char* test, bool inverted);
         short dmrFilter(short sample);
         short nxdnFilter(short sample);
         //MBE

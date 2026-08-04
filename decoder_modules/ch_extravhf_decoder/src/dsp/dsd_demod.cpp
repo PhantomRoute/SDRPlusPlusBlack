@@ -1149,6 +1149,27 @@ namespace dsp {
             }
         }
 
+        // Picks the voice or data frame handler from the LICH symbols that follow the
+        // frame sync word. Exact matching is wrong here, since the LICH is data rather
+        // than a fixed pattern, but szechyjs's voice and data patterns still differ
+        // across those symbols enough to classify against by closest fit. Voice wins a
+        // tie: handing a data frame to the voice decoder costs one frame of noise,
+        // where the reverse silently drops audio.
+        int DSD::nxdnFrameSyncType (const char* test, bool inverted) {
+            const char* voice[2] = { inverted ? INV_NXDN_BS_VOICE_SYNC : NXDN_BS_VOICE_SYNC,
+                                     inverted ? INV_NXDN_MS_VOICE_SYNC : NXDN_MS_VOICE_SYNC };
+            const char* data[2]  = { inverted ? INV_NXDN_BS_DATA_SYNC : NXDN_BS_DATA_SYNC,
+                                     inverted ? INV_NXDN_MS_DATA_SYNC : NXDN_MS_DATA_SYNC };
+            int voiceErrors = NXDN_FSW_LEN * 2;
+            int dataErrors = NXDN_FSW_LEN * 2;
+            for (int i = 0; i < 2; i++) {
+                voiceErrors = std::min (voiceErrors, syncErrors (test, voice[i], NXDN_FSW_LEN));
+                dataErrors = std::min (dataErrors, syncErrors (test, data[i], NXDN_FSW_LEN));
+            }
+            if (dataErrors < voiceErrors) { return inverted ? 17 : 16; }
+            return inverted ? 9 : 8;
+        }
+
         int DSD::getFrameSync() {
             int symbol, i, lsum, dibit;
             /* detects frame sync and returns frame type
@@ -1425,93 +1446,37 @@ namespace dsp {
                 }
                 if ((frameNxdn96 == 1) || (frameNxdn48 == 1)) {
                     strncpy (framesynctest18, (framesynctest_p - 17), 18);
-                    if ((syncMatches (framesynctest18, NXDN_BS_VOICE_SYNC, nxdnSyncTolerance)) || (syncMatches (framesynctest18, NXDN_MS_VOICE_SYNC, nxdnSyncTolerance))) {
-                        if ((lastsynctype == 8) || (lastsynctype == 16)) {
+                    // Match the frame sync word only - see NXDN_FSW_LEN. The window
+                    // stays 18 symbols wide so the frame stays aligned exactly where
+                    // the old full width compare left it, and processNXDNVoice's dibit
+                    // skip is still correct; the trailing LICH symbols are simply not
+                    // required to match any more.
+                    bool nxdnInv = false;
+                    bool nxdnSync = syncMatches (framesynctest18, NXDN_BS_VOICE_SYNC, nxdnSyncTolerance, NXDN_FSW_LEN);
+                    if (!nxdnSync) {
+                        nxdnSync = syncMatches (framesynctest18, INV_NXDN_BS_VOICE_SYNC, nxdnSyncTolerance, NXDN_FSW_LEN);
+                        nxdnInv = nxdnSync;
+                    }
+                    if (nxdnSync) {
+                        int frameType = nxdnFrameSyncType (framesynctest18, nxdnInv);
+                        // Same confirmation the full width compare used: an NXDN sync
+                        // of the same polarity has to have been seen already.
+                        bool confirmed = nxdnInv ? ((lastsynctype == 9) || (lastsynctype == 17))
+                                                 : ((lastsynctype == 8) || (lastsynctype == 16));
+                        if (confirmed) {
                             carrier = 1;
                             offset = framesynctest_pos;
                             max = ((max) + framesynclmax) / 2;
                             min = ((min) + framesynclmin) / 2;
-                            if (samplesPerSymbol == 20) {
-                                sprintf(ftype, " NXDN48      ");
-                                if (errorbars == 1) {
-                                    printFrameSync ( "+NXDN48", framesynctest_pos + 1, framesyncmodulation);
-                                }
-                            } else {
-                                sprintf(ftype, " NXDN96      ");
-                                if (errorbars == 1) {
-                                    printFrameSync ( "+NXDN96", framesynctest_pos + 1, framesyncmodulation);
-                                }
+                            const char* rate = (samplesPerSymbol == 20) ? "NXDN48" : "NXDN96";
+                            sprintf(ftype, " %-12s", rate);
+                            if (errorbars == 1) {
+                                printFrameSync (std::string (nxdnInv ? "-" : "+") + rate, framesynctest_pos + 1, framesyncmodulation);
                             }
-                            lastsynctype = 8;
-                            return (8);
+                            lastsynctype = frameType;
+                            return (frameType);
                         } else {
-                            lastsynctype = 8;
-                        }
-                    } else if ((syncMatches (framesynctest18, INV_NXDN_BS_VOICE_SYNC, nxdnSyncTolerance)) || (syncMatches (framesynctest18, INV_NXDN_MS_VOICE_SYNC, nxdnSyncTolerance))) {
-                        if ((lastsynctype == 9) || (lastsynctype == 17)) {
-                            carrier = 1;
-                            offset = framesynctest_pos;
-                            max = ((max) + framesynclmax) / 2;
-                            min = ((min) + framesynclmin) / 2;
-                            if (samplesPerSymbol == 20) {
-                                sprintf(ftype, " NXDN48      ");
-                                if (errorbars == 1) {
-                                    printFrameSync ( "-NXDN48", framesynctest_pos + 1, framesyncmodulation);
-                                }
-                            } else {
-                                sprintf(ftype, " NXDN96      ");
-                                if (errorbars == 1) {
-                                    printFrameSync ( "-NXDN96", framesynctest_pos + 1, framesyncmodulation);
-                                }
-                            }
-                            lastsynctype = 9;
-                            return (9);
-                        } else {
-                            lastsynctype = 9;
-                        }
-                    } else if ((syncMatches (framesynctest18, NXDN_BS_DATA_SYNC, nxdnSyncTolerance)) || (syncMatches (framesynctest18, NXDN_MS_DATA_SYNC, nxdnSyncTolerance))) {
-                        if ((lastsynctype == 8) || (lastsynctype == 16)) {
-                            carrier = 1;
-                            offset = framesynctest_pos;
-                            max = ((max) + framesynclmax) / 2;
-                            min = ((min) + framesynclmin) / 2;
-                            if (samplesPerSymbol == 20) {
-                                sprintf(ftype, " NXDN48      ");
-                                if (errorbars == 1) {
-                                    printFrameSync ( "+NXDN48", framesynctest_pos + 1, framesyncmodulation);
-                                }
-                            } else {
-                                sprintf(ftype, " NXDN96      ");
-                                if (errorbars == 1) {
-                                    printFrameSync ( "+NXDN96", framesynctest_pos + 1, framesyncmodulation);
-                                }
-                            }
-                            lastsynctype = 16;
-                            return (16);
-                        } else {
-                            lastsynctype = 16;
-                        }
-                    } else if ((syncMatches (framesynctest18, INV_NXDN_BS_DATA_SYNC, nxdnSyncTolerance)) || (syncMatches (framesynctest18, INV_NXDN_MS_DATA_SYNC, nxdnSyncTolerance))) {
-                        if ((lastsynctype == 9) || (lastsynctype == 17)) {
-                            carrier = 1;
-                            offset = framesynctest_pos;
-                            max = ((max) + framesynclmax) / 2;
-                            min = ((min) + framesynclmin) / 2;
-                            if (samplesPerSymbol == 20) {
-                                sprintf(ftype, " NXDN48      ");
-                                if (errorbars == 1) {
-                                    printFrameSync ( "-NXDN48", framesynctest_pos + 1, framesyncmodulation);
-                                }
-                            } else {
-                                sprintf(ftype, " NXDN96      ");
-                                if (errorbars == 1) {
-                                    printFrameSync ( "-NXDN96", framesynctest_pos + 1, framesyncmodulation);
-                                }
-                            }
-                            lastsynctype = 17;
-                            return (17);
-                        } else {
-                            lastsynctype = 17;
+                            lastsynctype = frameType;
                         }
                     }
                 }
