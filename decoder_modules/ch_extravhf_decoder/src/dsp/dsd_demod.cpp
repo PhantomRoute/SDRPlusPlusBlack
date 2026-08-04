@@ -514,7 +514,16 @@ namespace dsp {
 
             // continuous update of min/max in rfMod=1 (QPSK) mode
             // in c4fm min/max must only be updated during sync
-            if (rfMod == 1) {
+            //
+            // GFSK is tracked too. Upstream left it on the estimate taken at sync,
+            // which for NXDN means the slicer runs a whole frame on thresholds that
+            // started at noCarrier's 15000 and only halve toward the real level once
+            // per sync. NXDN's deviation is small enough that umid then sits well
+            // above the outer symbols and every one of them is read as an inner one,
+            // so the frame syncs and the audio is still noise. dsdcc tracks levels
+            // continuously for every modulation. C4FM is deliberately left alone,
+            // since DMR and P25 decode correctly as they are.
+            if (rfMod == 1 || (rfMod == 2 && trackLevelsForGfsk)) {
                 lmin = (sbuf2[0] + sbuf2[1]) / 2;
                 lmax = (sbuf2[(ssize - 1)] + sbuf2[(ssize - 2)]) / 2;
                 minbuf[midx] = lmin;

@@ -54,6 +54,9 @@ namespace demod {
             if (_config->conf[name][getName()].contains("nxdnSyncTolerance")) {
                 dsdDec.nxdnSyncTolerance = _config->conf[name][getName()]["nxdnSyncTolerance"];
             }
+            if (_config->conf[name][getName()].contains("trackLevelsForGfsk")) {
+                dsdDec.trackLevelsForGfsk = _config->conf[name][getName()]["trackLevelsForGfsk"];
+            }
             _config->release();
 
             dsdDec.setDemodMode(getSelectedMode());
@@ -120,6 +123,13 @@ namespace demod {
                     dsdDec.nxdnSyncTolerance = tolerant ? 1 : 0;
                     _config->acquire();
                     _config->conf[name][getName()]["nxdnSyncTolerance"] = dsdDec.nxdnSyncTolerance;
+                    _config->release(true);
+                }
+                // Off is upstream's behaviour: slicer levels frozen at whatever they
+                // were when the frame synced.
+                if (ImGui::Checkbox(("Track levels (GFSK)##_olddsd_gfsktrack_" + name).c_str(), &dsdDec.trackLevelsForGfsk)) {
+                    _config->acquire();
+                    _config->conf[name][getName()]["trackLevelsForGfsk"] = dsdDec.trackLevelsForGfsk;
                     _config->release(true);
                 }
             }

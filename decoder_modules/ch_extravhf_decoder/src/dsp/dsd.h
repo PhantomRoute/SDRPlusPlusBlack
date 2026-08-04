@@ -637,6 +637,11 @@ namespace dsp {
         // off exact matching. 0 restores the old exact-compare behaviour.
         int nxdnSyncTolerance = 1;
 
+        // Whether the slicer levels are tracked continuously in GFSK, or left on the
+        // estimate taken when the frame synced - see use_symbol. Off restores
+        // upstream's behaviour, for comparing the two on a live signal.
+        bool trackLevelsForGfsk = true;
+
         // Demodulator state for the menu. Whether a protocol fails to sync because
         // the modulation was detected wrong, because the symbol rate is wrong, or
         // because the sync pattern is seen once but never confirmed, are three very
