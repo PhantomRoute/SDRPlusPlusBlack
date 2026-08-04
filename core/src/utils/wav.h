@@ -56,6 +56,10 @@ namespace wav {
 
         size_t getSamplesWritten() { return samplesWritten; }
 
+        // True once the container has hit the 4GB a WAV header can describe.
+        // See riff::Writer::isFull.
+        bool isFull() { return rw.isFull(); }
+
         void write(float* samples, int count);
 
     private:

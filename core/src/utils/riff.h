@@ -36,6 +36,12 @@ namespace riff {
 
         void write(const uint8_t* data, size_t len);
 
+        // True once the file has hit the 4GB ceiling a RIFF container can
+        // describe. Further writes are dropped rather than corrupting the
+        // header, so a caller that wants an unbroken recording should start a
+        // new file when this goes true.
+        bool isFull();
+
     private:
         void beginRIFF(const char form[4]);
         void endRIFF();
@@ -43,6 +49,8 @@ namespace riff {
         std::recursive_mutex mtx;
         std::ofstream file;
         std::stack<ChunkDesc> chunks;
+        uint64_t totalSize = 0;
+        bool full = false;
     };
 
     // class Reader {

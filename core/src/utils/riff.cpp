@@ -1,6 +1,7 @@
 #include "riff.h"
 #include <string.h>
 #include <stdexcept>
+#include "flog.h"
 
 namespace riff {
     const char* RIFF_SIGNATURE      = "RIFF";
@@ -21,6 +22,10 @@ namespace riff {
         // Open file
         file = std::ofstream(path, std::ios::out | std::ios::binary);
         if (!file.is_open()) { return false; }
+
+        // Reset the size accounting for the new file
+        totalSize = 0;
+        full = false;
 
         // Begin RIFF chunk
         beginRIFF(form);
@@ -75,6 +80,7 @@ namespace riff {
         memcpy(desc.hdr.id, id, sizeof(desc.hdr.id));
         desc.hdr.size = 0;
         file.write((char*)&desc.hdr, sizeof(ChunkHeader));
+        totalSize += sizeof(ChunkHeader);
 
         // Save descriptor
         chunks.push(desc);
@@ -105,14 +111,35 @@ namespace riff {
         }
     }
 
+    bool Writer::isFull() {
+        std::lock_guard<std::recursive_mutex> lck(mtx);
+        return full;
+    }
+
     void Writer::write(const uint8_t* data, size_t len) {
         std::lock_guard<std::recursive_mutex> lck(mtx);
 
         if (chunks.empty()) {
             throw std::runtime_error("No chunk to write into");
         }
+
+        // Every chunk size in a RIFF file is 32 bits, including the outer one
+        // that spans the whole file. Past 4GB they wrap silently: the file keeps
+        // growing on disk while its header describes a size that is simply
+        // wrong, and players either stop early or reject it. Stop at the ceiling
+        // instead, so what does get written stays a valid file. At 2.4Msps
+        // 16 bit IQ that is a little under eight minutes.
+        if (full) { return; }
+        if (len > UINT32_MAX - totalSize) {
+            full = true;
+            flog::error("RIFF file reached the 4GB limit a WAV header can describe, dropping further data");
+            return;
+        }
+
         file.write((char*)data, len);
-        chunks.top().hdr.size += len;
+        totalSize += len;
+        // Bounded above, so the narrowing is safe and the cast says so.
+        chunks.top().hdr.size += (uint32_t)len;
     }
 
     void Writer::beginRIFF(const char form[4]) {
