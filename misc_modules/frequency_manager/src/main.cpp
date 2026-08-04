@@ -851,13 +851,23 @@ private:
 
             if (clampedRectMax.x - clampedRectMin.x > 0) {
                 auto newRect = ImRect{clampedRectMin, clampedRectMax};
-again:
-                for (const auto &existing: _this->rects) {
-                    if (existing.rect.Overlaps(newRect)) {
-                        newRect.Min.y += layoutOverlapStep;
-                        newRect.Max.y += layoutOverlapStep;
-                        goto again;
+                // Step the label past anything already placed. Each pass pushes it one
+                // row further from the edge it started at, so it settles after at most
+                // one row per label already drawn - that is the bound. It also stops
+                // as soon as the label leaves the band, since the check below is going
+                // to drop it anyway and there is nothing left to collide with.
+                for (size_t attempt = 0; attempt <= _this->rects.size(); attempt++) {
+                    bool overlaps = false;
+                    for (const auto &existing: _this->rects) {
+                        if (existing.rect.Overlaps(newRect)) {
+                            overlaps = true;
+                            break;
+                        }
                     }
+                    if (!overlaps) { break; }
+                    if (newRect.Min.y < args.min.y || newRect.Max.y > args.max.y) { break; }
+                    newRect.Min.y += layoutOverlapStep;
+                    newRect.Max.y += layoutOverlapStep;
                 }
                 clampedRectMax = newRect.Max;
                 clampedRectMin = newRect.Min;
@@ -913,6 +923,10 @@ again:
 
         for(auto &d: _this->rects) {
             if (ImGui::IsMouseHoveringRect(d.rect.Min, d.rect.Max)) {
+                // rects is rebuilt from waterfallBookmarks on every redraw, so the
+                // index should always be live. Check it regardless - the cost of
+                // being wrong here is an out of bounds read on a vector.
+                if (d.index < 0 || d.index >= (int)_this->waterfallBookmarks.size()) { continue; }
                 inALabel = true;
                 hoveredBookmark = _this->waterfallBookmarks[d.index];
                 hoveredBookmarkName = hoveredBookmark.bookmarkName;
