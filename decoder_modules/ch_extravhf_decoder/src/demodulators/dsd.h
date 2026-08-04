@@ -71,7 +71,18 @@ namespace demod {
 
         void init(std::string name, ConfigManager* config, dsp::stream<dsp::complex_t>* input, double bandwidth, double audioSR) {
             this->name = name;
+            this->_config = config;
             registerInstance();
+
+            // Load config
+            _config->acquire();
+            for (const auto& proto : protocols) {
+                if (_config->conf[name][getName()].contains(proto.key)) {
+                    bool enabled = _config->conf[name][getName()][proto.key];
+                    decoder.*proto.flag = enabled ? 1 : 0;
+                }
+            }
+            _config->release();
 
             // Define structure
 
@@ -193,6 +204,26 @@ namespace demod {
 
         void showMenu() {
             float menuWidth = ImGui::GetContentRegionAvail().x;
+
+            std::string protoSummary = getProtocolSummary();
+            ImGui::LeftLabel("Protocols");
+            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+            if (ImGui::BeginCombo(("##_dsd_protocol_selector_" + name).c_str(), protoSummary.c_str())) {
+                for (const auto& proto : protocols) {
+                    bool enabled = decoder.*proto.flag == 1;
+                    if (ImGui::Checkbox((std::string(proto.label) + "##_dsd_proto_" + name).c_str(), &enabled)) {
+                        decoder.*proto.flag = enabled ? 1 : 0;
+                        _config->acquire();
+                        _config->conf[name][getName()][proto.key] = enabled;
+                        _config->release(true);
+                    }
+                }
+                ImGui::EndCombo();
+            }
+            if (protoSummary == "None") {
+                ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "No protocols selected");
+            }
+
             ImGui::Text("Signal constellation+slicer levels: ");
             ImGui::SetNextItemWidth(menuWidth);
             constDiag.draw(ImVec2(0, 20));
@@ -303,6 +334,34 @@ namespace demod {
             }
         }
 
+        // Frame syncs the decoder will search for, in menu order. Everything
+        // enabled means auto-detect. NXDN, D-STAR, X2-TDMA and ProVoice are not
+        // implemented by this decoder - use the oldDSD mode for those.
+        struct Protocol {
+            const char* label;
+            const char* key;
+            int dsp::NewDSD::* flag;
+        };
+
+        inline static const Protocol protocols[] = {
+            { "P25p1", "p25p1", &dsp::NewDSD::frameP25p1 },
+            { "DMR", "dmr", &dsp::NewDSD::frameDmr }
+        };
+
+        std::string getProtocolSummary() {
+            int enabledCount = 0;
+            std::string summary;
+            for (const auto& proto : protocols) {
+                if (decoder.*proto.flag != 1) { continue; }
+                enabledCount++;
+                if (!summary.empty()) { summary += ", "; }
+                summary += proto.label;
+            }
+            if (enabledCount == 0) { return "None"; }
+            if (enabledCount == IM_ARRAYSIZE(protocols)) { return "Auto (P25p1, DMR)"; }
+            return summary;
+        }
+
         float bw = 12500.0;
 
         inline static std::mutex registryMtx;
@@ -326,6 +385,7 @@ namespace demod {
         dsp::convert::MonoToStereo outputMts;
 
         std::string name;
+        ConfigManager* _config = NULL;
 
         static void _constDiagSinkHandler(float* data, int count, void* ctx) {
             DSD* _this = (DSD*)ctx;

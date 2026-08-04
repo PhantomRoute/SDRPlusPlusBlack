@@ -135,6 +135,13 @@ namespace dsp {
             return p25_status;
         }
 
+        // Frame syncs the decoder will search for. Both enabled (the default) is
+        // auto-detect: whichever sync pattern matches first selects the decoder.
+        // These are the only two protocols this decoder implements; the wider set
+        // (NXDN, D-STAR, X2-TDMA, ProVoice) only exists in the old DSD decoder.
+        int frameP25p1 = 1;
+        int frameDmr = 1;
+
     private:
 
         int inSymsCtr = 0;

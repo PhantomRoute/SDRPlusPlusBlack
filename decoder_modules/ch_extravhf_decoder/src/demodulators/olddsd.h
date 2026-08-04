@@ -10,6 +10,7 @@
 #include <dsp/stream.h>
 #include <dsp/sink/handler_sink.h>
 #include <gui/widgets/constellation_diagram.h>
+#include <gui/style.h>
 #include "../dsp/dsd.h"
 #include <dsp/clock_recovery/fd.h>
 #include <dsp/clock_recovery/mm.h>
@@ -40,6 +41,17 @@ namespace demod {
 
         void init(std::string name, ConfigManager* config, dsp::stream<dsp::complex_t>* input, double bandwidth, double audioSR) {
             this->name = name;
+            this->_config = config;
+
+            // Load config
+            _config->acquire();
+            for (const auto& proto : protocols) {
+                if (_config->conf[name][getName()].contains(proto.key)) {
+                    bool enabled = _config->conf[name][getName()][proto.key];
+                    dsdDec.*proto.flag = enabled ? 1 : 0;
+                }
+            }
+            _config->release();
 
             // Define structure
 
@@ -73,24 +85,23 @@ namespace demod {
         }
 
         void showMenu() {
-            float menuWidth = ImGui::GetContentRegionAvail().x;
-            ImGui::SetNextItemWidth(menuWidth);
-            if (ImGui::BeginCombo("##_olddsd_protocol_selector", "Protocols", ImGuiComboFlags_None)) {
-                bool p25 = dsdDec.frameP25p1 == 1;
-                if (ImGui::Checkbox("P25p1", &p25)) { dsdDec.frameP25p1 = p25 ? 1 : 0; }
-                bool provoice = dsdDec.frameProvoice == 1;
-                if (ImGui::Checkbox("ProVoice", &provoice)) { dsdDec.frameProvoice = provoice ? 1 : 0; }
-                bool x2tdma = dsdDec.frameX2tdma == 1;
-                if (ImGui::Checkbox("X2-TDMA", &x2tdma)) { dsdDec.frameX2tdma = x2tdma ? 1 : 0; }
-                bool dmr = dsdDec.frameDmr == 1;
-                if (ImGui::Checkbox("DMR", &dmr)) { dsdDec.frameDmr = dmr ? 1 : 0; }
-                bool nxdn48 = dsdDec.frameNxdn48 == 1;
-                if (ImGui::Checkbox("NXDN48", &nxdn48)) { dsdDec.frameNxdn48 = nxdn48 ? 1 : 0; }
-                bool nxdn96 = dsdDec.frameNxdn96 == 1;
-                if (ImGui::Checkbox("NXDN96", &nxdn96)) { dsdDec.frameNxdn96 = nxdn96 ? 1 : 0; }
-                bool dstar = dsdDec.frameDstar == 1;
-                if (ImGui::Checkbox("D-STAR", &dstar)) { dsdDec.frameDstar = dstar ? 1 : 0; }
+            std::string protoSummary = getProtocolSummary();
+            ImGui::LeftLabel("Protocols");
+            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+            if (ImGui::BeginCombo(("##_olddsd_protocol_selector_" + name).c_str(), protoSummary.c_str())) {
+                for (const auto& proto : protocols) {
+                    bool enabled = dsdDec.*proto.flag == 1;
+                    if (ImGui::Checkbox((std::string(proto.label) + "##_olddsd_proto_" + name).c_str(), &enabled)) {
+                        dsdDec.*proto.flag = enabled ? 1 : 0;
+                        _config->acquire();
+                        _config->conf[name][getName()][proto.key] = enabled;
+                        _config->release(true);
+                    }
+                }
                 ImGui::EndCombo();
+            }
+            if (protoSummary == "None") {
+                ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "No protocols selected");
             }
 
             ImVec4 color;
@@ -164,6 +175,37 @@ namespace demod {
 
     private:
 
+        // Frame sync detectors the decoder will attempt, in menu order
+        struct Protocol {
+            const char* label;
+            const char* key;
+            int dsp::DSD::* flag;
+        };
+
+        inline static const Protocol protocols[] = {
+            { "P25p1", "p25p1", &dsp::DSD::frameP25p1 },
+            { "ProVoice", "provoice", &dsp::DSD::frameProvoice },
+            { "X2-TDMA", "x2tdma", &dsp::DSD::frameX2tdma },
+            { "DMR", "dmr", &dsp::DSD::frameDmr },
+            { "NXDN48", "nxdn48", &dsp::DSD::frameNxdn48 },
+            { "NXDN96", "nxdn96", &dsp::DSD::frameNxdn96 },
+            { "D-STAR", "dstar", &dsp::DSD::frameDstar }
+        };
+
+        std::string getProtocolSummary() {
+            int enabledCount = 0;
+            std::string summary;
+            for (const auto& proto : protocols) {
+                if (dsdDec.*proto.flag != 1) { continue; }
+                enabledCount++;
+                if (!summary.empty()) { summary += ", "; }
+                summary += proto.label;
+            }
+            if (enabledCount == 0) { return "None"; }
+            if (enabledCount == IM_ARRAYSIZE(protocols)) { return "All"; }
+            return summary;
+        }
+
         float bw = 12500.0;
 
         dsp::stream<dsp::complex_t> nullStream;
@@ -176,6 +218,7 @@ namespace demod {
         dsp::convert::MonoToStereo outputMts;
 
         std::string name;
+        ConfigManager* _config = NULL;
 
     };
 }
