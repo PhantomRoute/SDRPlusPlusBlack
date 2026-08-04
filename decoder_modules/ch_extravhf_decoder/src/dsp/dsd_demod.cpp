@@ -1425,7 +1425,7 @@ namespace dsp {
                 }
                 if ((frameNxdn96 == 1) || (frameNxdn48 == 1)) {
                     strncpy (framesynctest18, (framesynctest_p - 17), 18);
-                    if ((strcmp (framesynctest18, NXDN_BS_VOICE_SYNC) == 0) || (strcmp (framesynctest18, NXDN_MS_VOICE_SYNC) == 0)) {
+                    if ((syncMatches (framesynctest18, NXDN_BS_VOICE_SYNC, nxdnSyncTolerance)) || (syncMatches (framesynctest18, NXDN_MS_VOICE_SYNC, nxdnSyncTolerance))) {
                         if ((lastsynctype == 8) || (lastsynctype == 16)) {
                             carrier = 1;
                             offset = framesynctest_pos;
@@ -1447,7 +1447,7 @@ namespace dsp {
                         } else {
                             lastsynctype = 8;
                         }
-                    } else if ((strcmp (framesynctest18, INV_NXDN_BS_VOICE_SYNC) == 0) || (strcmp (framesynctest18, INV_NXDN_MS_VOICE_SYNC) == 0)) {
+                    } else if ((syncMatches (framesynctest18, INV_NXDN_BS_VOICE_SYNC, nxdnSyncTolerance)) || (syncMatches (framesynctest18, INV_NXDN_MS_VOICE_SYNC, nxdnSyncTolerance))) {
                         if ((lastsynctype == 9) || (lastsynctype == 17)) {
                             carrier = 1;
                             offset = framesynctest_pos;
@@ -1469,7 +1469,7 @@ namespace dsp {
                         } else {
                             lastsynctype = 9;
                         }
-                    } else if ((strcmp (framesynctest18, NXDN_BS_DATA_SYNC) == 0) || (strcmp (framesynctest18, NXDN_MS_DATA_SYNC) == 0)) {
+                    } else if ((syncMatches (framesynctest18, NXDN_BS_DATA_SYNC, nxdnSyncTolerance)) || (syncMatches (framesynctest18, NXDN_MS_DATA_SYNC, nxdnSyncTolerance))) {
                         if ((lastsynctype == 8) || (lastsynctype == 16)) {
                             carrier = 1;
                             offset = framesynctest_pos;
@@ -1491,7 +1491,7 @@ namespace dsp {
                         } else {
                             lastsynctype = 16;
                         }
-                    } else if ((strcmp (framesynctest18, INV_NXDN_BS_DATA_SYNC) == 0) || (strcmp (framesynctest18, INV_NXDN_MS_DATA_SYNC) == 0)) {
+                    } else if ((syncMatches (framesynctest18, INV_NXDN_BS_DATA_SYNC, nxdnSyncTolerance)) || (syncMatches (framesynctest18, INV_NXDN_MS_DATA_SYNC, nxdnSyncTolerance))) {
                         if ((lastsynctype == 9) || (lastsynctype == 17)) {
                             carrier = 1;
                             offset = framesynctest_pos;

@@ -628,6 +628,15 @@ namespace dsp {
             MODE_PROVOICE
         };
 
+        // How many symbols of an NXDN frame sync may be wrong and still count as a
+        // match. szechyjs/dsd compares the 18 symbol sync with strcmp, so a single
+        // bad symbol loses the frame - and NXDN's sync is short enough, and its
+        // deviation small enough, that this happens constantly on air. Both C++
+        // descendants of this decoder fixed it the same way: f4exb/dsdcc matches
+        // its 19 symbol RDCH sync with a tolerance of 1, and dsd-fme likewise moved
+        // off exact matching. 0 restores the old exact-compare behaviour.
+        int nxdnSyncTolerance = 1;
+
         // Demodulator state for the menu. Whether a protocol fails to sync because
         // the modulation was detected wrong, because the symbol rate is wrong, or
         // because the sync pattern is seen once but never confirmed, are three very
@@ -794,6 +803,16 @@ namespace dsp {
         void printFrameSync (std::string frametype, int offset, char *modulation);
         void resetFrameSync();
         int getFrameSync();
+
+        // Compares a sync string allowing up to maxErrors mismatched symbols.
+        // maxErrors of 0 is equivalent to strcmp == 0.
+        static bool syncMatches(const char* test, const char* pattern, int maxErrors) {
+            int errors = 0;
+            for (int i = 0; pattern[i] != '\0'; i++) {
+                if (test[i] != pattern[i] && ++errors > maxErrors) { return false; }
+            }
+            return true;
+        }
         short dmrFilter(short sample);
         short nxdnFilter(short sample);
         //MBE

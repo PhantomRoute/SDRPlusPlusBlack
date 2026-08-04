@@ -51,6 +51,9 @@ namespace demod {
                     dsdDec.*proto.flag = enabled ? 1 : 0;
                 }
             }
+            if (_config->conf[name][getName()].contains("nxdnSyncTolerance")) {
+                dsdDec.nxdnSyncTolerance = _config->conf[name][getName()]["nxdnSyncTolerance"];
+            }
             _config->release();
 
             dsdDec.setDemodMode(getSelectedMode());
@@ -107,6 +110,17 @@ namespace demod {
                 for (const auto& proto : protocols) {
                     if (dsdDec.*proto.flag != 1 || !proto.ownRate) { continue; }
                     ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.4f, 1.0f), "Untick the rest to decode %s", proto.label);
+                }
+            }
+            if (dsdDec.frameNxdn48 == 1 || dsdDec.frameNxdn96 == 1) {
+                // Off is szechyjs's exact compare, on is what dsdcc and dsd-fme do.
+                // Worth turning off if it starts syncing on noise.
+                bool tolerant = dsdDec.nxdnSyncTolerance > 0;
+                if (ImGui::Checkbox(("Tolerant NXDN sync##_olddsd_nxdntol_" + name).c_str(), &tolerant)) {
+                    dsdDec.nxdnSyncTolerance = tolerant ? 1 : 0;
+                    _config->acquire();
+                    _config->conf[name][getName()]["nxdnSyncTolerance"] = dsdDec.nxdnSyncTolerance;
+                    _config->release(true);
                 }
             }
 
