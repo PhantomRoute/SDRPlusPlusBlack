@@ -1,4 +1,5 @@
 #include "flog.h"
+#include "temp_path.h"
 #include <mutex>
 #include <chrono>
 #include <string.h>
@@ -21,7 +22,18 @@ namespace flog {
     std::mutex outMtx;
     std::vector<LogRec> logRecords;
     int performAdhocFileLogging = -1;
-    static const char *adhocLogFileName = "/tmp/sdrpp.adhoc.log";
+
+    // Touch this file to turn on append logging. The unix path is unchanged so
+    // existing habits keep working; Windows has no /tmp, so the opt-in could
+    // never be used there and now lives in %TEMP% instead.
+    static const std::string& adhocLogFileName() {
+#ifdef _WIN32
+        static const std::string path = utils::tempFilePath("sdrpp.adhoc.log");
+#else
+        static const std::string path = "/tmp/sdrpp.adhoc.log";
+#endif
+        return path;
+    }
     static bool memoryLogEnabled =
 #ifdef __ANDROID__
         true;
@@ -216,7 +228,7 @@ namespace flog {
 #endif
 
             if (performAdhocFileLogging == -1) {
-                FILE *f = fopen(adhocLogFileName,"rt");
+                FILE *f = fopen(adhocLogFileName().c_str(),"rt");
                 if (f) {
                     fclose(f);
                     performAdhocFileLogging = 1;
@@ -226,11 +238,19 @@ namespace flog {
                 }
             }
             if (performAdhocFileLogging == 1) {
-                FILE *f = fopen(adhocLogFileName,"at");
-                fprintf(f, "[%02d/%02d/%02d %02d:%02d:%02d.%03d] [%s" "] %s\n",
-                    nowc->tm_mday, nowc->tm_mon + 1, nowc->tm_year + 1900, nowc->tm_hour, nowc->tm_min, nowc->tm_sec, (int)(msec % 1000), TYPE_STR[type], out.c_str());
-                fflush(f);
-                fclose(f);
+                // The probe above only proved the file existed once. If it has
+                // since been removed or turned read only this comes back null,
+                // and printing to it took the whole application down.
+                FILE *f = fopen(adhocLogFileName().c_str(),"at");
+                if (f) {
+                    fprintf(f, "[%02d/%02d/%02d %02d:%02d:%02d.%03d] [%s" "] %s\n",
+                        nowc->tm_mday, nowc->tm_mon + 1, nowc->tm_year + 1900, nowc->tm_hour, nowc->tm_min, nowc->tm_sec, (int)(msec % 1000), TYPE_STR[type], out.c_str());
+                    fflush(f);
+                    fclose(f);
+                }
+                else {
+                    performAdhocFileLogging = 0;
+                }
             }
             if (memoryLogEnabled) {
                 logRecords.emplace_back(LogRec{msec, type, out});

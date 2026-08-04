@@ -4,6 +4,7 @@
 #include "plugin_main.h"
 #include "utils/stream_tracker.h"
 #include "utils/wav.h"
+#include "utils/temp_path.h"
 #include <dsp/types.h>
 #include <signal_path/signal_path.h>
 #include <ctm.h>
@@ -148,17 +149,20 @@ struct HL2Device {
         setHangLatency(pttHangTime, bufferLatency); // as in linhpsdr
         setDuplex(true);
         setSoftwarePower(255);
-        bool debug = true;
-        if (debug) {
-            debugOut = fopen("/tmp/hl2_tx_stream.bin", "wb");
-        }
+        // Raw TX capture. This used to be hardwired on, so every session on
+        // Linux and macOS grew an unbounded file in /tmp for as long as the
+        // radio ran; on Windows the open just failed, so nobody noticed it was
+        // meant to be optional. Build with HL2_TX_DEBUG_DUMP to get it back.
+#ifdef HL2_TX_DEBUG_DUMP
+        debugOut = fopen(utils::tempFilePath("hl2_tx_stream.bin").c_str(), "wb");
+#endif
         flog::info("Called HL2Device::HL2Device()");
     }
 
     static std::string hl2txdumpName() {
         char buf[1024];
-        snprintf(buf, sizeof buf, "/tmp/hl2dev_tx_stream_%d.raw", core::args["server"].b() ? 1 : 0);
-        return buf;
+        snprintf(buf, sizeof buf, "hl2dev_tx_stream_%d.raw", core::args["server"].b() ? 1 : 0);
+        return utils::tempFilePath(buf);
     }
 
     virtual ~HL2Device() {

@@ -10,6 +10,7 @@
 #include <thread>
 #include <algorithm>
 #include <utils/cty.h>
+#include <utils/temp_path.h>
 #include <gui/widgets/waterfall.h>
 #include <gui/icons.h>
 #include <gui/widgets/bandplan.h>
@@ -393,7 +394,11 @@ struct AudioInToTransmitter : dsp::Processor<dsp::stereo_t, dsp::complex_t> {
         this->audioIsIqData = audioIsIqData;
         init(in);
         totalRead = 0;
-        debugDump = fopen("/tmp/aitt.raw", "wb");
+        // Same story as the HL2 capture: unconditionally on, so it grew without
+        // bound on Linux and macOS while doing nothing at all on Windows.
+#ifdef AITT_DEBUG_DUMP
+        debugDump = fopen(utils::tempFilePath("aitt.raw").c_str(), "wb");
+#endif
     }
 
     int totalRead;
