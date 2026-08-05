@@ -9,6 +9,7 @@
 #include <gui/widgets/stepped_slider.h>
 #include <libbladeRF.h>
 #include <gui/smgui.h>
+#include <gui/dialogs/bias_tee_confirm.h>
 #include <algorithm>
 #include <utils/optionlist.h>
 
@@ -554,7 +555,7 @@ private:
         }
 
         if (_this->selectedBladeType == BLADERF_TYPE_V2) {
-            if (SmGui::Checkbox("Bias-T##_balderf_biast_", &_this->biasT)) {
+            if (dialogs::BiasTeeCheckbox("Bias-T##_balderf_biast_", &_this->biasT)) {
                 if (_this->running) {
                     bladerf_set_bias_tee(_this->openDev, BLADERF_CHANNEL_RX(_this->chanId), _this->biasT);
                 }

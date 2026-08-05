@@ -6,6 +6,7 @@
 #include <gui/style.h>
 #include <config.h>
 #include <gui/smgui.h>
+#include <gui/dialogs/bias_tee_confirm.h>
 #include <rtl-sdr.h>
 
 #ifdef __ANDROID__
@@ -538,7 +539,7 @@ private:
         
         if (_this->tunerAgc || _this->gainList.size() == 0) { SmGui::EndDisabled(); }
 
-        if (SmGui::Checkbox(CONCAT("Bias T##_rtlsdr_rtl_biast_", _this->name), &_this->biasT)) {
+        if (dialogs::BiasTeeCheckbox(CONCAT("Bias T##_rtlsdr_rtl_biast_", _this->name), &_this->biasT)) {
             if (_this->running) {
                 rtlsdr_set_bias_tee(_this->openDev, _this->biasT);
             }

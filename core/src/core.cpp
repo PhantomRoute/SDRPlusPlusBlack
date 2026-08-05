@@ -724,6 +724,9 @@ int sdrpp_main(int argc, char* argv[]) {
 
     defConfig["selectedOffset"] = "None";
     defConfig["manualOffset"] = 0.0;
+    // Confirm before a Bias-T switch puts voltage on an antenna port. Cleared from
+    // inside that dialog by "Don't show this again".
+    defConfig["biasTeeWarning"] = true;
     defConfig["showMenu"] = true;
     defConfig["showWaterfall"] = true;
     defConfig["source"] = "";

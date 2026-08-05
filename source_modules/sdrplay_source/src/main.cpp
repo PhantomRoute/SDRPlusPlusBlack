@@ -8,6 +8,7 @@
 #include <config.h>
 #include <sdrplay_api.h>
 #include <gui/smgui.h>
+#include <gui/dialogs/bias_tee_confirm.h>
 #include <utils/optionlist.h>
 
 #define CONCAT(a, b) ((std::string(a) + b).c_str())
@@ -946,7 +947,7 @@ private:
             config.conf["devices"][selectedName]["dabNotch"] = rsp1a_dabNotch;
             config.release(true);
         }
-        if (SmGui::Checkbox(CONCAT("Bias-T##sdrplay_rsp1a_biast", name), &rsp1a_biasT)) {
+        if (dialogs::BiasTeeCheckbox(CONCAT("Bias-T##sdrplay_rsp1a_biast", name), &rsp1a_biasT)) {
             if (running) {
                 channelParams->rsp1aTunerParams.biasTEnable = rsp1a_biasT;
                 sdrplay_api_Update(openDev.dev, openDev.tuner, sdrplay_api_Update_Rsp1a_BiasTControl, sdrplay_api_Update_Ext1_None);
@@ -992,7 +993,7 @@ private:
             style::endDisabled();
         }
         
-        if (SmGui::Checkbox(CONCAT("Bias-T##sdrplay_rsp2_biast", name), &rsp2_biasT)) {
+        if (dialogs::BiasTeeCheckbox(CONCAT("Bias-T##sdrplay_rsp2_biast", name), &rsp2_biasT)) {
             if (running) {
                 channelParams->rsp2TunerParams.biasTEnable = rsp2_biasT;
                 sdrplay_api_Update(openDev.dev, openDev.tuner, sdrplay_api_Update_Rsp2_BiasTControl, sdrplay_api_Update_Ext1_None);
@@ -1034,7 +1035,7 @@ private:
             config.conf["devices"][selectedName]["dabNotch"] = rspduo_dabNotch;
             config.release(true);
         }
-        if (SmGui::Checkbox(CONCAT("Bias-T##sdrplay_rspduo_biast", name), &rspduo_biasT)) {
+        if (dialogs::BiasTeeCheckbox(CONCAT("Bias-T##sdrplay_rspduo_biast", name), &rspduo_biasT)) {
             if (running) {
                 channelParams->rspDuoTunerParams.biasTEnable = rspduo_biasT;
                 sdrplay_api_Update(openDev.dev, openDev.tuner, sdrplay_api_Update_RspDuo_BiasTControl, sdrplay_api_Update_Ext1_None);
@@ -1076,7 +1077,7 @@ private:
             config.conf["devices"][selectedName]["dabNotch"] = rspdx_dabNotch;
             config.release(true);
         }
-        if (SmGui::Checkbox(CONCAT("Bias-T##sdrplay_rspdx_biast", name), &rspdx_biasT)) {
+        if (dialogs::BiasTeeCheckbox(CONCAT("Bias-T##sdrplay_rspdx_biast", name), &rspdx_biasT)) {
             if (running) {
                 openDevParams->devParams->rspDxParams.biasTEnable = rspdx_biasT;
                 sdrplay_api_Update(openDev.dev, openDev.tuner, sdrplay_api_Update_None, sdrplay_api_Update_RspDx_BiasTControl);

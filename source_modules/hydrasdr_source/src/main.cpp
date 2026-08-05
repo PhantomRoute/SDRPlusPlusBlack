@@ -7,6 +7,7 @@
 #include <gui/style.h>
 #include <config.h>
 #include <gui/smgui.h>
+#include <gui/dialogs/bias_tee_confirm.h>
 #include <hydrasdr.h>
 #include <utils/optionlist.h>
 
@@ -614,7 +615,7 @@ private:
         }
 
         // Bias T
-        if (SmGui::Checkbox(CONCAT("Bias T##_hydrasdr_", _this->name), &_this->biasT)) {
+        if (dialogs::BiasTeeCheckbox(CONCAT("Bias T##_hydrasdr_", _this->name), &_this->biasT)) {
             if (_this->running) {
                 hydrasdr_set_rf_bias(_this->openDev, _this->biasT);
             }

@@ -7,6 +7,7 @@
 #include <config.h>
 #include <gui/widgets/stepped_slider.h>
 #include <gui/smgui.h>
+#include <gui/dialogs/bias_tee_confirm.h>
 
 #ifndef __ANDROID__
 #include <libhackrf/hackrf.h>
@@ -402,7 +403,7 @@ private:
             config.release(true);
         }
 
-        if (SmGui::Checkbox(CONCAT("Bias-T##_hackrf_bt_", _this->name), &_this->biasT)) {
+        if (dialogs::BiasTeeCheckbox(CONCAT("Bias-T##_hackrf_bt_", _this->name), &_this->biasT)) {
             if (_this->running) {
                 hackrf_set_antenna_enable(_this->openDev, _this->biasT);
             }

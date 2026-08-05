@@ -112,6 +112,10 @@ namespace SmGui {
     // Rec/Play functions
     // TODO: Maybe move verification to the load function instead of checking in drawFrame
     void init(bool server);
+
+    // True when the menu is being drawn for a remote client rather than a local
+    // window. Anything that wants to put a popup on screen has to check this.
+    bool isServerMode();
     void setDiff(std::string id, SmGui::DrawListElem value);
     void startRecord(DrawList* dl);
     void stopRecord();

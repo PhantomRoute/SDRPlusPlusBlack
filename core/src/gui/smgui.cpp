@@ -41,6 +41,10 @@ namespace SmGui {
     void init(bool server) {
         serverMode = server;
     }
+
+    bool isServerMode() {
+        return serverMode;
+    }
     
     // Rec/Play functions
     void setDiff(std::string id, SmGui::DrawListElem value) {

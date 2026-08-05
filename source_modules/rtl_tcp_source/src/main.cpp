@@ -6,6 +6,7 @@
 #include <signal_path/signal_path.h>
 #include <core.h>
 #include <gui/smgui.h>
+#include <gui/dialogs/bias_tee_confirm.h>
 #include <gui/style.h>
 #include <utils/optionlist.h>
 
@@ -239,7 +240,7 @@ private:
         }
         if (_this->tunerAGC) { SmGui::EndDisabled(); }
 
-        if (SmGui::Checkbox(CONCAT("Bias-T##_biast_select_", _this->name), &_this->biasTee)) {
+        if (dialogs::BiasTeeCheckbox(CONCAT("Bias-T##_biast_select_", _this->name), &_this->biasTee)) {
             if (_this->running) {
                 _this->client->setBiasTee(_this->biasTee);
             }
@@ -248,7 +249,7 @@ private:
             config.release(true);
         }
 
-        if (SmGui::Checkbox(CONCAT("Offset Tuning##_biast_select_", _this->name), &_this->offsetTuning)) {
+        if (SmGui::Checkbox(CONCAT("Offset Tuning##_offset_tuning_select_", _this->name), &_this->offsetTuning)) {
             if (_this->running) {
                 _this->client->setOffsetTuning(_this->offsetTuning);
             }

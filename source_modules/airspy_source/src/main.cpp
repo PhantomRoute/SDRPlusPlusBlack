@@ -7,6 +7,7 @@
 #include <gui/style.h>
 #include <config.h>
 #include <gui/smgui.h>
+#include <gui/dialogs/bias_tee_confirm.h>
 #include <airspy.h>
 
 #ifdef __ANDROID__
@@ -596,7 +597,7 @@ private:
         }
 
         // Bias T
-        if (SmGui::Checkbox(CONCAT("Bias T##_airspy_", _this->name), &_this->biasT)) {
+        if (dialogs::BiasTeeCheckbox(CONCAT("Bias T##_airspy_", _this->name), &_this->biasT)) {
             if (_this->running) {
                 airspy_set_rf_bias(_this->openDev, _this->biasT);
             }
