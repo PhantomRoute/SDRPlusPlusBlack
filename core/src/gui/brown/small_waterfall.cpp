@@ -3,6 +3,7 @@
 
 #include <vector>
 #include <mutex>
+#include <cstddef>
 #include <dsp/types.h>
 #include <dsp/multirate/rational_resampler.h>
 #include <gui/widgets/waterfall.h>
@@ -29,6 +30,19 @@ struct SubWaterfall::SubWaterfallPrivate {
 
     void flushDrawUpdates() {
         std::lock_guard<std::mutex> lock(inputBufferMutex);
+
+        // The audio reader thread feeds inputBuffer whether or not this waterfall is
+        // on screen, and this is the only thing that drains it, so the first draw
+        // after it is switched on can face everything recorded since the radio
+        // started. Throw all but the most recent rows away in one erase: a waterfall
+        // only shows so many lines, the old ones would scroll straight off, and
+        // grinding through the backlog a row at a time is quadratic because each row
+        // erases from the front.
+        const std::ptrdiff_t maxBacklog = (std::ptrdiff_t)fftSize * 64;
+        if ((std::ptrdiff_t)inputBuffer.size() > maxBacklog) {
+            inputBuffer.erase(inputBuffer.begin(), inputBuffer.end() - maxBacklog);
+        }
+
         while (inputBuffer.size() > fftSize) {
             for (int i = 0; i < fftSize; i++) {
                 fft_in[i][0] = inputBuffer[i].l;
@@ -47,6 +61,15 @@ struct SubWaterfall::SubWaterfallPrivate {
                 pub->peaks.erase(pub->peaks.begin());
             }
             float* dest = waterfall.getFFTBuffer();
+            if (dest == NULL) {
+                // The waterfall allocates its FFT storage when it is first drawn and
+                // sized, so this is null until then - and memcpy'ing into it is what
+                // crashed the moment the audio waterfall became visible. Leave the
+                // row in the buffer and pick it up next frame. getFFTBuffer only
+                // advances its line counter when it hands back a real buffer, so
+                // stopping here costs nothing.
+                break;
+            }
             memcpy(dest, spectrumLine, fftSize * sizeof(float));
             for (int q = 0; q < fftSize / 2; q++) {
                 std::swap(dest[q], dest[q + fftSize / 2]);
