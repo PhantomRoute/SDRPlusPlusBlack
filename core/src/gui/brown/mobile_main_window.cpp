@@ -2537,14 +2537,16 @@ MobileMainWindow::MobileMainWindow() : MainWindow(),
 }
 
 MobileMainWindow::~MobileMainWindow() {
-    // Destroying a joinable std::thread calls std::terminate, so the reader has to be
-    // stopped here whatever else happens, and the stream released only once it has.
-    stopAudioWaterfallReader();
-    if (!currentAudioStreamName.empty() && currentAudioStream) {
-        sigpath::sinkManager.unbindStream(currentAudioStreamName, currentAudioStream);
+    // end() does the real teardown while the rest of the program is still alive. This
+    // runs during static destruction, where sinkManager and the stream it handed out
+    // may already be gone, so there is nothing safe to wait for: stopReader would spin
+    // on a reader count in freed memory and never come back, which hangs the process
+    // after its window has closed. Destroying a joinable std::thread calls
+    // std::terminate though, so it still has to be dealt with - detach and let the
+    // process go.
+    if (audioWaterfallThread.joinable()) {
+        audioWaterfallThread.detach();
     }
-    currentAudioStream = nullptr;
-    currentAudioStreamName.clear();
 }
 
 
@@ -2648,6 +2650,19 @@ void MobileMainWindow::updateModeFromRadio(int radioDemodId) {
 }
 
 void MobileMainWindow::end() {
+    // Release the audio waterfall reader here, not in the destructor. This object is
+    // a global (gui::pmainWindow), so its destructor runs during static destruction,
+    // after main has returned - and sinkManager is another global that may already be
+    // gone by then. Waiting on a thread and unbinding a stream at that point is how
+    // the window closes but the process stays alive. end() runs from sdrpp_main while
+    // everything is still standing.
+    stopAudioWaterfallReader();
+    if (!currentAudioStreamName.empty() && currentAudioStream) {
+        sigpath::sinkManager.unbindStream(currentAudioStreamName, currentAudioStream);
+    }
+    currentAudioStream = nullptr;
+    currentAudioStreamName.clear();
+
     pvt->end();
     displaymenu::onDisplayDraw.unbindHandler(&displayDrawHandler);
     MainWindow::end();
