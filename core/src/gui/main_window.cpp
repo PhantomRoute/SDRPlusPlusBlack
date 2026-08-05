@@ -1193,17 +1193,21 @@ void MainWindow::handleWaterfallInput(ImGui::WaterfallVFO* vfo) {
 }
 
 void MainWindow::drawBottomWindows(int dy) {
-    if (!showMenu) {
-        if (bottomWindows.size() > 0) {
-            updateBottomWindowLayout();
-            for (int i = 0; i < bottomWindows.size(); i++) {
-                ImGui::Begin(("bottomwindow_" + bottomWindows[i].name).c_str(),
-                             NULL, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse);
-                ImGui::SetWindowPos(ImVec2(bottomWindows[i].loc.x, gui::waterfall.wfMax.y + dy));
-                ImGui::SetWindowSize(ImVec2(bottomWindows[i].size.x, bottomWindows[i].size.y));
-                bottomWindows[i].drawFunc();
-                ImGui::End();
-            }
+    // This used to be wrapped in if (!showMenu), so a bottom window only appeared
+    // once the menu was hidden - and ticking "Show Audio Waterfall" is something you
+    // do from the menu, so it looked like the option did nothing at all. Meanwhile
+    // the waterfall above was shrunk to make room whether or not anything was drawn,
+    // leaving a blank strip. The gate was standing in for the layout bug below,
+    // where windows were placed from x=0 and so sat under the menu panel.
+    if (bottomWindows.size() > 0) {
+        updateBottomWindowLayout();
+        for (int i = 0; i < bottomWindows.size(); i++) {
+            ImGui::Begin(("bottomwindow_" + bottomWindows[i].name).c_str(),
+                         NULL, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse);
+            ImGui::SetWindowPos(ImVec2(bottomWindows[i].loc.x, gui::waterfall.wfMax.y + dy));
+            ImGui::SetWindowSize(ImVec2(bottomWindows[i].size.x, bottomWindows[i].size.y));
+            bottomWindows[i].drawFunc();
+            ImGui::End();
         }
     }
 }
@@ -1231,7 +1235,11 @@ void MainWindow::updateBottomWindowLayout() {
         nWindows = 5;
     }
     auto size = fullWidth / nWindows;
-    auto scan = 0;
+    // Start at the left edge of the FFT area, not at x=0. The width already came
+    // from that area, so with the menu open the windows were the right size but
+    // laid out from the far left, sitting under the menu panel instead of beneath
+    // the waterfall they belong to.
+    auto scan = gui::waterfall.fftAreaMin.x;
     for (int i = 0; i < bottomWindows.size(); i++) {
         bottomWindows[i].loc.x = scan;
         bottomWindows[i].loc.y = 0;
