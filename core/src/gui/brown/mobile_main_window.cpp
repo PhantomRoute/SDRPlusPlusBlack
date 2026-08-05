@@ -1628,8 +1628,27 @@ void MobileMainWindow::updateAudioWaterfallPipeline() {
         }
         currentAudioStreamName = wanted;
         if (!currentAudioStreamName.empty()) {
-            currentAudioStreamSampleRate = (int) sigpath::sinkManager.getStreamSampleRate(currentAudioStreamName);
-            currentAudioStream = sigpath::sinkManager.bindStream(currentAudioStreamName);
+            // Neither of these is safe to use unchecked. getStreamSampleRate returns
+            // -1 for a stream it does not know, and bindStream returns NULL for the
+            // same, and both happen while the sink stream is being rebuilt - which is
+            // exactly what selecting a demodulator does. -1 then reaches
+            // addAudioSamples and turns its buffer sizing negative, and NULL is
+            // dereferenced on the reader thread's first read. Give up for this frame
+            // and try again on the next one; the name is cleared so the comparison
+            // above re-runs rather than believing it is already bound.
+            float rate = sigpath::sinkManager.getStreamSampleRate(currentAudioStreamName);
+            dsp::stream<dsp::stereo_t>* bound = (rate > 0.0f) ? sigpath::sinkManager.bindStream(currentAudioStreamName) : NULL;
+            if (bound == NULL) {
+                if (rate > 0.0f) {
+                    // Bound nothing but the rate was fine, so nothing to release.
+                    flog::warn("Audio waterfall: stream '{0}' not available yet", currentAudioStreamName);
+                }
+                currentAudioStreamName.clear();
+                currentAudioStream = nullptr;
+                return;
+            }
+            currentAudioStreamSampleRate = (int)rate;
+            currentAudioStream = bound;
             // Captured by value on purpose. Reading this->currentAudioStream inside
             // the loop meant that after a VFO change the outgoing thread would follow
             // the member to the incoming stream and flush it, stealing a block from

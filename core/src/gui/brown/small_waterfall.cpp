@@ -191,7 +191,13 @@ void SubWaterfall::draw() {
 }
 
 void SubWaterfall::addAudioSamples(dsp::stereo_t* samples, int count, int sampleRate) {
+    // sampleRate comes from SinkManager::getStreamSampleRate, which answers -1 for a
+    // stream it does not know. Dividing by that makes newSize negative, and the
+    // comparison against resampledV.size() converts it to a huge size_t, so the
+    // resize below asks for gigabytes and throws. Zero would divide by zero outright.
+    if (samples == NULL || count <= 0 || sampleRate <= 0) { return; }
     int newSize = 1000 + (pvt->res.getOutSampleRate() * count / sampleRate);
+    if (newSize < 0) { return; }
     if (pvt->resampledV.size() < newSize) {
         pvt->resampledV.resize(newSize);
     }
