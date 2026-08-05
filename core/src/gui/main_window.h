@@ -78,6 +78,10 @@ public:
     // queued from other threads used to sit there forever.
     void runMainThreadTasks();
 
+    // Opens the credits dialog. The Display menu drives this now that the logo
+    // button no longer sits in the top bar.
+    void openCredits() { showCredits = true; }
+
 
 protected:
     void displayVariousWindows();

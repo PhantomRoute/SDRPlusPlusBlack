@@ -137,9 +137,14 @@ SubWaterfall::SubWaterfall(int sampleRate, int wfrange, const std::string & lbl)
     pvt->waterfall.quiet = true;
     pvt->fftSize = pvt->hiFreq / pvt->waterfallRate;
     pvt->waterfall.setRawFFTSize(pvt->fftSize);
+    // The spectrum handed to this widget spans -hiFreq..+hiFreq with DC in the
+    // middle, since flushDrawUpdates swaps the FFT halves. So view the whole of it,
+    // centred. It used to ask for a half width view offset by +hiFreq, which
+    // setViewOffset clamps to wholeBandwidth/2 - viewBandwidth/2 - the top half of
+    // the span - leaving DC against the left edge instead of the centre.
     pvt->waterfall.setBandwidth(2 * pvt->hiFreq);
-    pvt->waterfall.setViewBandwidth(pvt->hiFreq);
-    pvt->waterfall.setViewOffset(pvt->hiFreq);
+    pvt->waterfall.setViewBandwidth(2 * pvt->hiFreq);
+    pvt->waterfall.setViewOffset(0);
     pvt->waterfall.setFFTMin(-150);
     pvt->waterfall.setFFTMax(0);
     pvt->waterfall.setWaterfallMin(-150);

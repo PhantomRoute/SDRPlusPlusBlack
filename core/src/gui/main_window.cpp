@@ -674,12 +674,10 @@ void MainWindow::draw() {
 
     // ImGui::EndChild();
 
-    // Logo button
-    ImGui::SetCursorPosX(ImGui::GetWindowSize().x - (48 * style::uiScale));
-    ImGui::SetCursorPosY(10.0f * style::uiScale);
-    if (ImGui::ImageButton(icons::LOGO, ImVec2(32 * style::uiScale, 32 * style::uiScale), ImVec2(0, 0), ImVec2(1, 1), 0)) {
-        showCredits = true;
-    }
+    // The logo button used to sit here, taking 48 pixels off the right of the top
+    // bar for something you press once. Credits moved to the bottom of the Display
+    // menu, which keeps the upstream attribution reachable without spending screen
+    // width on it - that width matters on a phone.
     if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
         if (showCredits) {
             showCredits = false;
