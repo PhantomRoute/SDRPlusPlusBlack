@@ -5,6 +5,7 @@
 #include "bgnoise.h"
 #include <array>
 #include <list>
+#include <cmath>
 #include <ctm.h>
 
 namespace dsp {
@@ -411,7 +412,10 @@ namespace dsp {
                         const int n = (int)ksi->size();
                         for (int q = 0; q < n; q++) {
                             const float a = ksiD[q] / (ksiD[q] + 1.0f);
-                            hwD[q] = a * exp(0.5f * expn(a * gammakD[q]));
+                            // std::exp qualified deliberately: dsp::arrays has an
+                            // exp(const FloatArray&) and this file's using-directive
+                            // brings it in, so a bare exp on a float does not compile.
+                            hwD[q] = a * std::exp(0.5f * expn(a * gammakD[q]));
                         }
                     }
                     ALLOC_AND_CHECK(x, sz, "logmmse_all point 14")
