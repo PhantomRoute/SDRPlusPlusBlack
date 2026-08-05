@@ -561,7 +561,7 @@ private:
 
             // AGC Control
             SmGui::ForceSync();
-            if (SmGui::Checkbox(CONCAT("LNA AGC##_airspy_", _this->name), &_this->lnaAgc)) {
+            if (SmGui::Checkbox(CONCAT("LNA AGC##_airspy_lna_agc_", _this->name), &_this->lnaAgc)) {
                 if (_this->running) {
                     if (_this->lnaAgc) {
                         airspy_set_lna_agc(_this->openDev, 1);
@@ -578,7 +578,7 @@ private:
                 }
             }
             SmGui::ForceSync();
-            if (SmGui::Checkbox(CONCAT("Mixer AGC##_airspy_", _this->name), &_this->mixerAgc)) {
+            if (SmGui::Checkbox(CONCAT("Mixer AGC##_airspy_mix_agc_", _this->name), &_this->mixerAgc)) {
                 if (_this->running) {
                     if (_this->mixerAgc) {
                         airspy_set_mixer_agc(_this->openDev, 1);
@@ -597,7 +597,7 @@ private:
         }
 
         // Bias T
-        if (dialogs::BiasTeeCheckbox(CONCAT("Bias T##_airspy_", _this->name), &_this->biasT)) {
+        if (dialogs::BiasTeeCheckbox(CONCAT("Bias T##_airspy_biast_", _this->name), &_this->biasT)) {
             if (_this->running) {
                 airspy_set_rf_bias(_this->openDev, _this->biasT);
             }

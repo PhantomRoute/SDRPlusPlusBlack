@@ -579,7 +579,7 @@ private:
 
             // AGC Control
             SmGui::ForceSync();
-            if (SmGui::Checkbox(CONCAT("LNA AGC##_hydrasdr_", _this->name), &_this->lnaAgc)) {
+            if (SmGui::Checkbox(CONCAT("LNA AGC##_hydrasdr_lna_agc_", _this->name), &_this->lnaAgc)) {
                 if (_this->running) {
                     if (_this->lnaAgc) {
                         hydrasdr_set_lna_agc(_this->openDev, 1);
@@ -596,7 +596,7 @@ private:
                 }
             }
             SmGui::ForceSync();
-            if (SmGui::Checkbox(CONCAT("Mixer AGC##_hydrasdr_", _this->name), &_this->mixerAgc)) {
+            if (SmGui::Checkbox(CONCAT("Mixer AGC##_hydrasdr_mix_agc_", _this->name), &_this->mixerAgc)) {
                 if (_this->running) {
                     if (_this->mixerAgc) {
                         hydrasdr_set_mixer_agc(_this->openDev, 1);
@@ -615,7 +615,7 @@ private:
         }
 
         // Bias T
-        if (dialogs::BiasTeeCheckbox(CONCAT("Bias T##_hydrasdr_", _this->name), &_this->biasT)) {
+        if (dialogs::BiasTeeCheckbox(CONCAT("Bias T##_hydrasdr_biast_", _this->name), &_this->biasT)) {
             if (_this->running) {
                 hydrasdr_set_rf_bias(_this->openDev, _this->biasT);
             }

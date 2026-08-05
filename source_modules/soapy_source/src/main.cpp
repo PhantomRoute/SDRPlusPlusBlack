@@ -434,7 +434,7 @@ private:
         if (_this->devId < 0) {
             SmGui::FillWidth();
             SmGui::ForceSync();
-            if (SmGui::Button(CONCAT("Refresh##_dev_select_", _this->name))) {
+            if (SmGui::Button(CONCAT("Refresh##_dev_refr_", _this->name))) {
                 _this->refresh();
                 _this->selectDevice(config.conf["device"]);
             }
@@ -461,7 +461,7 @@ private:
 
         SmGui::SameLine();
         SmGui::FillWidth();
-        if (SmGui::Button(CONCAT("Refresh##_dev_select_", _this->name))) {
+        if (SmGui::Button(CONCAT("Refresh##_dev_refr_", _this->name))) {
             _this->refresh();
             _this->selectDevice(config.conf["device"]);
         }
