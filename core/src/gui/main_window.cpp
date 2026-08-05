@@ -146,7 +146,6 @@ void MainWindow::init() {
     }
 
     // Create module instances
-    usleep(100000);
     for (auto const& [name, _module] : modList) {
         std::string mod = _module["module"];
         bool enabled = _module["enabled"];
