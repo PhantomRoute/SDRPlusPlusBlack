@@ -673,6 +673,13 @@ void MainWindow::draw() {
 
     // The logo button used to sit here, taking 48 pixels off the right of the top
     // bar for something pressed once. Attribution lives in the readme and LICENSE.
+    //
+    // It was also, per the note above, what gave this row its height: a 32 pixel
+    // tall item placed at y=10. With it gone the row collapsed and the menu below
+    // rode up over the play and volume buttons. Reserve the height explicitly. Zero
+    // width, so the space the button occupied is still given back.
+    ImGui::SetCursorPosY(10.0f * style::uiScale);
+    ImGui::Dummy(ImVec2(0.0f, 32.0f * style::uiScale));
 
     lockWaterfallControls = false;
 
