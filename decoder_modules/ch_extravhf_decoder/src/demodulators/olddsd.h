@@ -12,6 +12,7 @@
 #include <gui/widgets/constellation_diagram.h>
 #include <gui/style.h>
 #include "../dsp/dsd.h"
+#include "dsd_status_ui.h"
 #include <dsp/clock_recovery/fd.h>
 #include <dsp/clock_recovery/mm.h>
 #include <cstdio>
@@ -122,10 +123,7 @@ namespace demod {
             // question is "is it in range", which a number makes you work out.
             drawLevelBar();
 
-            ImVec4 syncColor = dsdDec.status_sync ? ImVec4(0.3f, 1.0f, 0.3f, 1.0f)
-                                                  : ImVec4(1.0f, 0.4f, 0.4f, 1.0f);
-            ImGui::TextColored(syncColor, "%s  %s", dsdDec.status_sync ? "SYNC" : "no sync",
-                               dsdDec.status_last_proto.empty() ? "" : dsdDec.status_last_proto.c_str());
+            drawSyncLine(dsdDec.status_sync, dsdDec.status_last_proto);
 
             // Only the protocol actually being decoded. The old panel listed P25, DMR
             // and NXDN at once, so two thirds of it was always stale zeroes in red.
@@ -175,21 +173,11 @@ namespace demod {
             }
         }
 
-        // Eases a bar toward its reading so it shows a level instead of flickering
-        // once per decoded frame. Hand rolled rather than std::min/std::max - the
-        // windows.h macros make those unusable in this module.
-        static float approach(float current, float target, float perSecond) {
-            float step = ImGui::GetIO().DeltaTime * perSecond;
-            if (step > 1.0f) { step = 1.0f; }
-            if (step < 0.0f) { step = 0.0f; }
-            return current + ((target - current) * step);
-        }
-
         void drawLevelBar() {
             float level = (float)dsdDec.status_lvl / 100.0f;
             if (level > 1.0f) { level = 1.0f; }
             if (level < 0.0f) { level = 0.0f; }
-            levelSmoothed = approach(levelSmoothed, level, 10.0f);
+            levelSmoothed = approachValue(levelSmoothed, level, 10.0f);
 
             // Too quiet starves the slicer, pinned at the top means clipping.
             ImVec4 color = ImVec4(0.4f, 0.8f, 0.4f, 1.0f);
@@ -204,73 +192,8 @@ namespace demod {
             ImGui::PopStyleColor();
         }
 
-        // mbelib writes one '=' per corrected bit error, then a letter if the frame
-        // was an erasure (E), a tone (T), repeated because it had more than three
-        // errors (R), or muted after too many repeats (M). A lengthening row of '='
-        // carries all of that and shows none of it, so read the count out as a
-        // quality bar - full and green is clean - and say what the letter meant. The
-        // raw string is still on the tooltip for anyone who reads mbelib output.
         void drawVoiceQuality() {
-            int errors = 0;
-            char flag = 0;
-            for (char c : dsdDec.status_errorbar) {
-                if (c == '=') { errors++; }
-                else if (c != ' ') { flag = c; }
-            }
-
-            const char* verdict;
-            ImVec4 color;
-            if (!dsdDec.status_sync) {
-                verdict = "no signal";
-                color = ImVec4(0.5f, 0.5f, 0.5f, 1.0f);
-            } else if (flag == 'M') {
-                verdict = "muted, too many bad frames";
-                color = ImVec4(1.0f, 0.3f, 0.3f, 1.0f);
-            } else if (flag == 'R') {
-                verdict = "frame repeated";
-                color = ImVec4(1.0f, 0.5f, 0.3f, 1.0f);
-            } else if (flag == 'E') {
-                verdict = "erasure";
-                color = ImVec4(1.0f, 0.5f, 0.3f, 1.0f);
-            } else if (flag == 'T') {
-                verdict = "tone";
-                color = ImVec4(0.4f, 0.7f, 1.0f, 1.0f);
-            } else if (errors == 0) {
-                verdict = "clean";
-                color = ImVec4(0.3f, 1.0f, 0.3f, 1.0f);
-            } else if (errors <= 4) {
-                verdict = "good";
-                color = ImVec4(0.5f, 1.0f, 0.4f, 1.0f);
-            } else if (errors <= 10) {
-                verdict = "fair";
-                color = ImVec4(1.0f, 0.9f, 0.3f, 1.0f);
-            } else {
-                verdict = "poor";
-                color = ImVec4(1.0f, 0.4f, 0.3f, 1.0f);
-            }
-
-            // Full bar is clean. The scale is a rough one: mbelib repeats a frame past
-            // three errors, and a voice frame carries a handful of them, so 16 stands
-            // in for "every frame at the repeat threshold". Protocols pack different
-            // numbers of AMBE frames per voice frame, so this is an indicator and not
-            // a measurement.
-            float quality = 1.0f - ((float)errors / 16.0f);
-            if (quality < 0.0f) { quality = 0.0f; }
-            if (!dsdDec.status_sync) { quality = 0.0f; }
-            voiceQualitySmoothed = approach(voiceQualitySmoothed, quality, 6.0f);
-
-            char overlay[64];
-            if (errors > 0) { snprintf(overlay, sizeof(overlay), "%s - %d bit errors", verdict, errors); }
-            else { snprintf(overlay, sizeof(overlay), "%s", verdict); }
-
-            ImGui::LeftLabel("Voice");
-            ImGui::PushStyleColor(ImGuiCol_PlotHistogram, color);
-            ImGui::ProgressBar(voiceQualitySmoothed, ImVec2(ImGui::GetContentRegionAvail().x, 0), overlay);
-            ImGui::PopStyleColor();
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("mbelib: %s\n'=' corrected bit error, E erasure, T tone, R repeat, M muted",
-                                  dsdDec.status_errorbar.empty() ? "(none)" : dsdDec.status_errorbar.c_str());
-            }
+            drawVoiceQualityBar(dsdDec.status_errorbar, dsdDec.status_sync, voiceQualitySmoothed, name);
         }
 
         // Names getFrameSync's return codes. A protocol showing up here without

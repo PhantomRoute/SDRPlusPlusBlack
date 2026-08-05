@@ -14,6 +14,7 @@
 #include <gui/widgets/constellation_diagram.h>
 #include "../dsp/dsd.h"
 #include "../dsp/slicer.h"
+#include "dsd_status_ui.h"
 #include "gui/style.h"
 #include <dsp/clock_recovery/fd.h>
 #include <dsp/clock_recovery/mm.h>
@@ -224,71 +225,69 @@ namespace demod {
                 ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "No protocols selected");
             }
 
-            ImGui::Text("Signal constellation+slicer levels: ");
+            ImGui::Spacing();
+
+            // The constellation is this decoder's level readout - it shows the slicer
+            // levels directly, which is more than a number could.
+            ImGui::LeftLabel("Signal");
             ImGui::SetNextItemWidth(menuWidth);
             constDiag.draw(ImVec2(0, 20));
 
             dsp::NewDSD::Frame_status fr_st = decoder.getFrameSyncStatus();
-            ImVec4 color = fr_st.sync ? (ImVec4(0.4f, 1.0f, 0.4f, 1.0f)) : (ImVec4(1.0f, 0.4f, 0.4f, 1.0f));
+            const char* protoName = "-";
+            if (fr_st.lasttype == dsp::NewDSD::Frame_status::LAST_P25) { protoName = "P25p1"; }
+            else if (fr_st.lasttype == dsp::NewDSD::Frame_status::LAST_DMR) { protoName = "DMR"; }
+            drawSyncLine(fr_st.sync, protoName);
+
+            // Only the protocol actually being decoded, and only the fields worth
+            // reading at a glance. The rest went behind Details rather than filling
+            // the panel with hex that means nothing unless you are chasing something.
+            if (!fr_st.sync) { style::beginDisabled(); }
             switch (fr_st.lasttype) {
             case dsp::NewDSD::Frame_status::LAST_P25: {
-                ImGui::TextColored(color, "Mode: P25p1");
-                if (!fr_st.sync) {
-                    style::beginDisabled();
-                }
                 dsp::NewDSD::P25_status p25_st = decoder.getP25Status();
-                ImGui::Text("NAC     : 0x%03x", p25_st.p25_status_nac);
-                ImGui::Text("DUID    : %u%u %s", p25_st.p25_status_lastduid[0], p25_st.p25_status_lastduid[1], p25_st.p25_status_lasttype.c_str());
+                ImGui::Text("NAC  0x%03x   SRC %u", p25_st.p25_status_nac, p25_st.p25_status_src);
+                ImGui::Text("TG   %u", p25_st.p25_status_tg);
+                ImGui::Text("DUID %u%u %s", p25_st.p25_status_lastduid[0], p25_st.p25_status_lastduid[1], p25_st.p25_status_lasttype.c_str());
                 if (p25_st.p25_status_irr_err) {
-                    ImGui::SameLine();
-                    ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), " IRRECOV ERROR!");
+                    ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Irrecoverable error");
                 }
-                ImGui::Text("SRC     : %u", p25_st.p25_status_src);
-                ImGui::Text("TG       : (id %u) %u (others %u %u %u)", p25_st.p25_status_tgid, p25_st.p25_status_tg, p25_st.p25_status_othertg1, p25_st.p25_status_othertg2, p25_st.p25_status_othertg3);
-                ImGui::Text("ALGID : 0x%02x", p25_st.p25_status_algid);
+                // Worth calling out plainly - an encrypted call is the usual reason
+                // for a solid sync producing no audio.
                 if (p25_st.p25_status_algid != 0x80) {
-                    // Encrypted
-                    ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "ENCR? KID: 0x%04x", p25_st.p25_status_kid);
+                    ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "Encrypted (ALG 0x%02x, KEY 0x%04x)", p25_st.p25_status_algid, p25_st.p25_status_kid);
                 }
                 else {
-                    ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "UNENCR");
+                    ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "Unencrypted");
                 }
-                ImGui::Text("MFID    : 0x%02x", p25_st.p25_status_mfid);
-                ImGui::TextColored((p25_st.p25_status_emr ? ImVec4(0.4f, 1.0f, 0.4f, 1.0f) : ImVec4(1.0f, 0.4f, 0.4f, 1.0f)), "EMR");
-                ImGui::Text("LCFORMAT: 0x%02x", p25_st.p25_status_lcformat);
-                ImGui::Text("LCINFO: 0x%016lx", p25_st.p25_status_lcinfo);
-                ImGui::Text("MI(INV): 0x%016lx %04x", p25_st.p25_status_mi_0, p25_st.p25_status_mi_1);
-                if (!fr_st.sync) {
-                    style::endDisabled();
+                if (p25_st.p25_status_emr) {
+                    ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "Emergency");
+                }
+                if (ImGui::TreeNode(("Details##_dsd_p25_detail_" + name).c_str())) {
+                    ImGui::Text("TGID     %u", p25_st.p25_status_tgid);
+                    ImGui::Text("Other TG %u %u %u", p25_st.p25_status_othertg1, p25_st.p25_status_othertg2, p25_st.p25_status_othertg3);
+                    ImGui::Text("MFID     0x%02x", p25_st.p25_status_mfid);
+                    ImGui::Text("LCFORMAT 0x%02x", p25_st.p25_status_lcformat);
+                    ImGui::Text("LCINFO   0x%016llx", (unsigned long long)p25_st.p25_status_lcinfo);
+                    ImGui::Text("MI(INV)  0x%016llx %04x", (unsigned long long)p25_st.p25_status_mi_0, p25_st.p25_status_mi_1);
+                    ImGui::TreePop();
                 }
                 break;
             }
             case dsp::NewDSD::Frame_status::LAST_DMR: {
-                ImGui::TextColored(color, "Mode: DMR");
-                if (!fr_st.sync) {
-                    style::beginDisabled();
-                }
                 dsp::NewDSD::DMR_status dmr_st = decoder.getDMRStatus();
-                ImGui::Text("SLOT0: (%02d) %s", dmr_st.dmr_status_s0_lastburstt, dmr_st.dmr_status_s0_lasttype.c_str());
-                ImGui::Text("SLOT1: (%02d) %s", dmr_st.dmr_status_s1_lastburstt, dmr_st.dmr_status_s1_lasttype.c_str());
-                ImGui::Text("CC: 0x%02x %02x", dmr_st.dmr_status_s1_lastburstt, dmr_st.dmr_status_cc);
-                if (!fr_st.sync) {
-                    style::endDisabled();
-                }
+                ImGui::Text("Slot 0  (%02d) %s", dmr_st.dmr_status_s0_lastburstt, dmr_st.dmr_status_s0_lasttype.c_str());
+                ImGui::Text("Slot 1  (%02d) %s", dmr_st.dmr_status_s1_lastburstt, dmr_st.dmr_status_s1_lasttype.c_str());
+                ImGui::Text("Colour code 0x%02x", dmr_st.dmr_status_cc);
                 break;
             }
             default:
-                ImGui::TextColored(color, "Mode: -");
                 break;
             }
-            if (!fr_st.sync) {
-                style::beginDisabled();
-            }
+            if (!fr_st.sync) { style::endDisabled(); }
+
             dsp::NewDSD::MBE_status mbe_st = decoder.getMBEStatus();
-            ImGui::TextColored((mbe_st.mbe_status_decoding ? ImVec4(0.4f, 1.0f, 0.4f, 1.0f) : ImVec4(1.0f, 0.4f, 0.4f, 1.0f)), "MBE ERR: %s", mbe_st.mbe_status_errorbar.c_str());
-            if (!fr_st.sync) {
-                style::endDisabled();
-            }
+            drawVoiceQualityBar(mbe_st.mbe_status_errorbar, fr_st.sync && mbe_st.mbe_status_decoding, voiceQualitySmoothed, name);
         }
 
         void setBandwidth(double bandwidth) {}
@@ -386,6 +385,7 @@ namespace demod {
 
         std::string name;
         ConfigManager* _config = NULL;
+        float voiceQualitySmoothed = 0.0f;
 
         static void _constDiagSinkHandler(float* data, int count, void* ctx) {
             DSD* _this = (DSD*)ctx;
