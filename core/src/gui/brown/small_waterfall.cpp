@@ -4,6 +4,7 @@
 #include <vector>
 #include <mutex>
 #include <cstddef>
+#include <cmath>
 #include <dsp/types.h>
 #include <dsp/multirate/rational_resampler.h>
 #include <gui/widgets/waterfall.h>
@@ -88,11 +89,26 @@ struct SubWaterfall::SubWaterfallPrivate {
                     maxx = dest[q];
                 }
             }
-            minMaxQueue.emplace_back(minn, maxx);
+            // With squelch closed the samples are all zero, and the power spectrum of
+            // silence comes out at -inf, or a nonsense value once volk is done with
+            // it. Averaging that into the running levels drags the colour scale far
+            // below anything real, so when the next transmission opens the squelch
+            // its first frames map to the top of the palette and arrive as a block of
+            // red. Silent lines are still drawn, they just do not get a vote on the
+            // levels - which leaves those sitting where the last real audio put them.
+            const float SILENCE_FLOOR = -200.0f;
+            const bool levelsUsable = std::isfinite(minn) && std::isfinite(maxx) && maxx > SILENCE_FLOOR;
+            if (levelsUsable) {
+                minMaxQueue.emplace_back(minn, maxx);
+            }
 
             int AVERAGE_SECONDS = 5;
             waterfall.pushFFT();
             inputBuffer.erase(inputBuffer.begin(), inputBuffer.begin() + fftSize);
+            if (minMaxQueue.empty()) {
+                // Nothing but silence so far, so there is no level to work from yet.
+                continue;
+            }
             int start = (int)minMaxQueue.size() - waterfallRate * AVERAGE_SECONDS;
             if (start < 0) {
                 start = 0;

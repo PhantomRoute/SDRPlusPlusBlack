@@ -418,7 +418,10 @@ void MainWindow::drawUpperLine(ImGui::WaterfallVFO* vfo) {
 
     ImGui::SameLine();
 
-    int snrOffset = 87.0f * style::uiScale;
+    // Right margin the meter keeps clear. 48 of the original 87 were the logo
+    // button that used to sit out there; with it gone the meter can use that space,
+    // so it now sits further right and gets wider until it hits its 300 clamp.
+    int snrOffset = 39.0f * style::uiScale;
     int snrWidth = std::clamp<int>(ImGui::GetWindowSize().x - ImGui::GetCursorPosX() - snrOffset, 100.0f * style::uiScale, 300.0f * style::uiScale);
     int snrPos = std::max<int>(ImGui::GetWindowSize().x - (snrWidth + snrOffset), ImGui::GetCursorPosX());
 
