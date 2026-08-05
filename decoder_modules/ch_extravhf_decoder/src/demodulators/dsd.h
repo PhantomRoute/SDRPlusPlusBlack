@@ -228,13 +228,18 @@ namespace demod {
 
             ImGui::Spacing();
 
-            drawLevelBar((int)(symbolPeak.load(std::memory_order_relaxed) * 100.0f), levelSmoothed);
+            // Full scale is the +-1.3 the slicer clamps its references at, not 1.0.
+            // Against 1.0 a properly tuned signal read 116% and sat red, because the
+            // RRC and the recovery loop carry a little gain of their own. Measured
+            // against what the slicer will actually follow, the same signal reads
+            // around 90% and the bar only goes red when it is genuinely past that.
+            drawLevelBar((int)(symbolPeak.load(std::memory_order_relaxed) * (100.0f / 1.3f)), levelSmoothed);
 
             // The constellation sits under it: the bar says how strong, this says
             // how clean, by showing where the symbols land against the slicer levels.
             ImGui::LeftLabel("Signal");
             ImGui::SetNextItemWidth(menuWidth);
-            constDiag.draw(ImVec2(0, 20));
+            constDiag.draw(ImVec2(0, 55));
 
             dsp::NewDSD::Frame_status fr_st = decoder.getFrameSyncStatus();
             const char* protoName = "-";
@@ -414,9 +419,14 @@ namespace demod {
 
             dsp::complex_t* cdBuff = _this->constDiag.acquireBuffer();
             if (count == 1024) {
+                // A 4FSK symbol carries all its information in one dimension, so
+                // plotting every point at im=0 piles a thousand of them onto four
+                // dots. Spread them vertically by position in the block instead:
+                // the four levels show up as four bands, and how tight each band
+                // is tells you at a glance how cleanly the signal is slicing.
                 for (int i = 0; i < 1021; i++) {
                     cdBuff[i].re = data[i];
-                    cdBuff[i].im = 0;
+                    cdBuff[i].im = ((float)(i % 128) / 64.0f) - 1.0f;
                 }
                 //                cdBuff[1019].re = _this->slicer.max;
                 //                cdBuff[1019].im = 0.5f;

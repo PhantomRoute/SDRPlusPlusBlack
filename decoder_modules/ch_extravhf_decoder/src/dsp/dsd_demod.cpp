@@ -350,31 +350,39 @@ namespace dsp {
 
             sum = 0;
             count = 0;
-            for (i = 0; i < samplesPerSymbol; i++) {
+            // Snapshot the rate and the sampling point. setDemodMode writes both
+            // from the menu thread, and a change part way through this loop leaves
+            // the accumulator windows below unreachable for the rest of it, so count
+            // stays zero and the division underneath is an integer divide by zero.
+            // Deselecting the last protocol while a signal was decoding did exactly
+            // that. Working from locals keeps one pass internally consistent.
+            const int sps = samplesPerSymbol;
+            const int symCenter = symbolCenter;
+            for (i = 0; i < sps; i++) {
                 // timing control
                 if ((i == 0) && (have_sync == 0)) {
-                    if (samplesPerSymbol == 20) {
+                    if (sps == 20) {
                         if ((jitter >= 7) && (jitter <= 10)) {
                             i--;
                         } else if ((jitter >= 11) && (jitter <= 14)) {
                             i++;
                         }
                     } else if (rfMod == 1) {
-                        if ((jitter >= 0) && (jitter < symbolCenter)) {
+                        if ((jitter >= 0) && (jitter < symCenter)) {
                             i++;          // fall back
-                        } else if ((jitter > symbolCenter) && (jitter < 10)) {
+                        } else if ((jitter > symCenter) && (jitter < 10)) {
                             i--;          // catch up
                         }
                     } else if (rfMod == 2) {
-                        if ((jitter >= symbolCenter - 1) && (jitter <= symbolCenter)) {
+                        if ((jitter >= symCenter - 1) && (jitter <= symCenter)) {
                             i--;
-                        } else if ((jitter >= symbolCenter + 1) && (jitter <= symbolCenter + 2)) {
+                        } else if ((jitter >= symCenter + 1) && (jitter <= symCenter + 2)) {
                             i++;
                         }
                     } else if (rfMod == 0) {
-                        if ((jitter > 0) && (jitter <= symbolCenter)) {
+                        if ((jitter > 0) && (jitter <= symCenter)) {
                             i--;          // catch up
-                        } else if ((jitter > symbolCenter) && (jitter < samplesPerSymbol)) {
+                        } else if ((jitter > symCenter) && (jitter < sps)) {
                             i++;          // fall back
                         }
                     }
@@ -386,7 +394,7 @@ namespace dsp {
                     if (lastsynctype >= 10 && lastsynctype <= 13)
                         sample = dmrFilter(sample);
                     else if (lastsynctype == 8 || lastsynctype == 9 || lastsynctype == 16 || lastsynctype == 17) {
-                        if(samplesPerSymbol == 20) {
+                        if(sps == 20) {
                             sample = nxdnFilter(sample);
                         } else { // the 12.5KHz NXDN filter is the same as the DMR filter
                             sample = dmrFilter(sample);
@@ -450,13 +458,13 @@ namespace dsp {
                         }
                     }
                 }
-                if (samplesPerSymbol == 20) {
+                if (sps == 20) {
                     if ((i >= 9) && (i <= 11)) {
                         sum += sample;
                         count++;
                     }
                 }
-                if (samplesPerSymbol == 5) {
+                if (sps == 5) {
                     if (i == 2) {
                         sum += sample;
                         count++;
@@ -465,7 +473,7 @@ namespace dsp {
                     if (rfMod == 0) {
                         // 0: C4FM modulation
 
-                        if ((i >= symbolCenter - 1) && (i <= symbolCenter + 2)) {
+                        if ((i >= symCenter - 1) && (i <= symCenter + 2)) {
                             sum += sample;
                             count++;
                         }
@@ -477,8 +485,8 @@ namespace dsp {
                         // comes one sample too late.
                         // This change makes a significant improvement in the BER, at least for
                         // this file.
-                        //if ((i == symbolCenter) || (i == symbolCenter + 1))
-                        if ((i == symbolCenter - 1) || (i == symbolCenter + 1)) {
+                        //if ((i == symCenter) || (i == symCenter + 1))
+                        if ((i == symCenter - 1) || (i == symCenter + 1)) {
                             sum += sample;
                             count++;
                         }
@@ -487,6 +495,9 @@ namespace dsp {
                 lastsample = sample;
             }   // for
 
+            // Belt and braces: a rate change racing this loop could still leave
+            // nothing accumulated, and dividing by that killed the process.
+            if (count == 0) { return lastsample; }
             symbol = (sum / count);
 
             if ((symboltiming == 1) && (have_sync == 0) && (lastsynctype != -1)) {
