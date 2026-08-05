@@ -145,7 +145,21 @@ namespace rds {
                 type = SYNDROMES[syn];
             }
             else {
-                type = (BlockType)((lastType + 1) % _BLOCK_TYPE_COUNT);
+                // A group runs A, B, C (or C'), D, so what follows C or C' is D and
+                // what follows D is A. Walking the enum instead - (lastType + 1) %
+                // _BLOCK_TYPE_COUNT - inserted a phantom C' after every C, because
+                // C' sits between them in the enum. That filed the block under the
+                // wrong index, and left lastType as C when the run length test below
+                // wanted B, so the whole group was dropped. One corrupted block cost
+                // the entire group.
+                static const BlockType NEXT_BLOCK[_BLOCK_TYPE_COUNT] = {
+                    BLOCK_TYPE_B, // after A
+                    BLOCK_TYPE_C, // after B
+                    BLOCK_TYPE_D, // after C
+                    BLOCK_TYPE_D, // after C'
+                    BLOCK_TYPE_A  // after D
+                };
+                type = NEXT_BLOCK[lastType];
             }
 
             // Save block while correcting errors (NOT YET) <- idk why the "not yet is here", TODO: find why
@@ -155,7 +169,18 @@ namespace rds {
             if (type == BLOCK_TYPE_A) {
                 decodeBlockA();
             }
-            else if (type == BLOCK_TYPE_B) { contGroup = 1; }
+            else if (type == BLOCK_TYPE_B) {
+                contGroup = 1;
+                // Block B starts a new group, so retire the blocks that follow it.
+                // Availability was never cleared, so a C or D recovered in an
+                // earlier group stayed marked available and the group decoders
+                // happily read it as if it belonged to this one - which is how a
+                // station name picks up characters from a group that has long since
+                // gone, at whatever offset this group happens to name.
+                blockAvail[BLOCK_TYPE_C] = false;
+                blockAvail[BLOCK_TYPE_CP] = false;
+                blockAvail[BLOCK_TYPE_D] = false;
+            }
             else if ((type == BLOCK_TYPE_C || type == BLOCK_TYPE_CP) && lastType == BLOCK_TYPE_B) { contGroup++; }
             else if (type == BLOCK_TYPE_D && (lastType == BLOCK_TYPE_C || lastType == BLOCK_TYPE_CP)) { contGroup++; }
             else {

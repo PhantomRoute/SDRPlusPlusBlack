@@ -261,8 +261,13 @@ namespace rds {
         int skip = 0;
         BlockType lastType = BLOCK_TYPE_A;
         int contGroup = 0;
-        uint32_t blocks[_BLOCK_TYPE_COUNT];
-        bool blockAvail[_BLOCK_TYPE_COUNT];
+        // Both need initialising. Decoder has no constructor, so as bare arrays
+        // these held indeterminate values until the first block of each type
+        // arrived - and every decode path gates on blockAvail, so a stale true
+        // would let it read a garbage block and publish a bogus PI code, callsign
+        // or station name before a single group had been received.
+        uint32_t blocks[_BLOCK_TYPE_COUNT] = {};
+        bool blockAvail[_BLOCK_TYPE_COUNT] = {};
 
         // Block A (All groups)
         std::mutex blockAMtx;
