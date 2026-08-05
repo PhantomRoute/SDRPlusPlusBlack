@@ -1607,10 +1607,16 @@ void MobileMainWindow::updateFrequencyAfterChange() {
 // was still reading it.
 void MobileMainWindow::stopAudioWaterfallReader() {
     if (!audioWaterfallThread.joinable()) { return; }
+    // Both of these wait on the reader thread, and both have hung at shutdown
+    // before, so say which one we are in. stopReader spins until the stream's
+    // reader count reaches zero and join waits for the thread to leave the loop.
+    flog::info("Audio waterfall: stopping reader");
     if (currentAudioStream) {
         currentAudioStream->stopReader();
     }
+    flog::info("Audio waterfall: joining reader");
     audioWaterfallThread.join();
+    flog::info("Audio waterfall: reader stopped");
 }
 
 void MobileMainWindow::updateAudioWaterfallPipeline() {

@@ -914,23 +914,34 @@ int sdrpp_main(int argc, char* argv[]) {
 
     backend::renderLoop();
 
+    // Every step below waits on something that can fail to stop, and when one of
+    // them does the window is already gone, so it looks like the app has exited
+    // while the process is still there. Log each step: the last line in the log is
+    // the one that hung.
+    flog::info("Shutdown: main window");
     gui::mainWindow.end();
 
     // Before anything gets torn down: its handlers reach into modules, and the
     // UI thread has stopped draining the queue they hand work to.
+    flog::info("Shutdown: http debug server");
     httpdebug::stopHttpServer();
 
     // On android, none of this shutdown should happen due to the way the UI works
 #ifndef __ANDROID__
     // Shut down all modules
     for (auto& [name, mod] : core::moduleManager.modules) {
+        flog::info("Shutdown: module {0}", name);
         mod.end();
     }
 
     // Terminate backend (TODO: CHECK RETURN VALUE)
+    flog::info("Shutdown: backend");
     backend::end();
 
+    flog::info("Shutdown: IQ frontend");
     sigpath::iqFrontEnd.stop();
+
+    flog::info("Shutdown: saving config");
 
     // Stop the save worker before reading the config, so it isn't serialising
     // the same object on another thread while we do.
