@@ -87,12 +87,6 @@
             "name": "Radionavigation",
             "type": "navigation",
             "start": 112000,
-            "end": 115000
-        },
-        {
-            "name": "Radionavigation",
-            "type": "navigation",
-            "start": 115000,
             "end": 117600
         },
         {
@@ -168,12 +162,6 @@
             "end": 315000
         },
         {
-            "name": "Aeronautical Radionavigation Maritime Radionavigation",
-            "type": "marine",
-            "start": 285300,
-            "end": 285700
-        },
-        {
             "name": "Aeronautical Radionavigation / Maritime Radionavigation",
             "type": "marine",
             "start": 285700,
@@ -183,12 +171,6 @@
             "name": "Aeronautical Radionavigation",
             "type": "aviation",
             "start": 315000,
-            "end": 325000
-        },
-        {
-            "name": "Aeronautical Radionavigation",
-            "type": "aviation",
-            "start": 325000,
             "end": 405000
         },
         {
@@ -213,12 +195,6 @@
             "name": "Maritime Mobile",
             "type": "marine",
             "start": 472000,
-            "end": 479000
-        },
-        {
-            "name": "Maritime Mobile",
-            "type": "marine",
-            "start": 479000,
             "end": 495000
         },
         {
@@ -489,84 +465,12 @@
             "name": "Fixed Mobile",
             "type": "mobile",
             "start": 30010000,
-            "end": 37500000
-        },
-        {
-            "name": "Fixed Mobile",
-            "type": "mobile",
-            "start": 37500000,
-            "end": 38250000
-        },
-        {
-            "name": "Fixed Mobile",
-            "type": "mobile",
-            "start": 38250000,
-            "end": 39000000
-        },
-        {
-            "name": "Fixed Mobile",
-            "type": "mobile",
-            "start": 39000000,
-            "end": 39500000
-        },
-        {
-            "name": "Fixed Mobile",
-            "type": "mobile",
-            "start": 39500000,
-            "end": 39986000
-        },
-        {
-            "name": "Fixed Mobile",
-            "type": "mobile",
-            "start": 39986000,
-            "end": 40020000
-        },
-        {
-            "name": "Fixed Mobile",
-            "type": "mobile",
-            "start": 40020000,
-            "end": 40980000
-        },
-        {
-            "name": "Fixed Mobile",
-            "type": "mobile",
-            "start": 40980000,
-            "end": 41015000
-        },
-        {
-            "name": "Fixed Mobile",
-            "type": "mobile",
-            "start": 41015000,
-            "end": 42000000
-        },
-        {
-            "name": "Fixed Mobile",
-            "type": "mobile",
-            "start": 42000000,
-            "end": 42500000
-        },
-        {
-            "name": "Fixed Mobile",
-            "type": "mobile",
-            "start": 42500000,
-            "end": 44000000
-        },
-        {
-            "name": "Fixed Mobile",
-            "type": "mobile",
-            "start": 44000000,
             "end": 47000000
         },
         {
             "name": "Broadcasting",
             "type": "broadcast",
             "start": 47000000,
-            "end": 50000000
-        },
-        {
-            "name": "Broadcasting",
-            "type": "broadcast",
-            "start": 50000000,
             "end": 52000000
         },
         {
@@ -639,24 +543,6 @@
             "name": "Space Operation / Meteorological",
             "type": "satellite",
             "start": 137000000,
-            "end": 137025000
-        },
-        {
-            "name": "Space Operation / Meteorological",
-            "type": "satellite",
-            "start": 137025000,
-            "end": 137175000
-        },
-        {
-            "name": "Space Operation / Meteorological",
-            "type": "satellite",
-            "start": 137175000,
-            "end": 137825000
-        },
-        {
-            "name": "Space Operation / Meteorological",
-            "type": "satellite",
-            "start": 137825000,
             "end": 138000000
         },
         {
@@ -711,12 +597,6 @@
             "name": "Fixed Mobile",
             "type": "mobile",
             "start": 153000000,
-            "end": 154000000
-        },
-        {
-            "name": "Fixed Mobile",
-            "type": "mobile",
-            "start": 154000000,
             "end": 156487500
         },
         {
@@ -730,12 +610,6 @@
             "type": "marine",
             "start": 156487500,
             "end": 156562500
-        },
-        {
-            "name": "Maritime Mobile",
-            "type": "marine",
-            "start": 156512500,
-            "end": 156537500
         },
         {
             "name": "Fixed Land Mobile Maritime Mobile",
@@ -753,30 +627,6 @@
             "name": "Maritime Mobile",
             "type": "marine",
             "start": 156762500,
-            "end": 156787500
-        },
-        {
-            "name": "Maritime Mobile",
-            "type": "marine",
-            "start": 156787500,
-            "end": 156812500
-        },
-        {
-            "name": "Maritime Mobile",
-            "type": "marine",
-            "start": 156812500,
-            "end": 156835700
-        },
-        {
-            "name": "Maritime Mobile",
-            "type": "marine",
-            "start": 156812500,
-            "end": 156837500
-        },
-        {
-            "name": "Maritime Mobile",
-            "type": "marine",
-            "start": 156835700,
             "end": 156837500
         },
         {
@@ -795,72 +645,18 @@
             "name": "Fixed Mobile",
             "type": "mobile",
             "start": 157187500,
-            "end": 157337500
-        },
-        {
-            "name": "Fixed Mobile",
-            "type": "mobile",
-            "start": 157337500,
-            "end": 161787500
-        },
-        {
-            "name": "Fixed Mobile",
-            "type": "mobile",
-            "start": 161787500,
-            "end": 161937500
-        },
-        {
-            "name": "Fixed Mobile",
-            "type": "mobile",
-            "start": 161937500,
-            "end": 161962500
-        },
-        {
-            "name": "Fixed Mobile",
-            "type": "mobile",
-            "start": 161962500,
-            "end": 161987500
-        },
-        {
-            "name": "Fixed Mobile",
-            "type": "mobile",
-            "start": 161987500,
-            "end": 162012500
-        },
-        {
-            "name": "Fixed Mobile",
-            "type": "mobile",
-            "start": 162012500,
-            "end": 162037500
-        },
-        {
-            "name": "Fixed Mobile",
-            "type": "mobile",
-            "start": 162037500,
             "end": 174000000
         },
         {
             "name": "Broadcasting",
             "type": "broadcast",
             "start": 174000000,
-            "end": 223000000
-        },
-        {
-            "name": "Broadcasting",
-            "type": "broadcast",
-            "start": 223000000,
             "end": 230000000
         },
         {
             "name": "Fixed Mobile",
             "type": "mobile",
             "start": 230000000,
-            "end": 235000000
-        },
-        {
-            "name": "Fixed Mobile",
-            "type": "mobile",
-            "start": 235000000,
             "end": 267000000
         },
         {
@@ -897,18 +693,6 @@
             "name": "Fixed Mobile",
             "type": "mobile",
             "start": 273000000,
-            "end": 312000000
-        },
-        {
-            "name": "Fixed Mobile",
-            "type": "mobile",
-            "start": 312000000,
-            "end": 315000000
-        },
-        {
-            "name": "Fixed Mobile",
-            "type": "mobile",
-            "start": 315000000,
             "end": 322000000
         },
         {
@@ -927,18 +711,6 @@
             "name": "Fixed Mobile",
             "type": "mobile",
             "start": 335400000,
-            "end": 387000000
-        },
-        {
-            "name": "Fixed Mobile",
-            "type": "mobile",
-            "start": 387000000,
-            "end": 390000000
-        },
-        {
-            "name": "Fixed Mobile",
-            "type": "mobile",
-            "start": 390000000,
             "end": 399900000
         },
         {
@@ -999,61 +771,13 @@
             "name": "70cm Amateur Radiolocation",
             "type": "amateur",
             "start": 430000000,
-            "end": 432000000
-        },
-        {
-            "name": "70cm Amateur Radiolocation",
-            "type": "amateur",
-            "start": 432000000,
-            "end": 438000000
-        },
-        {
-            "name": "70cm Amateur Radiolocation",
-            "type": "amateur",
-            "start": 438000000,
             "end": 440000000
         },
         {
             "name": "Fixed Mobile",
             "type": "mobile",
             "start": 440000000,
-            "end": 450000000
-        },
-        {
-            "name": "Fixed Mobile",
-            "type": "mobile",
-            "start": 450000000,
-            "end": 455000000
-        },
-        {
-            "name": "Fixed Mobile",
-            "type": "mobile",
-            "start": 455000000,
-            "end": 456000000
-        },
-        {
-            "name": "Fixed Mobile",
-            "type": "mobile",
-            "start": 456000000,
-            "end": 459000000
-        },
-        {
-            "name": "Fixed Mobile",
-            "type": "mobile",
-            "start": 459000000,
-            "end": 460000000
-        },
-        {
-            "name": "Fixed Mobile",
-            "type": "mobile",
-            "start": 460000000,
             "end": 470000000
-        },
-        {
-            "name": "Broadcasting",
-            "type": "broadcast",
-            "start": 470000000,
-            "end": 606000000
         },
         {
             "name": "Broadcasting",
@@ -1083,24 +807,6 @@
             "name": "Fixed Mobile / Broadcasting",
             "type": "broadcast",
             "start": 790000000,
-            "end": 862000000
-        },
-        {
-            "name": "Fixed Mobile / Broadcasting",
-            "type": "broadcast",
-            "start": 862000000,
-            "end": 890000000
-        },
-        {
-            "name": "Fixed Mobile / Broadcasting",
-            "type": "broadcast",
-            "start": 890000000,
-            "end": 942000000
-        },
-        {
-            "name": "Fixed Mobile / Broadcasting",
-            "type": "broadcast",
-            "start": 942000000,
             "end": 960000000
         },
         {
@@ -1173,18 +879,6 @@
             "name": "Earth Exploration / Satellite",
             "type": "radiolocation",
             "start": 10000000000,
-            "end": 10025000000
-        },
-        {
-            "name": "Earth Exploration / Satellite",
-            "type": "radiolocation",
-            "start": 10000000000,
-            "end": 10400000000
-        },
-        {
-            "name": "Earth Exploration / Satellite",
-            "type": "radiolocation",
-            "start": 10025000000,
             "end": 10400000000
         },
         {
@@ -1215,12 +909,6 @@
             "name": "Earth Exploration / Satellite",
             "type": "astronomy",
             "start": 10600000000,
-            "end": 10680000000
-        },
-        {
-            "name": "Earth Exploration / Satellite",
-            "type": "astronomy",
-            "start": 10680000000,
             "end": 10700000000
         },
         {
@@ -1257,12 +945,6 @@
             "name": "Fixed / Satellite",
             "type": "satellite",
             "start": 12500000000,
-            "end": 12750000000
-        },
-        {
-            "name": "Fixed / Satellite",
-            "type": "satellite",
-            "start": 12750000000,
             "end": 13250000000
         },
         {
@@ -1275,12 +957,6 @@
             "name": "Earth Exploration / Satellite",
             "type": "radiolocation",
             "start": 13400000000,
-            "end": 13650000000
-        },
-        {
-            "name": "Earth Exploration / Satellite",
-            "type": "radiolocation",
-            "start": 13650000000,
             "end": 13750000000
         },
         {
@@ -1299,36 +975,6 @@
             "name": "Fixed / Satellite",
             "type": "satellite",
             "start": 14250000000,
-            "end": 14300000000
-        },
-        {
-            "name": "Fixed / Satellite",
-            "type": "satellite",
-            "start": 14300000000,
-            "end": 14400000000
-        },
-        {
-            "name": "Fixed / Satellite",
-            "type": "satellite",
-            "start": 14400000000,
-            "end": 14470000000
-        },
-        {
-            "name": "Fixed / Satellite",
-            "type": "satellite",
-            "start": 14470000000,
-            "end": 14500000000
-        },
-        {
-            "name": "Fixed / Satellite",
-            "type": "satellite",
-            "start": 14500000000,
-            "end": 14750000000
-        },
-        {
-            "name": "Fixed / Satellite",
-            "type": "satellite",
-            "start": 14750000000,
             "end": 14800000000
         },
         {
@@ -1365,18 +1011,6 @@
             "name": "Radiolocation",
             "type": "radiolocation",
             "start": 15700000000,
-            "end": 16600000000
-        },
-        {
-            "name": "Radiolocation",
-            "type": "radiolocation",
-            "start": 16600000000,
-            "end": 17100000000
-        },
-        {
-            "name": "Radiolocation",
-            "type": "radiolocation",
-            "start": 17100000000,
             "end": 17200000000
         },
         {
@@ -1389,24 +1023,6 @@
             "name": "Fixed / Satellite",
             "type": "satellite",
             "start": 17300000000,
-            "end": 17700000000
-        },
-        {
-            "name": "Fixed / Satellite",
-            "type": "satellite",
-            "start": 17700000000,
-            "end": 18100000000
-        },
-        {
-            "name": "Fixed / Satellite",
-            "type": "satellite",
-            "start": 18100000000,
-            "end": 18400000000
-        },
-        {
-            "name": "Fixed / Satellite",
-            "type": "satellite",
-            "start": 18400000000,
             "end": 18600000000
         },
         {
@@ -1431,24 +1047,6 @@
             "name": "Fixed / Satellite",
             "type": "satellite",
             "start": 19600000000,
-            "end": 19700000000
-        },
-        {
-            "name": "Fixed / Satellite",
-            "type": "satellite",
-            "start": 19700000000,
-            "end": 20100000000
-        },
-        {
-            "name": "Fixed / Satellite",
-            "type": "satellite",
-            "start": 20100000000,
-            "end": 20200000000
-        },
-        {
-            "name": "Fixed / Satellite",
-            "type": "satellite",
-            "start": 20200000000,
             "end": 21200000000
         },
         {
@@ -1485,12 +1083,6 @@
             "name": "Fixed Inter / Satellite",
             "type": "satellite",
             "start": 22550000000,
-            "end": 23150000000
-        },
-        {
-            "name": "Fixed Inter / Satellite",
-            "type": "satellite",
-            "start": 23150000000,
             "end": 23550000000
         },
         {
@@ -1533,12 +1125,6 @@
             "name": "Fixed / Satellite",
             "type": "satellite",
             "start": 24650000000,
-            "end": 24750000000
-        },
-        {
-            "name": "Fixed / Satellite",
-            "type": "satellite",
-            "start": 24750000000,
             "end": 25250000000
         },
         {
@@ -1581,72 +1167,6 @@
             "name": "Fixed / Satellite",
             "type": "satellite",
             "start": 28450000000,
-            "end": 28500000000
-        },
-        {
-            "name": "Fixed / Satellite",
-            "type": "satellite",
-            "start": 28500000000,
-            "end": 28940000000
-        },
-        {
-            "name": "Fixed / Satellite",
-            "type": "satellite",
-            "start": 28500000000,
-            "end": 29100000000
-        },
-        {
-            "name": "Fixed / Satellite",
-            "type": "satellite",
-            "start": 28940000000,
-            "end": 29100000000
-        },
-        {
-            "name": "Fixed / Satellite",
-            "type": "satellite",
-            "start": 29100000000,
-            "end": 29460000000
-        },
-        {
-            "name": "Fixed / Satellite",
-            "type": "satellite",
-            "start": 29100000000,
-            "end": 29500000000
-        },
-        {
-            "name": "Fixed / Satellite",
-            "type": "satellite",
-            "start": 29500000000,
-            "end": 29900000000
-        },
-        {
-            "name": "Fixed / Satellite",
-            "type": "satellite",
-            "start": 29900000000,
-            "end": 29950000000
-        },
-        {
-            "name": "Fixed / Satellite",
-            "type": "satellite",
-            "start": 29900000000,
-            "end": 30000000000
-        },
-        {
-            "name": "Fixed / Satellite",
-            "type": "satellite",
-            "start": 29950000000,
-            "end": 29999000000
-        },
-        {
-            "name": "Fixed / Satellite",
-            "type": "satellite",
-            "start": 29999000000,
-            "end": 30000000000
-        },
-        {
-            "name": "Fixed / Satellite",
-            "type": "satellite",
-            "start": 30000000000,
             "end": 31000000000
         },
         {
@@ -1659,24 +1179,12 @@
             "name": "Earth Exploration / Satellite",
             "type": "astronomy",
             "start": 31300000000,
-            "end": 31500000000
-        },
-        {
-            "name": "Earth Exploration / Satellite",
-            "type": "astronomy",
-            "start": 31500000000,
             "end": 31800000000
         },
         {
             "name": "Fixed / Radionavigation Space Research",
             "type": "navigation",
             "start": 31800000000,
-            "end": 32000000000
-        },
-        {
-            "name": "Fixed / Radionavigation Space Research",
-            "type": "navigation",
-            "start": 32000000000,
             "end": 32300000000
         },
         {
@@ -1761,12 +1269,6 @@
             "name": "Fixed / Satellite",
             "type": "broadcast",
             "start": 40500000000,
-            "end": 41000000000
-        },
-        {
-            "name": "Fixed / Satellite",
-            "type": "broadcast",
-            "start": 41000000000,
             "end": 42500000000
         },
         {
@@ -1774,12 +1276,6 @@
             "type": "astronomy",
             "start": 42500000000,
             "end": 43500000000
-        },
-        {
-            "name": "Mobile / Satellite Radionavigation",
-            "type": "navigation",
-            "start": 43500000000,
-            "end": 45500000000
         },
         {
             "name": "Mobile / Satellite Radionavigation",
@@ -1803,30 +1299,12 @@
             "name": "Fixed / Satellite",
             "type": "cellular",
             "start": 47200000000,
-            "end": 47500000000
-        },
-        {
-            "name": "Fixed / Satellite",
-            "type": "cellular",
-            "start": 47500000000,
-            "end": 47900000000
-        },
-        {
-            "name": "Fixed / Satellite",
-            "type": "cellular",
-            "start": 47900000000,
             "end": 48200000000
         },
         {
             "name": "Fixed / Satellite",
             "type": "satellite",
             "start": 48200000000,
-            "end": 48540000000
-        },
-        {
-            "name": "Fixed / Satellite",
-            "type": "satellite",
-            "start": 48540000000,
             "end": 48940000000
         },
         {
@@ -1839,12 +1317,6 @@
             "name": "Fixed / Satellite",
             "type": "satellite",
             "start": 49040000000,
-            "end": 49440000000
-        },
-        {
-            "name": "Fixed / Satellite",
-            "type": "satellite",
-            "start": 49440000000,
             "end": 50200000000
         },
         {
@@ -1857,12 +1329,6 @@
             "name": "Fixed / Satellite",
             "type": "satellite",
             "start": 50400000000,
-            "end": 51400000000
-        },
-        {
-            "name": "Fixed / Satellite",
-            "type": "satellite",
-            "start": 51400000000,
             "end": 52400000000
         },
         {
@@ -1875,36 +1341,6 @@
             "name": "Earth Exploration / Satellite",
             "type": "satellite",
             "start": 52600000000,
-            "end": 54250000000
-        },
-        {
-            "name": "Earth Exploration / Satellite",
-            "type": "satellite",
-            "start": 54250000000,
-            "end": 55780000000
-        },
-        {
-            "name": "Earth Exploration / Satellite",
-            "type": "satellite",
-            "start": 55780000000,
-            "end": 56900000000
-        },
-        {
-            "name": "Earth Exploration / Satellite",
-            "type": "satellite",
-            "start": 56900000000,
-            "end": 57000000000
-        },
-        {
-            "name": "Earth Exploration / Satellite",
-            "type": "satellite",
-            "start": 57000000000,
-            "end": 58200000000
-        },
-        {
-            "name": "Earth Exploration / Satellite",
-            "type": "satellite",
-            "start": 58200000000,
             "end": 59000000000
         },
         {
@@ -1972,12 +1408,6 @@
             "type": "astronomy",
             "start": 79000000000,
             "end": 81000000000
-        },
-        {
-            "name": "Fixed / Satellite",
-            "type": "astronomy",
-            "start": 81000000000,
-            "end": 81500000000
         },
         {
             "name": "Fixed / Satellite",
@@ -2067,12 +1497,6 @@
             "name": "Earth Exploration / Satellite",
             "type": "satellite",
             "start": 116000000000,
-            "end": 119980000000
-        },
-        {
-            "name": "Earth Exploration / Satellite",
-            "type": "satellite",
-            "start": 119980000000,
             "end": 122250000000
         },
         {
@@ -2175,12 +1599,6 @@
             "name": "Earth Exploration / Satellite",
             "type": "satellite",
             "start": 185000000000,
-            "end": 190000000000
-        },
-        {
-            "name": "Earth Exploration / Satellite",
-            "type": "satellite",
-            "start": 190000000000,
             "end": 191800000000
         },
         {
@@ -2199,12 +1617,6 @@
             "name": "Fixed / Satellite",
             "type": "astronomy",
             "start": 209000000000,
-            "end": 217000000000
-        },
-        {
-            "name": "Fixed / Satellite",
-            "type": "astronomy",
-            "start": 217000000000,
             "end": 226000000000
         },
         {
