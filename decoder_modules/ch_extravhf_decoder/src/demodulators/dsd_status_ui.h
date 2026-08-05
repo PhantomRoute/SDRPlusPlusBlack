@@ -19,6 +19,27 @@ namespace demod {
         return current + ((target - current) * step);
     }
 
+    // Input level as a bar rather than a bare percentage - the useful question is
+    // "is it in range", which a number makes you work out. Amber below 15% because
+    // that starves the slicer, red above 95% because it is close to clipping.
+    inline void drawLevelBar(int percent, float& smoothed) {
+        float level = (float)percent / 100.0f;
+        if (level > 1.0f) { level = 1.0f; }
+        if (level < 0.0f) { level = 0.0f; }
+        smoothed = approachValue(smoothed, level, 10.0f);
+
+        ImVec4 color = ImVec4(0.4f, 0.8f, 0.4f, 1.0f);
+        if (percent < 15) { color = ImVec4(1.0f, 0.6f, 0.3f, 1.0f); }
+        else if (percent > 95) { color = ImVec4(1.0f, 0.4f, 0.3f, 1.0f); }
+
+        char overlay[32];
+        snprintf(overlay, sizeof(overlay), "%d%%", percent);
+        ImGui::LeftLabel("Level");
+        ImGui::PushStyleColor(ImGuiCol_PlotHistogram, color);
+        ImGui::ProgressBar(smoothed, ImVec2(ImGui::GetContentRegionAvail().x, 0), overlay);
+        ImGui::PopStyleColor();
+    }
+
     // mbelib writes one '=' per corrected bit error, then a letter if the frame was
     // an erasure (E), a tone (T), repeated because it had more than three errors (R),
     // or muted after too many repeats (M). A lengthening row of '=' carries all of

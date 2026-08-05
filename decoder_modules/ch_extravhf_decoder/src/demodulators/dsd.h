@@ -20,6 +20,7 @@
 #include <dsp/clock_recovery/mm.h>
 #include <chrono>
 #include <mutex>
+#include <atomic>
 #include <thread>
 #include <unordered_map>
 
@@ -227,8 +228,10 @@ namespace demod {
 
             ImGui::Spacing();
 
-            // The constellation is this decoder's level readout - it shows the slicer
-            // levels directly, which is more than a number could.
+            drawLevelBar((int)(symbolPeak.load(std::memory_order_relaxed) * 100.0f), levelSmoothed);
+
+            // The constellation sits under it: the bar says how strong, this says
+            // how clean, by showing where the symbols land against the slicer levels.
             ImGui::LeftLabel("Signal");
             ImGui::SetNextItemWidth(menuWidth);
             constDiag.draw(ImVec2(0, 20));
@@ -386,9 +389,29 @@ namespace demod {
         std::string name;
         ConfigManager* _config = NULL;
         float voiceQualitySmoothed = 0.0f;
+        float levelSmoothed = 0.0f;
+        // Written by the DSP thread in _constDiagSinkHandler, read by the menu.
+        std::atomic<float> symbolPeak { 0.0f };
 
         static void _constDiagSinkHandler(float* data, int count, void* ctx) {
             DSD* _this = (DSD*)ctx;
+
+            // Track the symbol amplitude for the level bar. The slicer's own max and
+            // min would be the obvious source, but the AFC that used to move them is
+            // commented out, so they sit at their initial +-1 forever. These symbols
+            // are the slicer's input, and quadDemod normalises 1944Hz of deviation to
+            // 1.0, so a correctly tuned signal peaks around there and the reading
+            // lands near 100%. Decays slowly so it holds through a gap between
+            // bursts rather than dropping out with the carrier.
+            float peak = 0.0f;
+            for (int i = 0; i < count; i++) {
+                float mag = data[i] < 0.0f ? -data[i] : data[i];
+                if (mag > peak) { peak = mag; }
+            }
+            float prev = _this->symbolPeak.load(std::memory_order_relaxed);
+            _this->symbolPeak.store(peak > prev ? peak : prev + ((peak - prev) * 0.15f),
+                                    std::memory_order_relaxed);
+
             dsp::complex_t* cdBuff = _this->constDiag.acquireBuffer();
             if (count == 1024) {
                 for (int i = 0; i < 1021; i++) {

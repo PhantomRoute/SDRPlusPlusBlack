@@ -121,7 +121,7 @@ namespace demod {
 
             // Input level as a bar rather than a bare percentage - the useful
             // question is "is it in range", which a number makes you work out.
-            drawLevelBar();
+            drawLevelBar(dsdDec.status_lvl, levelSmoothed);
 
             drawSyncLine(dsdDec.status_sync, dsdDec.status_last_proto);
 
@@ -171,25 +171,6 @@ namespace demod {
                     }
                 }
             }
-        }
-
-        void drawLevelBar() {
-            float level = (float)dsdDec.status_lvl / 100.0f;
-            if (level > 1.0f) { level = 1.0f; }
-            if (level < 0.0f) { level = 0.0f; }
-            levelSmoothed = approachValue(levelSmoothed, level, 10.0f);
-
-            // Too quiet starves the slicer, pinned at the top means clipping.
-            ImVec4 color = ImVec4(0.4f, 0.8f, 0.4f, 1.0f);
-            if (dsdDec.status_lvl < 15) { color = ImVec4(1.0f, 0.6f, 0.3f, 1.0f); }
-            else if (dsdDec.status_lvl > 95) { color = ImVec4(1.0f, 0.4f, 0.3f, 1.0f); }
-
-            char overlay[32];
-            snprintf(overlay, sizeof(overlay), "%d%%", dsdDec.status_lvl);
-            ImGui::LeftLabel("Level");
-            ImGui::PushStyleColor(ImGuiCol_PlotHistogram, color);
-            ImGui::ProgressBar(levelSmoothed, ImVec2(ImGui::GetContentRegionAvail().x, 0), overlay);
-            ImGui::PopStyleColor();
         }
 
         void drawVoiceQuality() {
