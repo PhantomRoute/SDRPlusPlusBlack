@@ -116,26 +116,7 @@ namespace demod {
                     ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.4f, 1.0f), "Untick the rest to decode %s", proto.label);
                 }
             }
-            if (dsdDec.frameNxdn48 == 1 || dsdDec.frameNxdn96 == 1) {
-                // Off is szechyjs's exact compare, on is what dsdcc and dsd-fme do.
-                // Worth turning off if it starts syncing on noise.
-                bool tolerant = dsdDec.nxdnSyncTolerance > 0;
-                if (ImGui::Checkbox(("Tolerant NXDN sync##_olddsd_nxdntol_" + name).c_str(), &tolerant)) {
-                    dsdDec.nxdnSyncTolerance = tolerant ? 1 : 0;
-                    _config->acquire();
-                    _config->conf[name][getName()]["nxdnSyncTolerance"] = dsdDec.nxdnSyncTolerance;
-                    _config->release(true);
-                }
-                // Off is upstream's behaviour: slicer levels frozen at whatever they
-                // were when the frame synced.
-                if (ImGui::Checkbox(("Track levels (GFSK)##_olddsd_gfsktrack_" + name).c_str(), &dsdDec.trackLevelsForGfsk)) {
-                    _config->acquire();
-                    _config->conf[name][getName()]["trackLevelsForGfsk"] = dsdDec.trackLevelsForGfsk;
-                    _config->release(true);
-                }
-            }
-
-            ImGui::Separator();
+            ImGui::Spacing();
 
             // Input level as a bar rather than a bare percentage - the useful
             // question is "is it in range", which a number makes you work out.
@@ -163,10 +144,35 @@ namespace demod {
 
             const char* modNames[] = { "C4FM", "QPSK", "GFSK" };
             int rfMod = dsdDec.getRfMod();
-            ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), "Demod: %s %d sps, sync %s",
+            ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "%s  %d sps  sync %s",
                                (rfMod >= 0 && rfMod <= 2) ? modNames[rfMod] : "?",
                                dsdDec.getSamplesPerSymbol(),
                                getSyncTypeName(dsdDec.getLastSyncType()));
+
+            // Tuning knobs for the NXDN work, collapsed by default and only shown
+            // when they apply - the same way the main window tucks its debug section
+            // away. Nobody needs these to listen to a channel.
+            if (dsdDec.frameNxdn48 == 1 || dsdDec.frameNxdn96 == 1) {
+                ImGui::Spacing();
+                if (ImGui::CollapsingHeader(("Advanced##_olddsd_adv_" + name).c_str())) {
+                    // Off is szechyjs's exact compare, on is what dsdcc and dsd-fme do.
+                    // Worth turning off if it starts syncing on noise.
+                    bool tolerant = dsdDec.nxdnSyncTolerance > 0;
+                    if (ImGui::Checkbox(("Tolerant NXDN sync##_olddsd_nxdntol_" + name).c_str(), &tolerant)) {
+                        dsdDec.nxdnSyncTolerance = tolerant ? 1 : 0;
+                        _config->acquire();
+                        _config->conf[name][getName()]["nxdnSyncTolerance"] = dsdDec.nxdnSyncTolerance;
+                        _config->release(true);
+                    }
+                    // Off is upstream's behaviour: slicer levels frozen at whatever
+                    // they were when the frame synced.
+                    if (ImGui::Checkbox(("Track levels (GFSK)##_olddsd_gfsktrack_" + name).c_str(), &dsdDec.trackLevelsForGfsk)) {
+                        _config->acquire();
+                        _config->conf[name][getName()]["trackLevelsForGfsk"] = dsdDec.trackLevelsForGfsk;
+                        _config->release(true);
+                    }
+                }
+            }
         }
 
         // Eases a bar toward its reading so it shows a level instead of flickering
