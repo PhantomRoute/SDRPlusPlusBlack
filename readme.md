@@ -11,7 +11,7 @@ I built this fork for myself, because the existing versions didn't have everythi
 * **[SDR++Brown](https://github.com/sannysanoff/SDRPlusPlusBrown)** by sannysanoff - the fork this one is based on, with a large set of features of its own.
 * **[SDR++](https://github.com/AlexandreRouma/SDRPlusPlus)** by Alexandre Rouma - the original, and the reason any of this exists.
 
-Parts of this fork are written with AI assistance. If that matters to you, the two projects above are not, and that's a perfectly good reason to pick one of them instead.
+Parts of this fork are written with AI assistance - mostly the hairier decoder work, where I'd rather say so than pretend otherwise. Worth knowing that the original SDR++ forbids AI-generated contributions as a matter of policy. If you feel the same way, that's a perfectly good reason to use it instead.
 
 Both digital voice modes in the Radio module now have a **Protocols** dropdown. Leave everything ticked and it auto-detects; untick a protocol to stop it syncing on that one.
 
