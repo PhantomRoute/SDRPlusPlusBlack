@@ -1,0 +1,543 @@
+{
+    "name": "South Africa",
+    "country_name": "South Africa",
+    "country_code": "ZA",
+    "author_name": "PhantomRoute",
+    "author_url": "https://github.com/PhantomRoute/SDRPlusPlusBlack",
+    "bands": [
+        {
+            "name": "2200m Ham Band",
+            "type": "amateur",
+            "start": 135700,
+            "end": 137800
+        },
+        {
+            "name": "Air/Marine Nav Beacons",
+            "type": "aviation",
+            "start": 283500,
+            "end": 526500
+        },
+        {
+            "name": "630m Ham Band",
+            "type": "amateur",
+            "start": 472000,
+            "end": 479000
+        },
+        {
+            "name": "Medium Wave (AM Broadcast)",
+            "type": "broadcast",
+            "start": 526500,
+            "end": 1606500
+        },
+        {
+            "name": "160m Ham Band",
+            "type": "amateur",
+            "start": 1810000,
+            "end": 1850000
+        },
+        {
+            "name": "Maritime",
+            "type": "marine",
+            "start": 2045000,
+            "end": 2300000
+        },
+        {
+            "name": "120m Broadcast",
+            "type": "broadcast",
+            "start": 2300000,
+            "end": 2495000
+        },
+        {
+            "name": "Maritime",
+            "type": "marine",
+            "start": 2500000,
+            "end": 2850000
+        },
+        {
+            "name": "Aeronautical Mobile",
+            "type": "aviation",
+            "start": 2850000,
+            "end": 3155000
+        },
+        {
+            "name": "90m Broadcast",
+            "type": "broadcast",
+            "start": 3200000,
+            "end": 3400000
+        },
+        {
+            "name": "Aeronautical Mobile",
+            "type": "aviation",
+            "start": 3400000,
+            "end": 3500000
+        },
+        {
+            "name": "80m Ham Band",
+            "type": "amateur",
+            "start": 3500000,
+            "end": 3800000
+        },
+        {
+            "name": "75m Broadcast",
+            "type": "broadcast",
+            "start": 3900000,
+            "end": 4000000
+        },
+        {
+            "name": "Maritime",
+            "type": "marine",
+            "start": 4063000,
+            "end": 4438000
+        },
+        {
+            "name": "Aeronautical Mobile",
+            "type": "aviation",
+            "start": 4650000,
+            "end": 4750000
+        },
+        {
+            "name": "60m Broadcast",
+            "type": "broadcast",
+            "start": 4750000,
+            "end": 4995000
+        },
+        {
+            "name": "60m Ham Band",
+            "type": "amateur",
+            "start": 5351500,
+            "end": 5366500
+        },
+        {
+            "name": "Aeronautical Mobile",
+            "type": "aviation",
+            "start": 5450000,
+            "end": 5730000
+        },
+        {
+            "name": "49m Broadcast",
+            "type": "broadcast",
+            "start": 5900000,
+            "end": 6200000
+        },
+        {
+            "name": "Maritime",
+            "type": "marine",
+            "start": 6200000,
+            "end": 6525000
+        },
+        {
+            "name": "Aeronautical Mobile",
+            "type": "aviation",
+            "start": 6525000,
+            "end": 6765000
+        },
+        {
+            "name": "40m Ham Band",
+            "type": "amateur",
+            "start": 7000000,
+            "end": 7200000
+        },
+        {
+            "name": "41m Broadcast",
+            "type": "broadcast",
+            "start": 7200000,
+            "end": 7450000
+        },
+        {
+            "name": "Maritime",
+            "type": "marine",
+            "start": 8195000,
+            "end": 8815000
+        },
+        {
+            "name": "Aeronautical Mobile",
+            "type": "aviation",
+            "start": 8815000,
+            "end": 9040000
+        },
+        {
+            "name": "31m Broadcast",
+            "type": "broadcast",
+            "start": 9400000,
+            "end": 9900000
+        },
+        {
+            "name": "Aeronautical Mobile",
+            "type": "aviation",
+            "start": 10005000,
+            "end": 10100000
+        },
+        {
+            "name": "30m Ham Band",
+            "type": "amateur",
+            "start": 10100000,
+            "end": 10150000
+        },
+        {
+            "name": "Aeronautical Mobile",
+            "type": "aviation",
+            "start": 11175000,
+            "end": 11400000
+        },
+        {
+            "name": "25m Broadcast",
+            "type": "broadcast",
+            "start": 11600000,
+            "end": 12100000
+        },
+        {
+            "name": "Maritime",
+            "type": "marine",
+            "start": 12230000,
+            "end": 13200000
+        },
+        {
+            "name": "Aeronautical Mobile",
+            "type": "aviation",
+            "start": 13200000,
+            "end": 13360000
+        },
+        {
+            "name": "22m Broadcast",
+            "type": "broadcast",
+            "start": 13570000,
+            "end": 13870000
+        },
+        {
+            "name": "20m Ham Band",
+            "type": "amateur",
+            "start": 14000000,
+            "end": 14350000
+        },
+        {
+            "name": "Aeronautical Mobile",
+            "type": "aviation",
+            "start": 15010000,
+            "end": 15100000
+        },
+        {
+            "name": "19m Broadcast",
+            "type": "broadcast",
+            "start": 15100000,
+            "end": 15800000
+        },
+        {
+            "name": "Maritime",
+            "type": "marine",
+            "start": 16360000,
+            "end": 17410000
+        },
+        {
+            "name": "16m Broadcast",
+            "type": "broadcast",
+            "start": 17480000,
+            "end": 17900000
+        },
+        {
+            "name": "Aeronautical Mobile",
+            "type": "aviation",
+            "start": 17900000,
+            "end": 18030000
+        },
+        {
+            "name": "17m Ham Band",
+            "type": "amateur",
+            "start": 18068000,
+            "end": 18168000
+        },
+        {
+            "name": "15m Broadcast",
+            "type": "broadcast",
+            "start": 18900000,
+            "end": 19020000
+        },
+        {
+            "name": "15m Ham Band",
+            "type": "amateur",
+            "start": 21000000,
+            "end": 21450000
+        },
+        {
+            "name": "13m Broadcast",
+            "type": "broadcast",
+            "start": 21450000,
+            "end": 21850000
+        },
+        {
+            "name": "Aeronautical Mobile",
+            "type": "aviation",
+            "start": 21870000,
+            "end": 22000000
+        },
+        {
+            "name": "12m Ham Band",
+            "type": "amateur",
+            "start": 24890000,
+            "end": 24990000
+        },
+        {
+            "name": "11m Broadcast",
+            "type": "broadcast",
+            "start": 25670000,
+            "end": 26100000
+        },
+        {
+            "name": "CB Radio",
+            "type": "utility",
+            "start": 26960000,
+            "end": 27410000
+        },
+        {
+            "name": "10m Ham Band",
+            "type": "amateur",
+            "start": 28000000,
+            "end": 29700000
+        },
+        {
+            "name": "6m Ham Band",
+            "type": "amateur",
+            "start": 50000000,
+            "end": 54000000
+        },
+        {
+            "name": "4m Ham Band",
+            "type": "amateur",
+            "start": 70000000,
+            "end": 70300000
+        },
+        {
+            "name": "FM Broadcast",
+            "type": "broadcast",
+            "start": 87500000,
+            "end": 108000000
+        },
+        {
+            "name": "Air Band VOR/ILS",
+            "type": "aviation",
+            "start": 108000000,
+            "end": 117975000
+        },
+        {
+            "name": "Air Band Voice",
+            "type": "aviation",
+            "start": 117975000,
+            "end": 137000000
+        },
+        {
+            "name": "Satellites",
+            "type": "satellite",
+            "start": 137000000,
+            "end": 138000000
+        },
+        {
+            "name": "2m Ham Band",
+            "type": "amateur",
+            "start": 144000000,
+            "end": 146000000
+        },
+        {
+            "name": "Satellites",
+            "type": "satellite",
+            "start": 148000000,
+            "end": 150050000
+        },
+        {
+            "name": "Marine VHF",
+            "type": "marine",
+            "start": 156000000,
+            "end": 162050000
+        },
+        {
+            "name": "Business / PMR",
+            "type": "PMR",
+            "start": 162050000,
+            "end": 174000000
+        },
+        {
+            "name": "VHF TV / DTT (Band III)",
+            "type": "broadcast",
+            "start": 174000000,
+            "end": 254000000
+        },
+        {
+            "name": "Satellites",
+            "type": "satellite",
+            "start": 399900000,
+            "end": 401000000
+        },
+        {
+            "name": "Radiosondes",
+            "type": "aviation",
+            "start": 401000000,
+            "end": 406000000
+        },
+        {
+            "name": "70cm Ham Band",
+            "type": "amateur",
+            "start": 430000000,
+            "end": 440000000
+        },
+        {
+            "name": "ISM / LPD 433",
+            "type": "ism",
+            "start": 433050000,
+            "end": 434790000
+        },
+        {
+            "name": "Business / PMR",
+            "type": "PMR",
+            "start": 450000000,
+            "end": 470000000
+        },
+        {
+            "name": "UHF TV / DTT",
+            "type": "broadcast",
+            "start": 470000000,
+            "end": 694000000
+        },
+        {
+            "name": "700MHz IMT uplink",
+            "type": "cellular",
+            "start": 703000000,
+            "end": 733000000
+        },
+        {
+            "name": "700MHz IMT downlink",
+            "type": "cellular",
+            "start": 758000000,
+            "end": 788000000
+        },
+        {
+            "name": "800MHz IMT downlink",
+            "type": "cellular",
+            "start": 791000000,
+            "end": 821000000
+        },
+        {
+            "name": "800MHz IMT uplink",
+            "type": "cellular",
+            "start": 832000000,
+            "end": 862000000
+        },
+        {
+            "name": "900MHz GSM uplink",
+            "type": "cellular",
+            "start": 880000000,
+            "end": 915000000
+        },
+        {
+            "name": "900MHz GSM downlink",
+            "type": "cellular",
+            "start": 925000000,
+            "end": 960000000
+        },
+        {
+            "name": "23cm Ham Band",
+            "type": "amateur",
+            "start": 1240000000,
+            "end": 1300000000
+        },
+        {
+            "name": "Satellite L-band",
+            "type": "satellite",
+            "start": 1518000000,
+            "end": 1559000000
+        },
+        {
+            "name": "RNSS (GPS/GLONASS/Galileo)",
+            "type": "satellite",
+            "start": 1559000000,
+            "end": 1610000000
+        },
+        {
+            "name": "Satellite L-band",
+            "type": "satellite",
+            "start": 1626500000,
+            "end": 1660500000
+        },
+        {
+            "name": "1800MHz IMT uplink",
+            "type": "cellular",
+            "start": 1710000000,
+            "end": 1785000000
+        },
+        {
+            "name": "1800MHz IMT downlink",
+            "type": "cellular",
+            "start": 1805000000,
+            "end": 1880000000
+        },
+        {
+            "name": "DECT",
+            "type": "cellular",
+            "start": 1880000000,
+            "end": 1900000000
+        },
+        {
+            "name": "2100MHz IMT uplink",
+            "type": "cellular",
+            "start": 1920000000,
+            "end": 1980000000
+        },
+        {
+            "name": "2100MHz IMT downlink",
+            "type": "cellular",
+            "start": 2110000000,
+            "end": 2170000000
+        },
+        {
+            "name": "2300MHz IMT (TDD)",
+            "type": "cellular",
+            "start": 2300000000,
+            "end": 2400000000
+        },
+        {
+            "name": "13cm Ham Band",
+            "type": "amateur",
+            "start": 2300000000,
+            "end": 2450000000
+        },
+        {
+            "name": "ISM 2.4GHz (WiFi/BT)",
+            "type": "ism",
+            "start": 2400000000,
+            "end": 2483500000
+        },
+        {
+            "name": "2600MHz IMT",
+            "type": "cellular",
+            "start": 2500000000,
+            "end": 2690000000
+        },
+        {
+            "name": "9cm Ham Band",
+            "type": "amateur",
+            "start": 3300000000,
+            "end": 3500000000
+        },
+        {
+            "name": "3.5GHz IMT",
+            "type": "cellular",
+            "start": 3400000000,
+            "end": 3800000000
+        },
+        {
+            "name": "ISM 5GHz (WiFi)",
+            "type": "ism",
+            "start": 5150000000,
+            "end": 5875000000
+        },
+        {
+            "name": "5cm Ham Band",
+            "type": "amateur",
+            "start": 5650000000,
+            "end": 5850000000
+        },
+        {
+            "name": "3cm Ham Band",
+            "type": "amateur",
+            "start": 10000000000,
+            "end": 10500000000
+        }
+    ]
+}
