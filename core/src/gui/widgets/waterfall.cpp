@@ -1207,6 +1207,18 @@ namespace ImGui {
         if (rawFFTs == NULL) { return; }
         MEASURE_LOCK_GUARD(latestFFTMtx);
 
+        // onResize gives up on a widget under 100x100 and leaves waterfallHeight at 0
+        // with waterfallFb still the single element the constructor allocated. The row
+        // index below then wraps to waterfallHeight - 1, which is -1, and the loop
+        // writes dataWidth entries in front of that buffer - guaranteed heap
+        // corruption. The main waterfall is always laid out before anything pushes to
+        // it, so this never came up; the sub waterfalls push from their own draw and
+        // get here first, and a bottom window is a fifth of the screen, so it may
+        // never reach the size onResize wants. Nothing can be drawn until there is
+        // somewhere to draw it.
+        if (latestFFT == NULL || dataWidth <= 0) { return; }
+        if (waterfallVisible && (waterfallHeight <= 0 || waterfallFb == NULL)) { return; }
+
         double offsetRatio = viewOffset / (wholeBandwidth / 2.0);
         int drawDataSize = (viewBandwidth / wholeBandwidth) * rawFFTSize;
         int drawDataStart = (((double)rawFFTSize / 2.0) * (offsetRatio + 1)) - (drawDataSize / 2);
@@ -1230,10 +1242,18 @@ namespace ImGui {
 
             float pixel;
             float dataRange = waterfallMax - waterfallMin;
+            // Equal min and max makes this a division by zero, and the infinity that
+            // falls out indexes the palette with garbage. updateWaterfallFb already
+            // returns early on it; here it only has to not be zero.
+            if (dataRange == 0.0f) { dataRange = 1.0f; }
             int waterfallFbIndex = waterfallFbHeadRowIndex * dataWidth;
             for (int j = 0; j < dataWidth; j++) {
                 pixel = (std::clamp<float>(latestFFT[j], waterfallMin, waterfallMax) - waterfallMin) / dataRange;
                 int id = (int)(pixel * (WATERFALL_RESOLUTION - 1));
+                // A NaN in latestFFT survives the clamp and lands here as an arbitrary
+                // index into a 1000 entry palette.
+                if (id < 0) { id = 0; }
+                if (id >= WATERFALL_RESOLUTION) { id = WATERFALL_RESOLUTION - 1; }
                 waterfallFb[waterfallFbIndex++] = waterfallPallet[id];
             }
             if (waterfallTexturesStatuses[waterfallHeadSectionIndex] == TEXTURE_OK) {
