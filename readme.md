@@ -2,9 +2,16 @@
 
 ![Build Status](https://img.shields.io/github/actions/workflow/status/PhantomRoute/SDRPlusPlusBlack/build_all.yml?branch=master)
 
-Welcome to **SDR++Black**, my personal take on what SDR++ should be!
+Welcome to **SDR++Black**, my personal take on what SDR++ should be.
 
-I originally built this fork for myself because the existing versions didn't have everything I wanted (such as being able to pick which protocols the DSD demodulators sync on, and a cleaner dropdown UI).
+I built this fork for myself, because the existing versions didn't have everything I wanted - being able to pick which protocols the DSD demodulators sync on, a cleaner dropdown UI, and a few sharp edges filed off. It reflects my priorities, not anyone else's.
+
+**If that isn't what you're after, no hard feelings.** Both projects this one is built on are excellent and actively maintained, and you should use whichever suits you:
+
+* **[SDR++Brown](https://github.com/sannysanoff/SDRPlusPlusBrown)** by sannysanoff - the fork this one is based on, with a large set of features of its own.
+* **[SDR++](https://github.com/AlexandreRouma/SDRPlusPlus)** by Alexandre Rouma - the original, and the reason any of this exists.
+
+Parts of this fork are written with AI assistance. If that matters to you, the two projects above are not, and that's a perfectly good reason to pick one of them instead.
 
 Both digital voice modes in the Radio module now have a **Protocols** dropdown. Leave everything ticked and it auto-detects; untick a protocol to stop it syncing on that one.
 
@@ -13,13 +20,7 @@ Both digital voice modes in the Radio module now have a **Protocols** dropdown. 
 
 Your selection is saved per VFO, so NXDN96 (which is off by default) stays on once you enable it.
 
-*This is a fork of SDR++Brown, which itself is a fork of the original SDR++.*
-
-**Please do not report bugs in this fork to the original author.**
-If you find issues with SDR++Black, please file an [issue](https://github.com/PhantomRoute/SDRPlusPlusBlack/issues) on this repository.
-
-* Be sure to check out [SDR++Brown](https://github.com/sannysanoff/SDRPlusPlusBrown) for the intermediate fork features.
-* Check out the [original upstream project page](https://github.com/AlexandreRouma/SDRPlusPlus) for the original application.
+**Please do not report bugs in this fork to Alexandre Rouma or sannysanoff.** They did not write this code and cannot fix it. If something is broken in SDR++Black, file an [issue](https://github.com/PhantomRoute/SDRPlusPlusBlack/issues) here.
 
 [Changelog](changelog.md)
 
