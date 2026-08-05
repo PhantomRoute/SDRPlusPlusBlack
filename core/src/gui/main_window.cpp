@@ -535,9 +535,6 @@ void MainWindow::displayVariousWindows() {
             ImGui::End();
         }
     }
-    if (showCredits) {
-        lockWaterfallControls = true;
-    }
 }
 
 
@@ -675,21 +672,9 @@ void MainWindow::draw() {
     // ImGui::EndChild();
 
     // The logo button used to sit here, taking 48 pixels off the right of the top
-    // bar for something you press once. Credits moved to the bottom of the Display
-    // menu, which keeps the upstream attribution reachable without spending screen
-    // width on it - that width matters on a phone.
-    if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
-        if (showCredits) {
-            showCredits = false;
-            lockWaterfallControls = true;
-        }
-    }
-    if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
-        showCredits = false;
-    }
+    // bar for something pressed once. Attribution lives in the readme and LICENSE.
 
-    // Reset waterfall lock
-    lockWaterfallControls = showCredits;
+    lockWaterfallControls = false;
 
     // Handle menu resize
     ImVec2 winSize = ImGui::GetWindowSize();
@@ -894,9 +879,6 @@ void MainWindow::draw() {
 
     ImGui::End();
 
-    if (showCredits) {
-        credits::show();
-    }
 
     // Draw listening popup if space is pressed
     if (spacePressed) {

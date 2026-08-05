@@ -78,10 +78,6 @@ public:
     // queued from other threads used to sit there forever.
     void runMainThreadTasks();
 
-    // Opens the credits dialog. The Display menu drives this now that the logo
-    // button no longer sits in the top bar.
-    void openCredits() { showCredits = true; }
-
 
 protected:
     void displayVariousWindows();
@@ -101,7 +97,6 @@ protected:
     float fftMax = 0.0;
     float bw = 1.0;             // slider position 0.0 .. 1.0
     bool playing = false;
-    bool showCredits = false;
     std::string audioStreamName = "";
     std::string sourceName = "";
     int menuWidth = 300;

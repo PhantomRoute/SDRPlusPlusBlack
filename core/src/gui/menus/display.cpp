@@ -417,12 +417,6 @@ namespace displaymenu {
 
         onDisplayDraw.emit(GImGui);
 
-        // Was the logo button in the top right. It lives here now so the top bar
-        // keeps its width, which is worth more than a permanent 48 pixel button.
-        if (ImGui::Button("Credits##_sdrpp_credits_btn", ImVec2(menuWidth, 0))) {
-            gui::mainWindow.openCredits();
-        }
-
         if (restartRequired) {
             ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), "Restart required.");
         }
