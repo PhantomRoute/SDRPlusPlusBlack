@@ -7,6 +7,8 @@
 #include <string>
 #include <utils/event.h>
 #include <mutex>
+#include <thread>
+#include <atomic>
 #include <gui/tuner.h>
 #include "../main_window.h"
 #include <signal_path/sink.h>
@@ -93,8 +95,13 @@ public:
     std::shared_ptr<SubWaterfall> audioWaterfall;
     std::shared_ptr<MobileMainWindowPrivate> pvt;
     dsp::stream<dsp::stereo_t> *currentAudioStream = nullptr;
-    int currentAudioStreamSampleRate = 0;
+    // Written by the UI thread, read by the reader thread, so it is atomic rather
+    // than a plain int that both touch.
+    std::atomic<int> currentAudioStreamSampleRate { 0 };
     std::string currentAudioStreamName = "";
+    // Joined before the stream it reads is unbound. It used to be detached, which
+    // left it reading a stream that was about to be freed.
+    std::thread audioWaterfallThread;
     bool drawAudioWaterfall = false;
     EventHandler<ImGuiContext*> displayDrawHandler;
     int cwAudioFrequency = 600;
@@ -215,6 +222,7 @@ public:
     };
 
     MobileMainWindow();
+    ~MobileMainWindow();
 
 
     void draw() override;
@@ -232,6 +240,7 @@ public:
     void leaveBandOrMode(int leavingFrequency);
     void selectSSBModeForBand(const std::string& band);
     void updateAudioWaterfallPipeline();
+    void stopAudioWaterfallReader();
     void updateDXInfo();
 
     void setBothGains(unsigned char gain);

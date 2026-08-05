@@ -1601,33 +1601,54 @@ void MobileMainWindow::updateFrequencyAfterChange() {
      */
 }
 
+// Unblocks the reader and waits for it to finish with the stream. Everything that
+// frees or rebinds the stream has to go through here first: the reader used to be
+// detached, so unbindStream could delete the stream out from under a thread that
+// was still reading it.
+void MobileMainWindow::stopAudioWaterfallReader() {
+    if (!audioWaterfallThread.joinable()) { return; }
+    if (currentAudioStream) {
+        currentAudioStream->stopReader();
+    }
+    audioWaterfallThread.join();
+}
+
 void MobileMainWindow::updateAudioWaterfallPipeline() {
-    if (gui::waterfall.selectedVFO != currentAudioStreamName) {
+    // No point reading audio into a waterfall nobody is looking at. This used to run
+    // from the moment a VFO existed, filling a buffer that only draw() drains, so by
+    // the time the waterfall was switched on there was a backlog of everything since
+    // the radio started.
+    const std::string wanted = drawAudioWaterfall ? gui::waterfall.selectedVFO : std::string();
+
+    if (wanted != currentAudioStreamName) {
         if (!currentAudioStreamName.empty()) {
-            currentAudioStream->stopReader();
+            stopAudioWaterfallReader();
             sigpath::sinkManager.unbindStream(currentAudioStreamName, currentAudioStream);
-        }
-        currentAudioStreamName = gui::waterfall.selectedVFO;
-        if (currentAudioStreamName.empty()) {
             currentAudioStream = nullptr;
-        } else {
+        }
+        currentAudioStreamName = wanted;
+        if (!currentAudioStreamName.empty()) {
             currentAudioStreamSampleRate = (int) sigpath::sinkManager.getStreamSampleRate(currentAudioStreamName);
             currentAudioStream = sigpath::sinkManager.bindStream(currentAudioStreamName);
-            std::thread x([&]() {
+            // Captured by value on purpose. Reading this->currentAudioStream inside
+            // the loop meant that after a VFO change the outgoing thread would follow
+            // the member to the incoming stream and flush it, stealing a block from
+            // the thread that owned it.
+            auto* stream = currentAudioStream;
+            audioWaterfallThread = std::thread([this, stream]() {
                 SetThreadName("AudioWaterfall");
                 while (true) {
-                    int rd = currentAudioStream->read();
+                    int rd = stream->read();
                     if (rd < 0) {
                         break;
                     }
-                    audioWaterfall->addAudioSamples(currentAudioStream->readBuf, rd, currentAudioStreamSampleRate);
-                    currentAudioStream->flush();
+                    audioWaterfall->addAudioSamples(stream->readBuf, rd, currentAudioStreamSampleRate);
+                    stream->flush();
                 }
             });
-            x.detach();
         }
     }
-    if (currentAudioStreamName != "") {
+    if (!currentAudioStreamName.empty()) {
         currentAudioStreamSampleRate = (int) sigpath::sinkManager.getStreamSampleRate(currentAudioStreamName);
     }
 }
@@ -2494,6 +2515,17 @@ MobileMainWindow::MobileMainWindow() : MainWindow(),
     qsoPanel->configPanel = configPanel;
     cwPanel = std::make_shared<CWPanel>();
     audioWaterfall = std::make_shared<SubWaterfall>(trxAudioSampleRate, 5000, "Audio Heard");
+}
+
+MobileMainWindow::~MobileMainWindow() {
+    // Destroying a joinable std::thread calls std::terminate, so the reader has to be
+    // stopped here whatever else happens, and the stream released only once it has.
+    stopAudioWaterfallReader();
+    if (!currentAudioStreamName.empty() && currentAudioStream) {
+        sigpath::sinkManager.unbindStream(currentAudioStreamName, currentAudioStream);
+    }
+    currentAudioStream = nullptr;
+    currentAudioStreamName.clear();
 }
 
 
