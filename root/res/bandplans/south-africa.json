@@ -6,19 +6,13 @@
     "author_url": "https://github.com/PhantomRoute/SDRPlusPlusBlack",
     "bands": [
         {
-            "name": "Other",
-            "type": "other",
-            "start": 0,
-            "end": 8300
-        },
-        {
             "name": "Meteorological Aids",
             "type": "utility",
             "start": 8300,
             "end": 9000
         },
         {
-            "name": "Meteorological Aids / Radionavigation",
+            "name": "Meteorological Aids Radionavigation",
             "type": "navigation",
             "start": 9000,
             "end": 11300
@@ -30,7 +24,7 @@
             "end": 14000
         },
         {
-            "name": "Fixed Maritime Mobile",
+            "name": "Fixed Maritime Mobile / Fixed Maritime Mobile Standard Frequency And Time Signal",
             "type": "marine",
             "start": 14000,
             "end": 19950
@@ -42,7 +36,7 @@
             "end": 20050
         },
         {
-            "name": "Fixed Maritime Mobile / Standard Frequency And Time Signal",
+            "name": "Fixed Maritime Mobile Standard Frequency And Time Signal",
             "type": "marine",
             "start": 20050,
             "end": 70000
@@ -54,7 +48,7 @@
             "end": 72000
         },
         {
-            "name": "Fixed Maritime Mobile / Radionavigation",
+            "name": "Fixed Maritime Mobile Radionavigation / Fixed Maritime Mobile Radionavigation Standard Frequency And Time Signal",
             "type": "marine",
             "start": 72000,
             "end": 84000
@@ -66,7 +60,7 @@
             "end": 86000
         },
         {
-            "name": "Fixed Maritime Mobile / Radionavigation",
+            "name": "Fixed Maritime Mobile Radionavigation / Fixed Maritime Mobile Radionavigation Standard Frequency And Time Signal",
             "type": "marine",
             "start": 86000,
             "end": 90000
@@ -144,7 +138,7 @@
             "end": 255000
         },
         {
-            "name": "Broadcasting Aeronautical Radionavigation",
+            "name": "Broadcasting Aeronautical Radionavigation / Aeronautical Radionavigation",
             "type": "broadcast",
             "start": 255000,
             "end": 283500
@@ -180,7 +174,7 @@
             "end": 415000
         },
         {
-            "name": "Maritime Mobile / Aeronautical Radionavigation",
+            "name": "Maritime Mobile Aeronautical Radionavigation / Navdat",
             "type": "marine",
             "start": 415000,
             "end": 435000
@@ -192,9 +186,15 @@
             "end": 472000
         },
         {
-            "name": "Maritime Mobile",
+            "name": "Maritime Mobile / Navdat",
             "type": "marine",
             "start": 472000,
+            "end": 479000
+        },
+        {
+            "name": "Maritime Mobile / Navtex",
+            "type": "marine",
+            "start": 479000,
             "end": 495000
         },
         {
@@ -222,8 +222,8 @@
             "end": 1850000
         },
         {
-            "name": "Other",
-            "type": "other",
+            "name": "Fixed Maritime Mobile Land Mobile / Fixed Maritime Mobile Land Mobile Radiodetermination",
+            "type": "broadcast",
             "start": 1950000,
             "end": 2045000
         },
@@ -433,7 +433,7 @@
         },
         {
             "name": "CB Radio",
-            "type": "utility",
+            "type": "PMR",
             "start": 26960000,
             "end": 27410000
         },
@@ -444,14 +444,14 @@
             "end": 28000000
         },
         {
-            "name": "10m Amateur-Satellite",
+            "name": "10m Amateur",
             "type": "amateur",
             "start": 28000000,
             "end": 29700000
         },
         {
-            "name": "Fixed Mobile",
-            "type": "mobile",
+            "name": "Land mobile / PMR",
+            "type": "PMR",
             "start": 29700000,
             "end": 30005000
         },
@@ -462,15 +462,45 @@
             "end": 30010000
         },
         {
+            "name": "Land mobile / PMR",
+            "type": "PMR",
+            "start": 30010000,
+            "end": 40980000
+        },
+        {
+            "name": "PMR",
+            "type": "PMR",
+            "start": 40980000,
+            "end": 41015000
+        },
+        {
+            "name": "Land mobile / PMR",
+            "type": "PMR",
+            "start": 41015000,
+            "end": 42000000
+        },
+        {
             "name": "Fixed Mobile",
             "type": "mobile",
-            "start": 30010000,
+            "start": 42000000,
+            "end": 44000000
+        },
+        {
+            "name": "PMR",
+            "type": "PMR",
+            "start": 44000000,
             "end": 47000000
         },
         {
-            "name": "Broadcasting",
+            "name": "Broadcasting / Broadcasting Land Mobile",
             "type": "broadcast",
             "start": 47000000,
+            "end": 50000000
+        },
+        {
+            "name": "6m Amateur",
+            "type": "amateur",
+            "start": 50000000,
             "end": 52000000
         },
         {
@@ -480,14 +510,14 @@
             "end": 52000000
         },
         {
-            "name": "Broadcasting",
+            "name": "Broadcasting / Broadcasting Fixed Mobile",
             "type": "broadcast",
             "start": 52000000,
             "end": 68000000
         },
         {
-            "name": "Fixed Mobile",
-            "type": "mobile",
+            "name": "Land mobile / PMR",
+            "type": "PMR",
             "start": 68000000,
             "end": 74800000
         },
@@ -498,39 +528,21 @@
             "end": 75200000
         },
         {
-            "name": "Fixed Mobile",
-            "type": "mobile",
+            "name": "Land mobile / PMR",
+            "type": "PMR",
             "start": 75200000,
             "end": 87500000
         },
         {
-            "name": "Broadcasting",
+            "name": "Broadcasting (WiFi / RLAN)",
             "type": "broadcast",
             "start": 87500000,
-            "end": 100000000
-        },
-        {
-            "name": "Broadcasting FM",
-            "type": "broadcast",
-            "start": 100000000,
             "end": 108000000
-        },
-        {
-            "name": "Other",
-            "type": "other",
-            "start": 108000000,
-            "end": 112000000
         },
         {
             "name": "Aeronautical Radionavigation",
             "type": "aviation",
             "start": 108000000,
-            "end": 117975000
-        },
-        {
-            "name": "Aeronautical Mobile / Aeronautical Radionavigation",
-            "type": "aviation",
-            "start": 112000000,
             "end": 117975000
         },
         {
@@ -546,7 +558,7 @@
             "end": 138000000
         },
         {
-            "name": "Aeronautical Mobile",
+            "name": "Aeronautical Mobile / Fixed Mobile",
             "type": "aviation",
             "start": 138000000,
             "end": 143600000
@@ -564,44 +576,50 @@
             "end": 144000000
         },
         {
-            "name": "2m Amateur-Satellite",
+            "name": "2m Amateur",
             "type": "amateur",
             "start": 144000000,
             "end": 146000000
         },
         {
-            "name": "Fixed Mobile",
-            "type": "mobile",
+            "name": "PMR",
+            "type": "PMR",
             "start": 146000000,
             "end": 148000000
         },
         {
-            "name": "Fixed Mobile / Mobile",
-            "type": "satellite",
+            "name": "Telemetry",
+            "type": "PMR",
             "start": 148000000,
             "end": 149900000
         },
         {
-            "name": "Mobile / Satellite",
+            "name": "Mobile / Satellite (Telemetry)",
             "type": "satellite",
             "start": 149900000,
             "end": 150050000
         },
         {
-            "name": "Fixed Mobile / Radio Astronomy",
-            "type": "astronomy",
+            "name": "Alarms",
+            "type": "PMR",
             "start": 150050000,
             "end": 153000000
         },
         {
-            "name": "Fixed Mobile",
-            "type": "mobile",
+            "name": "Land mobile / PMR",
+            "type": "PMR",
             "start": 153000000,
+            "end": 154000000
+        },
+        {
+            "name": "PMR",
+            "type": "PMR",
+            "start": 154000000,
             "end": 156487500
         },
         {
-            "name": "Maritime Mobile / Fixed",
-            "type": "marine",
+            "name": "Land mobile / PMR",
+            "type": "PMR",
             "start": 156487500,
             "end": 156512500
         },
@@ -612,15 +630,9 @@
             "end": 156562500
         },
         {
-            "name": "Fixed Land Mobile Maritime Mobile",
-            "type": "marine",
+            "name": "Land mobile / PMR",
+            "type": "PMR",
             "start": 156537500,
-            "end": 156562500
-        },
-        {
-            "name": "Fixed Mobile",
-            "type": "mobile",
-            "start": 156562500,
             "end": 156762500
         },
         {
@@ -636,8 +648,8 @@
             "end": 157187500
         },
         {
-            "name": "Other",
-            "type": "other",
+            "name": "Land mobile / PMR",
+            "type": "PMR",
             "start": 156837500,
             "end": 157450000
         },
@@ -648,38 +660,44 @@
             "end": 174000000
         },
         {
-            "name": "Broadcasting",
+            "name": "Broadcasting / T-Dab (Television)",
             "type": "broadcast",
             "start": 174000000,
+            "end": 223000000
+        },
+        {
+            "name": "Broadcasting / T-Dab (WiFi / RLAN)",
+            "type": "broadcast",
+            "start": 223000000,
             "end": 230000000
+        },
+        {
+            "name": "Fixed Mobile / Broadcasting (Television)",
+            "type": "broadcast",
+            "start": 230000000,
+            "end": 235000000
         },
         {
             "name": "Fixed Mobile",
             "type": "mobile",
-            "start": 230000000,
+            "start": 235000000,
             "end": 267000000
         },
         {
-            "name": "Fixed Mobile Pmr",
-            "type": "mobile",
+            "name": "Pmr",
+            "type": "PMR",
             "start": 238000000,
             "end": 246000000
         },
         {
-            "name": "Broadcasting",
-            "type": "broadcast",
-            "start": 246000000,
-            "end": 254000000
-        },
-        {
-            "name": "Mobile Fixed",
-            "type": "mobile",
+            "name": "Trunking",
+            "type": "PMR",
             "start": 254000000,
             "end": 267000000
         },
         {
-            "name": "Fixed / Mobile",
-            "type": "satellite",
+            "name": "Trunking / Telemetry",
+            "type": "PMR",
             "start": 267000000,
             "end": 272000000
         },
@@ -690,9 +708,15 @@
             "end": 273000000
         },
         {
+            "name": "Land mobile / PMR",
+            "type": "PMR",
+            "start": 273000000,
+            "end": 312000000
+        },
+        {
             "name": "Fixed Mobile",
             "type": "mobile",
-            "start": 273000000,
+            "start": 312000000,
             "end": 322000000
         },
         {
@@ -702,15 +726,27 @@
             "end": 328600000
         },
         {
-            "name": "Aeronautical Radionavigation",
+            "name": "Aeronautical Radionavigation / Aeronautical Radionavigation Ils",
             "type": "aviation",
             "start": 328600000,
             "end": 335400000
         },
         {
-            "name": "Fixed Mobile",
-            "type": "mobile",
+            "name": "PMR / Trunking",
+            "type": "PMR",
             "start": 335400000,
+            "end": 387000000
+        },
+        {
+            "name": "PMR",
+            "type": "PMR",
+            "start": 387000000,
+            "end": 390000000
+        },
+        {
+            "name": "PMR / Trunking",
+            "type": "PMR",
+            "start": 390000000,
             "end": 399900000
         },
         {
@@ -733,13 +769,13 @@
         },
         {
             "name": "Meteorological Aids Earth Exploration / Satellite",
-            "type": "satellite",
+            "type": "ism",
             "start": 402000000,
             "end": 403000000
         },
         {
-            "name": "Meteorological Aids",
-            "type": "utility",
+            "name": "Meteorological Aids (Short range devices)",
+            "type": "ism",
             "start": 403000000,
             "end": 406000000
         },
@@ -750,14 +786,14 @@
             "end": 406100000
         },
         {
-            "name": "Fixed Mobile / Radio Astronomy",
-            "type": "astronomy",
+            "name": "PMR",
+            "type": "PMR",
             "start": 406100000,
             "end": 410000000
         },
         {
-            "name": "Fixed Mobile / Space Research",
-            "type": "satellite",
+            "name": "PMR / Trunking",
+            "type": "PMR",
             "start": 410000000,
             "end": 420000000
         },
@@ -768,16 +804,52 @@
             "end": 430000000
         },
         {
-            "name": "70cm Amateur Radiolocation",
+            "name": "70cm Amateur",
             "type": "amateur",
             "start": 430000000,
+            "end": 432000000
+        },
+        {
+            "name": "Short range devices",
+            "type": "ism",
+            "start": 432000000,
+            "end": 438000000
+        },
+        {
+            "name": "70cm Amateur",
+            "type": "amateur",
+            "start": 438000000,
             "end": 440000000
+        },
+        {
+            "name": "Telemetry",
+            "type": "PMR",
+            "start": 440000000,
+            "end": 450000000
+        },
+        {
+            "name": "Land mobile / PMR",
+            "type": "PMR",
+            "start": 450000000,
+            "end": 455000000
+        },
+        {
+            "name": "Trunking",
+            "type": "PMR",
+            "start": 455000000,
+            "end": 460000000
         },
         {
             "name": "Fixed Mobile",
             "type": "mobile",
-            "start": 440000000,
+            "start": 460000000,
             "end": 470000000
+        },
+        {
+            "name": "Broadcasting (Television)",
+            "type": "broadcast",
+            "start": 470000000,
+            "end": 606000000
         },
         {
             "name": "Broadcasting",
@@ -786,13 +858,13 @@
             "end": 694000000
         },
         {
-            "name": "Broadcasting Radio Astronomy",
+            "name": "Television",
             "type": "broadcast",
             "start": 606000000,
             "end": 614000000
         },
         {
-            "name": "Broadcasting",
+            "name": "Broadcasting (Television)",
             "type": "broadcast",
             "start": 614000000,
             "end": 694000000
@@ -840,7 +912,7 @@
             "end": 1300000000
         },
         {
-            "name": "Cellular",
+            "name": "Radio Astronomy Space Research / Mobile",
             "type": "cellular",
             "start": 1646500000,
             "end": 1660500000
@@ -852,7 +924,7 @@
             "end": 2450000000
         },
         {
-            "name": "ISM 2.4GHz (WiFi/BT)",
+            "name": "WiFi / RLAN 2.4GHz",
             "type": "ism",
             "start": 2400000000,
             "end": 2483500000
@@ -864,7 +936,7 @@
             "end": 3500000000
         },
         {
-            "name": "ISM 5GHz (WiFi)",
+            "name": "WiFi / RLAN 5GHz",
             "type": "ism",
             "start": 5150000000,
             "end": 5875000000
@@ -882,7 +954,7 @@
             "end": 10400000000
         },
         {
-            "name": "Fixed / Mobile Radiolocation",
+            "name": "Fixed Mobile Radiolocation",
             "type": "radiolocation",
             "start": 10400000000,
             "end": 10450000000
@@ -894,15 +966,9 @@
             "end": 10500000000
         },
         {
-            "name": "Fixed / Mobile",
+            "name": "Fixed Mobile",
             "type": "mobile",
             "start": 10500000000,
-            "end": 10550000000
-        },
-        {
-            "name": "Fixed Mobile / Fixed",
-            "type": "mobile",
-            "start": 10550000000,
             "end": 10600000000
         },
         {
@@ -915,24 +981,6 @@
             "name": "Fixed / Satellite",
             "type": "satellite",
             "start": 10700000000,
-            "end": 10950000000
-        },
-        {
-            "name": "Fixed",
-            "type": "fixed",
-            "start": 10950000000,
-            "end": 11200000000
-        },
-        {
-            "name": "Fixed / Satellite",
-            "type": "satellite",
-            "start": 11200000000,
-            "end": 11450000000
-        },
-        {
-            "name": "Fixed",
-            "type": "fixed",
-            "start": 11450000000,
             "end": 11700000000
         },
         {
@@ -955,8 +1003,14 @@
         },
         {
             "name": "Earth Exploration / Satellite",
-            "type": "radiolocation",
+            "type": "ism",
             "start": 13400000000,
+            "end": 13650000000
+        },
+        {
+            "name": "Earth Exploration / Satellite",
+            "type": "radiolocation",
+            "start": 13650000000,
             "end": 13750000000
         },
         {
@@ -969,18 +1023,18 @@
             "name": "Fixed / Satellite",
             "type": "navigation",
             "start": 14000000000,
-            "end": 14250000000
+            "end": 14300000000
         },
         {
             "name": "Fixed / Satellite",
             "type": "satellite",
-            "start": 14250000000,
+            "start": 14300000000,
             "end": 14800000000
         },
         {
             "name": "Fixed Mobile",
             "type": "mobile",
-            "start": 15200000000,
+            "start": 14800000000,
             "end": 15350000000
         },
         {
@@ -990,7 +1044,7 @@
             "end": 15400000000
         },
         {
-            "name": "Radiolocation / Aeronautical Radionavigation",
+            "name": "Radiolocation Aeronautical Radionavigation",
             "type": "aviation",
             "start": 15400000000,
             "end": 15430000000
@@ -1002,7 +1056,7 @@
             "end": 15630000000
         },
         {
-            "name": "Radiolocation / Aeronautical Radionavigation",
+            "name": "Radiolocation Aeronautical Radionavigation",
             "type": "aviation",
             "start": 15630000000,
             "end": 15700000000
@@ -1011,11 +1065,17 @@
             "name": "Radiolocation",
             "type": "radiolocation",
             "start": 15700000000,
+            "end": 17100000000
+        },
+        {
+            "name": "Radiolocation / Radiolocation Was",
+            "type": "ism",
+            "start": 17100000000,
             "end": 17200000000
         },
         {
             "name": "Earth Exploration / Satellite",
-            "type": "radiolocation",
+            "type": "ism",
             "start": 17200000000,
             "end": 17300000000
         },
@@ -1035,18 +1095,6 @@
             "name": "Fixed / Satellite",
             "type": "satellite",
             "start": 18800000000,
-            "end": 19300000000
-        },
-        {
-            "name": "Fixed",
-            "type": "fixed",
-            "start": 19300000000,
-            "end": 19700000000
-        },
-        {
-            "name": "Fixed / Satellite",
-            "type": "satellite",
-            "start": 19600000000,
             "end": 21200000000
         },
         {
@@ -1056,7 +1104,7 @@
             "end": 21400000000
         },
         {
-            "name": "Fixed Mobile Broadcasting / Satellite",
+            "name": "Fixed Mobile Broadcasting / Satellite Fixed Mobile Broadcasting",
             "type": "broadcast",
             "start": 21400000000,
             "end": 22000000000
@@ -1074,20 +1122,26 @@
             "end": 22500000000
         },
         {
-            "name": "Fixed / Mobile",
+            "name": "Fixed Mobile",
             "type": "mobile",
             "start": 22500000000,
             "end": 22550000000
         },
         {
-            "name": "Fixed Inter / Satellite",
+            "name": "Fixed Inter / Satellite Mobile Space Research",
             "type": "satellite",
             "start": 22550000000,
+            "end": 23150000000
+        },
+        {
+            "name": "Fixed Inter / Satellite Mobile",
+            "type": "satellite",
+            "start": 23150000000,
             "end": 23550000000
         },
         {
-            "name": "Fixed",
-            "type": "fixed",
+            "name": "Fixed / Mobile",
+            "type": "mobile",
             "start": 23550000000,
             "end": 23600000000
         },
@@ -1098,7 +1152,7 @@
             "end": 24000000000
         },
         {
-            "name": "12mm Amateur-Satellite",
+            "name": "12mm Amateur",
             "type": "amateur",
             "start": 24000000000,
             "end": 24050000000
@@ -1110,25 +1164,25 @@
             "end": 24250000000
         },
         {
-            "name": "Fixed Mobile",
-            "type": "mobile",
+            "name": "Fixed Mobile / Rfsap (IMT)",
+            "type": "cellular",
             "start": 24250000000,
             "end": 24450000000
         },
         {
-            "name": "Fixed Inter / Satellite",
-            "type": "satellite",
+            "name": "Fixed Inter / Satellite (IMT)",
+            "type": "cellular",
             "start": 24450000000,
             "end": 24650000000
         },
         {
-            "name": "Fixed / Satellite",
-            "type": "satellite",
+            "name": "Fixed / Satellite (IMT)",
+            "type": "cellular",
             "start": 24650000000,
             "end": 25250000000
         },
         {
-            "name": "Fixed / Inter",
+            "name": "Fixed Inter / Satellite Mobile",
             "type": "satellite",
             "start": 25250000000,
             "end": 25500000000
@@ -1140,37 +1194,31 @@
             "end": 27000000000
         },
         {
-            "name": "Fixed Inter / Satellite",
+            "name": "Fixed Inter / Satellite Mobile",
             "type": "satellite",
             "start": 27000000000,
             "end": 27500000000
         },
         {
-            "name": "Fixed",
-            "type": "fixed",
+            "name": "Fixed / Satellite",
+            "type": "satellite",
             "start": 27500000000,
-            "end": 28500000000
+            "end": 30000000000
+        },
+        {
+            "name": "Fixed / Satellite (Telemetry)",
+            "type": "satellite",
+            "start": 29950000000,
+            "end": 30000000000
         },
         {
             "name": "Fixed / Satellite",
             "type": "satellite",
-            "start": 27501000000,
-            "end": 27820000000
-        },
-        {
-            "name": "Fixed",
-            "type": "fixed",
-            "start": 27820000000,
-            "end": 28450000000
-        },
-        {
-            "name": "Fixed / Satellite",
-            "type": "satellite",
-            "start": 28450000000,
+            "start": 30000000000,
             "end": 31000000000
         },
         {
-            "name": "Fixed / Mobile",
+            "name": "Fixed Mobile / Fixed",
             "type": "mobile",
             "start": 31000000000,
             "end": 31300000000
@@ -1182,20 +1230,20 @@
             "end": 31800000000
         },
         {
-            "name": "Fixed / Radionavigation Space Research",
+            "name": "Fixed Radionavigation Space Research",
             "type": "navigation",
             "start": 31800000000,
             "end": 32300000000
         },
         {
-            "name": "Fixed / Inter",
+            "name": "Fixed Inter / Satellite Radionavigation",
             "type": "navigation",
             "start": 32300000000,
             "end": 33000000000
         },
         {
-            "name": "Fixed",
-            "type": "fixed",
+            "name": "Fixed Hdfs / Radionavigation",
+            "type": "navigation",
             "start": 33000000000,
             "end": 33400000000
         },
@@ -1237,26 +1285,14 @@
         },
         {
             "name": "Fixed Mobile / Space Research",
-            "type": "satellite",
+            "type": "cellular",
             "start": 37000000000,
             "end": 37500000000
         },
         {
-            "name": "Fixed",
-            "type": "fixed",
-            "start": 37500000000,
-            "end": 38000000000
-        },
-        {
-            "name": "Fixed / Satellite",
-            "type": "satellite",
-            "start": 38000000000,
-            "end": 39500000000
-        },
-        {
-            "name": "Fixed / Satellite",
+            "name": "Fixed / Satellite (IMT)",
             "type": "cellular",
-            "start": 39500000000,
+            "start": 37500000000,
             "end": 40000000000
         },
         {
@@ -1266,14 +1302,14 @@
             "end": 40500000000
         },
         {
-            "name": "Fixed / Satellite",
+            "name": "Fixed / Satellite (IMT)",
             "type": "broadcast",
             "start": 40500000000,
             "end": 42500000000
         },
         {
-            "name": "Fixed / Satellite",
-            "type": "astronomy",
+            "name": "Fixed / Satellite (IMT)",
+            "type": "cellular",
             "start": 42500000000,
             "end": 43500000000
         },
@@ -1290,13 +1326,13 @@
             "end": 47000000000
         },
         {
-            "name": "6mm Amateur-Satellite",
+            "name": "6mm Amateur",
             "type": "amateur",
             "start": 47000000000,
             "end": 47200000000
         },
         {
-            "name": "Fixed / Satellite",
+            "name": "Fixed / Satellite (IMT)",
             "type": "cellular",
             "start": 47200000000,
             "end": 48200000000
@@ -1317,6 +1353,12 @@
             "name": "Fixed / Satellite",
             "type": "satellite",
             "start": 49040000000,
+            "end": 49440000000
+        },
+        {
+            "name": "Hdfss / Mobile",
+            "type": "mobile",
+            "start": 49440000000,
             "end": 50200000000
         },
         {
@@ -1332,7 +1374,7 @@
             "end": 52400000000
         },
         {
-            "name": "Fixed / Mobile",
+            "name": "Fixed Mobile",
             "type": "mobile",
             "start": 52400000000,
             "end": 52600000000
@@ -1341,17 +1383,17 @@
             "name": "Earth Exploration / Satellite",
             "type": "satellite",
             "start": 52600000000,
-            "end": 59000000000
+            "end": 57000000000
         },
         {
             "name": "Earth Exploration / Satellite",
-            "type": "radiolocation",
-            "start": 59000000000,
+            "type": "ism",
+            "start": 57000000000,
             "end": 59300000000
         },
         {
-            "name": "Fixed Inter / Satellite Mobile",
-            "type": "radiolocation",
+            "name": "Fixed Inter / Satellite Mobile Radiolocation",
+            "type": "ism",
             "start": 59300000000,
             "end": 64000000000
         },
@@ -1363,12 +1405,12 @@
         },
         {
             "name": "Earth Exploration / Satellite Fixed Inter",
-            "type": "satellite",
+            "type": "ism",
             "start": 65000000000,
             "end": 66000000000
         },
         {
-            "name": "Inter / Satellite Mobile",
+            "name": "Inter / Satellite Mobile (IMT)",
             "type": "cellular",
             "start": 66000000000,
             "end": 71000000000
@@ -1387,12 +1429,12 @@
         },
         {
             "name": "Radio Astronomy Radiolocation",
-            "type": "astronomy",
+            "type": "ism",
             "start": 76000000000,
             "end": 77500000000
         },
         {
-            "name": "4mm Amateur-Satellite Radiolocation",
+            "name": "Amateur-Satellite Radiolocation",
             "type": "amateur",
             "start": 77500000000,
             "end": 78000000000
@@ -1434,7 +1476,7 @@
             "end": 92000000000
         },
         {
-            "name": "Fixed / Mobile Radio Astronomy",
+            "name": "Fixed Mobile Radio Astronomy / Radiolocation",
             "type": "astronomy",
             "start": 92000000000,
             "end": 94000000000
@@ -1501,7 +1543,7 @@
         },
         {
             "name": "Fixed Inter / Satellite Mobile",
-            "type": "satellite",
+            "type": "ism",
             "start": 122250000000,
             "end": 123000000000
         },
@@ -1513,18 +1555,12 @@
         },
         {
             "name": "Earth Exploration / Satellite",
-            "type": "satellite",
+            "type": "astronomy",
             "start": 130000000000,
             "end": 134000000000
         },
         {
-            "name": "Earth Exploration / Satellite",
-            "type": "astronomy",
-            "start": 133500000000,
-            "end": 134000000000
-        },
-        {
-            "name": "2mm Amateur-Satellite",
+            "name": "Amateur-Satellite",
             "type": "amateur",
             "start": 134000000000,
             "end": 136000000000
@@ -1536,7 +1572,7 @@
             "end": 141000000000
         },
         {
-            "name": "Fixed / Mobile Radio Astronomy Radiolocation",
+            "name": "Fixed / Mobile Radio Astronomy Radiolocation Mobile Radio Astronomy Radiolocation",
             "type": "astronomy",
             "start": 141000000000,
             "end": 148500000000
@@ -1554,7 +1590,7 @@
             "end": 155500000000
         },
         {
-            "name": "Fixed Mobile Radio Astronomy Space Research / Earth Exploration",
+            "name": "Earth Exploration / Satellite",
             "type": "astronomy",
             "start": 155500000000,
             "end": 158500000000
