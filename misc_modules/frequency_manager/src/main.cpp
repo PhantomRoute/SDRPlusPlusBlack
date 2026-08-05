@@ -66,10 +66,26 @@ public:
         fftRedrawHandler.handler = fftRedraw;
         inputHandler.ctx = this;
         inputHandler.handler = fftInput;
+        // The scanner has to keep ticking whether or not this menu is on screen.
+        // See scannerTick.
+        scannerTickHandler.ctx = this;
+        scannerTickHandler.handler = scannerTick;
 
         gui::menu.registerEntry(name, menuHandler, this, NULL);
         gui::waterfall.onFFTRedraw.bindHandler(&fftRedrawHandler);
         gui::waterfall.onInputProcess.bindHandler(&inputHandler);
+        gui::mainWindow.onWaterfallDrawn.bindHandler(&scannerTickHandler);
+    }
+
+    // The menu handler only runs while the Frequency Manager section is expanded,
+    // because the core only calls it inside its CollapsingHeader. Driving the
+    // scanner from there meant collapsing the menu froze it mid scan - no timers,
+    // no station changes, and the squelch left muted or unmuted wherever it
+    // happened to be. onWaterfallDrawn fires once a frame regardless, so tick it
+    // from there and leave only the drawing to the menu.
+    static void scannerTick(ImGuiContext* ctx, void* c) {
+        FrequencyManagerModule* _this = (FrequencyManagerModule*)c;
+        _this->scanner.update(ImGui::GetIO().DeltaTime);
     }
 
     void *getInterface(const char *name) override {
@@ -87,6 +103,7 @@ public:
         gui::menu.removeEntry(name);
         gui::waterfall.onFFTRedraw.unbindHandler(&fftRedrawHandler);
         gui::waterfall.onInputProcess.unbindHandler(&inputHandler);
+        gui::mainWindow.onWaterfallDrawn.unbindHandler(&scannerTickHandler);
     }
 
     void postInit() override {
@@ -572,8 +589,8 @@ private:
         }
         _this->scanner.setBookmarks(bookmarkNames, _this->bookmarks);
         
-        // Update and render scanner section
-        _this->scanner.update(ImGui::GetIO().DeltaTime);
+        // Render only - the scanner is ticked from scannerTick, so that collapsing
+        // this menu does not stop it.
         _this->scanner.render();
 
         // List delete confirmation
@@ -1028,6 +1045,8 @@ private:
     bool deleteBookmarksOpen = false;
 
     EventHandler<ImGui::WaterFall::FFTRedrawArgs> fftRedrawHandler;
+
+    EventHandler<ImGuiContext*> scannerTickHandler;
     EventHandler<ImGui::WaterFall::InputHandlerArgs> inputHandler;
 
     std::map<std::string, FrequencyBookmark> bookmarks;
@@ -1088,8 +1107,11 @@ MOD_EXPORT void _INIT_() {
     def["scanner"] = json::object();
     def["scanner"]["scanIntervalMs"] = 100.0f;
     def["scanner"]["listenTimeSec"] = 10.0f;
-    def["scanner"]["noiseFloor"] = -120.0f;
-    def["scanner"]["signalMarginDb"] = 6.0f;
+    // These are on the SNR meter's scale, the same one Scanner::render clamps to
+    // 0..40, not absolute dBFS. -120 used to live here, which made every station
+    // clear the detection threshold instantly.
+    def["scanner"]["noiseFloor"] = 3.0f;
+    def["scanner"]["signalMarginDb"] = 4.0f;
     def["scanner"]["squelchEnabled"] = false;
     def["scanner"]["carrierHoldMode"] = false;
 

@@ -42,7 +42,7 @@ private:
     float listenTimeSec = 10.0f; // Default 10 seconds per station
     float elapsedTime = 0.0f;
     size_t currentStationIndex = 0;
-    float noiseFloor = -120.0f; // Default noise floor
+    float noiseFloor = 3.0f; // On the SNR meter's scale, not absolute dBFS
     float signalMarginDb = 6.0f; // Signal detection margin
     bool signalDetected = false;
     

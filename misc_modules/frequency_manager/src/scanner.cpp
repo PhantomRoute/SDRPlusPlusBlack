@@ -1,5 +1,6 @@
 #include "scanner.h"
 #include "frequency_manager.h"  // For FrequencyManagerModule definition
+#include <cmath>
 #include <utils/flog.h>
 #include <gui/gui.h>
 #include <gui/style.h>
@@ -40,6 +41,13 @@ Scanner::Scanner(FrequencyManagerModule* module) : module(module) {
     listenTimeSec = config.conf["scanner"]["listenTimeSec"];
     noiseFloor = config.conf["scanner"]["noiseFloor"];
     signalMarginDb = config.conf["scanner"]["signalMarginDb"];
+    // An earlier default put -120 in here, an absolute dBFS level, where the rest
+    // of the scanner works on the SNR meter's 0..40 scale. Every measurement clears
+    // -120, so the first station always looked busy and the scan stopped dead on
+    // it. Repair anything outside the range the UI allows - written as a negated
+    // range so a NaN from a corrupt config is caught too.
+    if (!(noiseFloor >= 0.0f && noiseFloor <= 40.0f)) { noiseFloor = 3.0f; }
+    if (!(signalMarginDb >= 0.0f && signalMarginDb <= 40.0f)) { signalMarginDb = 4.0f; }
     squelchEnabled = config.conf["scanner"]["squelchEnabled"];
     if (config.conf["scanner"].contains("carrierHoldMode")) {
         carrierHoldMode = config.conf["scanner"]["carrierHoldMode"];
@@ -219,8 +227,14 @@ void Scanner::stop() {
 void Scanner::onSNRMeterExtPoint(ImGui::SNRMeterExtPoint point) {
     if (!scanning) return;
     
-    // Convert drawn value back to dB
+    // Convert drawn value back to dB. Guard the divisor: before the meter has been
+    // laid out this is zero, and the resulting inf or NaN goes straight into
+    // signalLevelSum, where it sticks - every later comparison against the
+    // threshold is then false and the scanner never detects another signal for the
+    // rest of the session.
+    if (!(point.postSnrLocation.x > 0.0f)) { return; }
     float signalLevelDb = point.lastDrawnValue / (point.postSnrLocation.x / 90.0f);
+    if (!std::isfinite(signalLevelDb)) { return; }
     
     // For signal detection
     // Always track signal level when scanning
