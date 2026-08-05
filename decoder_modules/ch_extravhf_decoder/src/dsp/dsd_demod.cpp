@@ -546,8 +546,21 @@ namespace dsp {
                 center = ((max) + (min)) / 2;
                 umid = (((max) - center) * 5 / 8) + center;
                 lmid = (((min) - center) * 5 / 8) + center;
-                maxref = (int)((max) * 0.80F);
-                minref = (int)((min) * 0.80F);
+                if (rfMod == 1) {
+                    maxref = (int)((max) * 0.80F);
+                    minref = (int)((min) * 0.80F);
+                } else {
+                    // GFSK keeps the unscaled references. maxref and minref do not
+                    // touch the slicer - they only set the "spike out of place"
+                    // threshold in getSymbol, and scaling by 0.8 puts that threshold
+                    // at max exactly, so every peak sample fell into a branch that
+                    // records a transition for QPSK only. Peaks stopped feeding
+                    // symbol timing, which drifts it and costs a bit here and there
+                    // on a signal that is otherwise clean. Tracking the slicer levels
+                    // was the point of this branch; changing the timing was not.
+                    maxref = max;
+                    minref = min;
+                }
             } else {
                 maxref = max;
                 minref = min;

@@ -34,13 +34,21 @@ namespace dsp {
                 }
                 lbuf2[lbuf2idx] = sym_c;
                 lbuf2idx = (lbuf2idx+1) % LVL_BUFF;
+                // Scan the 24 most recent symbols. This used to read lbuf2[0..23]
+                // regardless of where the write index was, and since that wraps at
+                // LVL_BUFF those slots are only rewritten once every 1024 symbols -
+                // so the window was stale, and before the first wrap it was reading
+                // an uninitialised array. Which is very likely why the AFC below
+                // "works better" switched off: it was being driven by noise.
                 float lmax = 0;
                 float lmin = 0;
                 for(int i = 0; i < 24; i++) {
-                    if(lbuf2[i] > lmax) {
-                        lmax = lbuf2[i];
-                    } else if(lbuf2[i] < lmin) {
-                        lmin = lbuf2[i];
+                    float v = lbuf2[(lbuf2idx + LVL_BUFF - 1 - i) % LVL_BUFF];
+                    if(v > lmax) {
+                        lmax = v;
+                    }
+                    if(v < lmin) {
+                        lmin = v;
                     }
                 }
                 //WORKS BETTER WITHOUT AFC
@@ -86,7 +94,9 @@ namespace dsp {
 
     private:
         int lbuf2idx = 0;
-        float lbuf2[LVL_BUFF];
+        // Needs initialising: the level scan above reads it before a full pass has
+        // been written.
+        float lbuf2[LVL_BUFF] = {};
 
     };
 }
