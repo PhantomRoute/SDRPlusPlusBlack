@@ -126,16 +126,29 @@ namespace dsp {
                         noise_history.pop_front();
                     }
 
-                    auto noiseAvg = div(sums, (float)noise_history.size());
-
-                    auto diff = subeach(noise, noiseAvg);
-                    diff = muleach(diff, diff);
+                    // diff[w] = (noise[w] - mean[w])^2, in one pass, straight into the
+                    // array dev_history keeps. This was div, subeach then muleach in
+                    // sequence, and each of those allocates an nFFT array and walks it -
+                    // three buffers where only the last is kept. At a 192k baseband rate
+                    // nFFT is 7680 and this runs 100 times a second.
+                    auto diff = std::make_shared<std::vector<float>>(nFFT);
+                    const float historyCount = (float)noise_history.size();
+                    const float* noiseD = noise->data();
+                    const float* sumsD = sums->data();
+                    float* diffD = diff->data();
+                    for (int w = 0; w < nFFT; w++) {
+                        const float d = noiseD[w] - (sumsD[w] / historyCount);
+                        diffD[w] = d * d;
+                    }
                     dev_history.emplace_back(diff);
 
-                    devs = addeach(devs, diff);
+                    // In place, the same way sums is maintained above. addeach and
+                    // subeach each returned a fresh array, so devs was reallocated twice
+                    // per frame just to add and subtract one row from a running total.
+                    volk_32f_x2_add_32f(devs->data(), devs->data(), diffD, nFFT);
 
                     while (dev_history.size() > noise_history_len()) {
-                        devs = subeach(devs, dev_history.front());
+                        volk_32f_x2_subtract_32f(devs->data(), devs->data(), dev_history.front()->data(), nFFT);
                         dev_history.pop_front();
                     }
 
@@ -384,13 +397,23 @@ namespace dsp {
                         ksi = npmaximum_(ksi, params->ksi_min);
                     }
                     ALLOC_AND_CHECK(x, sz, "logmmse_all point 10")
-                    auto A = diveach(ksi, add(ksi, 1));
-                    ALLOC_AND_CHECK(x, sz, "logmmse_all point 11")
-                    auto vk = muleach(A, gammak);
-                    ALLOC_AND_CHECK(x, sz, "logmmse_all point 12")
-                    auto ei_vk = mul(scipyspecialexpn(vk), 0.5);
-                    ALLOC_AND_CHECK(x, sz, "logmmse_all point 13")
-                    auto hw = muleach(A, npexp(ei_vk));
+                    // hw = A * exp(0.5 * expn(A * gammak)), where A = ksi / (ksi + 1).
+                    // Every step of that is elementwise over arrays of the same length,
+                    // and only hw is used afterwards, so do it in one pass. Written out
+                    // as add, diveach, muleach, scipyspecialexpn, mul, npexp and muleach
+                    // it allocated and walked seven nFFT arrays to produce one, on every
+                    // frame of every block.
+                    auto hw = std::make_shared<std::vector<float>>(ksi->size());
+                    {
+                        const float* ksiD = ksi->data();
+                        const float* gammakD = gammak->data();
+                        float* hwD = hw->data();
+                        const int n = (int)ksi->size();
+                        for (int q = 0; q < n; q++) {
+                            const float a = ksiD[q] / (ksiD[q] + 1.0f);
+                            hwD[q] = a * exp(0.5f * expn(a * gammakD[q]));
+                        }
+                    }
                     ALLOC_AND_CHECK(x, sz, "logmmse_all point 14")
                     sig = muleach(sig, hw);
                     ALLOC_AND_CHECK(x, sz, "logmmse_all point 15")
