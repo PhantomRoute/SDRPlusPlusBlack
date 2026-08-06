@@ -2,6 +2,7 @@
 
 #include <string>
 #include "config.h"
+#include <radio_interface.h>
 
 struct FrequencyBookmark {
     double frequency;
@@ -9,6 +10,10 @@ struct FrequencyBookmark {
     int modeIndex;
     bool selected;
     std::string vfoName; // VFO/radio this bookmark belongs to; empty = legacy (apply to currently selected VFO)
+    // A repeater's tone is a property of the channel, so it belongs on the
+    // bookmark. Defaults are "no tone", which is what every bookmark saved before
+    // this existed gets when it loads.
+    RadioToneSettings tone;
 };
 
 struct WaterfallBookmark {

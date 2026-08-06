@@ -1261,7 +1261,33 @@ private:
         if (!_this->selectedDemod) { return; }
 
         // Execute commands
-        if (code == RADIO_IFACE_CMD_GET_MODE && out) {
+        if (code == RADIO_IFACE_CMD_GET_TONE_SETTINGS && out) {
+            RadioToneSettings* _out = (RadioToneSettings*)out;
+            _out->squelchEnabled = _this->toneSqEnabled;
+            _out->mode = (int)_this->toneTarget.mode;
+            _out->ctcssFreq = _this->toneTarget.ctcssFreq;
+            _out->dcsCode = _this->toneTarget.dcsCode;
+            _out->dcsInverted = _this->toneTarget.dcsInverted;
+            _out->filterEnabled = _this->toneFilterEnabled;
+            _out->identifyEnabled = _this->toneIdEnabled;
+        }
+        else if (code == RADIO_IFACE_CMD_SET_TONE_SETTINGS && in && _this->enabled) {
+            RadioToneSettings* _in = (RadioToneSettings*)in;
+            // Silently a no-op on anything but NFM, so a bookmark carrying tone
+            // settings can be applied to an AM or SSB channel without complaint.
+            if (!_this->toneIdAllowed) { return; }
+            _this->toneSqEnabled = _in->squelchEnabled;
+            _this->toneFilterEnabled = _in->filterEnabled;
+            _this->toneIdEnabled = _in->identifyEnabled;
+            if (_in->mode >= 0 && _in->mode <= (int)tonedetect::Target::DCS) {
+                _this->toneTarget.mode = (tonedetect::Target::Mode)_in->mode;
+            }
+            _this->toneTarget.ctcssFreq = _in->ctcssFreq;
+            _this->toneTarget.dcsCode = _in->dcsCode;
+            _this->toneTarget.dcsInverted = _in->dcsInverted;
+            _this->updateToneBlock(true);
+        }
+        else if (code == RADIO_IFACE_CMD_GET_MODE && out) {
             int* _out = (int*)out;
             *_out = _this->selectedDemodID;
         }

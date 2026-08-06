@@ -17,6 +17,9 @@
 #include "frequency_manager.h"
 #include "scanner.h"
 #include "../../radio/src/radio_module_interface.h"
+#include "../../radio/src/tone_tables.h"
+#include <algorithm>
+#include <cmath>
 
 SDRPP_MOD_INFO{
     /* Name:            */ "frequency_manager",
@@ -271,6 +274,123 @@ public:
     }
 
 private:
+    // Combo strings for the tone pickers, built once from the shared tables.
+    static const char* ctcssToneNames() {
+        static const std::string names = [] {
+            std::string s;
+            char buf[16];
+            for (int i = 0; i < tonedetect::CTCSS_TONE_COUNT; i++) {
+                snprintf(buf, sizeof buf, "%.1f Hz", tonedetect::CTCSS_TONES[i]);
+                s += buf;
+                s += '\0';
+            }
+            s += '\0';
+            return s;
+        }();
+        return names.c_str();
+    }
+
+    static const std::vector<int>& dcsCodes() {
+        static const std::vector<int> codes = tonedetect::dcsCodeList();
+        return codes;
+    }
+
+    static const char* dcsCodeNames() {
+        static const std::string names = [] {
+            std::string s;
+            char buf[16];
+            for (int c : dcsCodes()) {
+                snprintf(buf, sizeof buf, "D%03d", c);
+                s += buf;
+                s += '\0';
+            }
+            s += '\0';
+            return s;
+        }();
+        return names.c_str();
+    }
+
+    // The tone rows of the edit dialog. Only shown for NFM, since that is the only
+    // demodulator the radio will accept tone settings for - offering them against
+    // an SSB bookmark would just be a control that does nothing.
+    void drawToneRows() {
+        // The bookmark's own radio when it names one, since that is what recalling it
+        // will drive; only fall back to the selected VFO for a legacy bookmark.
+        std::string vfo = editedBookmark.vfoName.empty() ? gui::waterfall.selectedVFO : editedBookmark.vfoName;
+        auto radio = (RadioModuleInterface*)core::moduleManager.getInterface(vfo, "RadioModuleInterface");
+        if (radio == nullptr || editedBookmark.modeIndex < 0) { return; }
+        if (radio->getDemodByIndex(editedBookmark.modeIndex) != RADIO_DEMOD_NFM) { return; }
+
+        RadioToneSettings& t = editedBookmark.tone;
+
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::LeftLabel("Tone squelch");
+        ImGui::TableSetColumnIndex(1);
+        ImGui::SetNextItemWidth(200);
+        if (ImGui::Checkbox(("##freq_manager_edit_tonesq" + name).c_str(), &t.squelchEnabled)) {
+            if (t.squelchEnabled && t.mode == 0) { t.mode = 1; }
+        }
+
+        if (t.squelchEnabled) {
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::LeftLabel("Type");
+            ImGui::TableSetColumnIndex(1);
+            ImGui::SetNextItemWidth(200);
+            int modeSel = (t.mode == 2) ? 1 : 0;
+            if (ImGui::Combo(("##freq_manager_edit_tonetype" + name).c_str(), &modeSel, "CTCSS\0DCS\0")) {
+                t.mode = modeSel ? 2 : 1;
+            }
+
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            if (t.mode == 2) {
+                ImGui::LeftLabel("Code");
+                ImGui::TableSetColumnIndex(1);
+                ImGui::SetNextItemWidth(110);
+                const auto& codes = dcsCodes();
+                auto it = std::find(codes.begin(), codes.end(), t.dcsCode);
+                int codeId = (it == codes.end()) ? 0 : (int)std::distance(codes.begin(), it);
+                if (ImGui::Combo(("##freq_manager_edit_dcs" + name).c_str(), &codeId, dcsCodeNames())) {
+                    t.dcsCode = codes[codeId];
+                }
+                ImGui::SameLine();
+                int pol = t.dcsInverted ? 1 : 0;
+                ImGui::SetNextItemWidth(85);
+                if (ImGui::Combo(("##freq_manager_edit_dcspol" + name).c_str(), &pol, "Normal\0Invert\0")) {
+                    t.dcsInverted = (pol != 0);
+                }
+            }
+            else {
+                ImGui::LeftLabel("Tone");
+                ImGui::TableSetColumnIndex(1);
+                ImGui::SetNextItemWidth(200);
+                int toneId = 0;
+                for (int i = 0; i < tonedetect::CTCSS_TONE_COUNT; i++) {
+                    if (std::fabs(tonedetect::CTCSS_TONES[i] - t.ctcssFreq) < 0.05f) { toneId = i; break; }
+                }
+                if (ImGui::Combo(("##freq_manager_edit_ctcss" + name).c_str(), &toneId, ctcssToneNames())) {
+                    t.ctcssFreq = tonedetect::CTCSS_TONES[toneId];
+                }
+            }
+        }
+
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::LeftLabel("Remove tone");
+        ImGui::TableSetColumnIndex(1);
+        ImGui::SetNextItemWidth(200);
+        ImGui::Checkbox(("##freq_manager_edit_tonefilt" + name).c_str(), &t.filterEnabled);
+
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::LeftLabel("Identify tone");
+        ImGui::TableSetColumnIndex(1);
+        ImGui::SetNextItemWidth(200);
+        ImGui::Checkbox(("##freq_manager_edit_toneid" + name).c_str(), &t.identifyEnabled);
+    }
+
     bool bookmarkEditDialog() {
         bool open = true;
         gui::mainWindow.lockWaterfallControls = true;
@@ -314,6 +434,8 @@ private:
             ImGui::SetNextItemWidth(200);
 
             ImGui::Combo(("##freq_manager_edit_mode" + name).c_str(), &editedBookmark.modeIndex, demodModeListTxt.c_str());
+
+            drawToneRows();
 
             ImGui::EndTable();
 
@@ -447,6 +569,7 @@ private:
                 int mode = config.conf["lists"][listName]["bookmarks"][bookmarkName]["mode"];
                 wbm.bookmark.modeIndex = (radio != nullptr) ? radio->getDemodIndex(mode) : -1;
                 wbm.bookmark.vfoName = config.conf["lists"][listName]["bookmarks"][bookmarkName].value("vfo", "");
+                wbm.bookmark.tone = loadTone(config.conf["lists"][listName]["bookmarks"][bookmarkName]);
                 wbm.bookmark.selected = false;
                 wbm.notValidAfter = 0;
                 wbm.extraInfo = "";
@@ -490,10 +613,41 @@ private:
             fbm.bandwidth = bm["bandwidth"];
             fbm.modeIndex = (radio != nullptr) ? radio->getDemodIndex(bm["mode"]) : -1;
             fbm.vfoName = bm.value("vfo", "");
+            fbm.tone = loadTone(bm);
             fbm.selected = false;
             bookmarks[bmName] = fbm;
         }
         config.release();
+    }
+
+    // Only written when there is something to say, so a list full of plain
+    // bookmarks does not grow a block of "off" keys apiece.
+    static void saveTone(json& bm, const RadioToneSettings& t) {
+        bm.erase("tone");
+        if (!t.squelchEnabled && !t.filterEnabled && !t.identifyEnabled) { return; }
+        bm["tone"]["squelch"] = t.squelchEnabled;
+        bm["tone"]["mode"] = t.mode;
+        bm["tone"]["ctcss"] = t.ctcssFreq;
+        bm["tone"]["dcsCode"] = t.dcsCode;
+        bm["tone"]["dcsInverted"] = t.dcsInverted;
+        bm["tone"]["filter"] = t.filterEnabled;
+        bm["tone"]["identify"] = t.identifyEnabled;
+    }
+
+    // Absent on every bookmark saved before tones existed, so each key is optional
+    // and the defaults mean "no tone".
+    static RadioToneSettings loadTone(const json& bm) {
+        RadioToneSettings t;
+        if (!bm.contains("tone") || !bm["tone"].is_object()) { return t; }
+        const json& j = bm["tone"];
+        t.squelchEnabled = j.value("squelch", false);
+        t.mode = j.value("mode", 0);
+        t.ctcssFreq = j.value("ctcss", 100.0f);
+        t.dcsCode = j.value("dcsCode", 23);
+        t.dcsInverted = j.value("dcsInverted", false);
+        t.filterEnabled = j.value("filter", false);
+        t.identifyEnabled = j.value("identify", false);
+        return t;
     }
 
     void updateModeList(RadioModuleInterface *radio) {
@@ -520,6 +674,7 @@ private:
             flog::info("bm.modeIndex={}, demodId={}", (int)bm.modeIndex, (int)demodId);
             config.conf["lists"][listName]["bookmarks"][bmName]["mode"] = demodId;
             config.conf["lists"][listName]["bookmarks"][bmName]["vfo"] = bm.vfoName;
+            saveTone(config.conf["lists"][listName]["bookmarks"][bmName], bm.tone);
         }
         refreshWaterfallBookmarks(false);
         config.release(true);
@@ -636,6 +791,13 @@ private:
             _this->editedBookmark.modeIndex = (radio != nullptr) ? radio->getDemodIndex(radio->getSelectedDemodId()) : -1;
             _this->editedBookmark.vfoName = gui::waterfall.selectedVFO;
             _this->editedBookmark.selected = false;
+            // Take the tone the radio is set to right now, so bookmarking a repeater
+            // you have just tuned in captures its tone without retyping it.
+            _this->editedBookmark.tone = RadioToneSettings();
+            if (gui::waterfall.selectedVFO != "") {
+                core::modComManager.callInterface(gui::waterfall.selectedVFO, RADIO_IFACE_CMD_GET_TONE_SETTINGS,
+                                                  NULL, &_this->editedBookmark.tone);
+            }
 
 
             _this->createOpen = true;
@@ -1089,6 +1251,10 @@ void applyBookmark(FrequencyBookmark bm, std::string vfoName) {
             float bandwidth = bm.bandwidth;
             core::modComManager.callInterface(targetVfo, RADIO_IFACE_CMD_SET_MODE, &mode, NULL);
             core::modComManager.callInterface(targetVfo, RADIO_IFACE_CMD_SET_BANDWIDTH, &bandwidth, NULL);
+            // After the mode, since the radio ignores tone settings unless the
+            // demodulator it just switched to is one that carries them.
+            RadioToneSettings tone = bm.tone;
+            core::modComManager.callInterface(targetVfo, RADIO_IFACE_CMD_SET_TONE_SETTINGS, &tone, NULL);
         }
     }
     tuner::tune(tuner::TUNER_MODE_NORMAL, targetVfo, bm.frequency);
