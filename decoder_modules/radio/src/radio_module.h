@@ -21,6 +21,7 @@
 #include "radio_interface.h"
 #include "demod.h"
 #include "radio_module_interface.h"
+#include "tone_detector.h"
 
 extern ConfigManager config;
 
@@ -107,8 +108,13 @@ public:
         resamp.init(NULL, 250000.0, 48000.0);
         deemp.init(NULL, 50e-6, 48000.0);
 
+        toneDetector.init(NULL, audioSampleRate);
+
         afChain.addBlock(&resamp, true);
         afChain.addBlock(&deemp, false);
+        // Last, so the squelch gates what actually reaches the sink. Its own
+        // detection runs on the block's input, which is upstream of its gate.
+        afChain.addBlock(&toneDetector, false);
 
         // Initialize the sink
         srChangeHandler.ctx = this;
@@ -599,6 +605,76 @@ private:
         }
         if (!_this->squelchEnabled && _this->enabled) { style::endDisabled(); }
 
+        // CTCSS / DCS identification and tone squelch
+        if (_this->toneIdAllowed) {
+            if (ImGui::Checkbox(("Identify tone##_radio_toneid_ena_" + _this->name).c_str(), &_this->toneIdEnabled)) {
+                _this->updateToneBlock(true);
+            }
+            if (_this->toneIdEnabled) {
+                ImGui::SameLine();
+                tonedetect::Result r = _this->toneDetector.getResult();
+                // Dimmed while there is nothing to show, so an empty readout does
+                // not read as a broken one.
+                if (r.kind == tonedetect::Result::NONE) {
+                    ImGui::TextDisabled("%s", r.longLabel().c_str());
+                }
+                else {
+                    ImGui::TextUnformatted(r.longLabel().c_str());
+                }
+            }
+
+            if (ImGui::Checkbox(("Tone squelch##_radio_tonesq_ena_" + _this->name).c_str(), &_this->toneSqEnabled)) {
+                // Ticking it with nothing chosen would mute the radio outright, so
+                // default to the mode the pickers below are already showing.
+                if (_this->toneSqEnabled && _this->toneTarget.mode == tonedetect::Target::OFF) {
+                    _this->toneTarget.mode = tonedetect::Target::CTCSS;
+                }
+                _this->updateToneBlock(true);
+            }
+            if (_this->toneSqEnabled) {
+                ImGui::SameLine();
+                if (_this->toneDetector.isGateOpen()) { ImGui::TextUnformatted("open"); }
+                else { ImGui::TextDisabled("muted"); }
+
+                if (!_this->enabled) { style::beginDisabled(); }
+                int mode = (_this->toneTarget.mode == tonedetect::Target::DCS) ? 1 : 0;
+                ImGui::LeftLabel("Type");
+                ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());
+                if (ImGui::Combo(("##_radio_tonesq_mode_" + _this->name).c_str(), &mode, "CTCSS\0DCS\0")) {
+                    _this->toneTarget.mode = mode ? tonedetect::Target::DCS : tonedetect::Target::CTCSS;
+                    _this->updateToneBlock(true);
+                }
+
+                if (_this->toneTarget.mode == tonedetect::Target::DCS) {
+                    ImGui::LeftLabel("Code");
+                    float remaining = menuWidth - ImGui::GetCursorPosX();
+                    ImGui::SetNextItemWidth(remaining * 0.55f);
+                    int codeId = dcsCodeIndex(_this->toneTarget.dcsCode);
+                    if (ImGui::Combo(("##_radio_tonesq_dcs_" + _this->name).c_str(), &codeId, dcsCodeNames())) {
+                        _this->toneTarget.dcsCode = dcsCodes()[codeId];
+                        _this->updateToneBlock(true);
+                    }
+                    ImGui::SameLine();
+                    int pol = _this->toneTarget.dcsInverted ? 1 : 0;
+                    ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());
+                    if (ImGui::Combo(("##_radio_tonesq_dcspol_" + _this->name).c_str(), &pol, "Normal\0Invert\0")) {
+                        _this->toneTarget.dcsInverted = (pol != 0);
+                        _this->updateToneBlock(true);
+                    }
+                }
+                else {
+                    ImGui::LeftLabel("Tone");
+                    ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());
+                    int toneId = ctcssToneIndex(_this->toneTarget.ctcssFreq);
+                    if (ImGui::Combo(("##_radio_tonesq_ctcss_" + _this->name).c_str(), &toneId, ctcssToneNames())) {
+                        _this->toneTarget.ctcssFreq = tonedetect::CTCSS_TONES[toneId];
+                        _this->updateToneBlock(true);
+                    }
+                }
+                if (!_this->enabled) { style::endDisabled(); }
+            }
+        }
+
         // FM IF Noise Reduction
         if (_this->FMIFNRAllowed) {
             if (ImGui::Checkbox(("IF Noise Reduction##_radio_fmifnr_ena_" + _this->name).c_str(), &_this->FMIFNREnabled)) {
@@ -704,6 +780,12 @@ private:
         nbAllowed = selectedDemod->getNBAllowed();
         nbEnabled = false;
         nbLevel = 0.0f;
+        // Sub-audible signalling is an FM thing. WFM broadcast does not carry it
+        // either, so this is narrow FM only.
+        toneIdAllowed = (selectedDemodID == RADIO_DEMOD_NFM);
+        toneIdEnabled = false;
+        toneSqEnabled = false;
+        toneTarget = tonedetect::Target();
         double ifSamplerate = selectedDemod->getIFSampleRate();
         config.acquire();
         if (config.conf[name][selectedDemod->getName()].contains("bandwidth")) {
@@ -743,6 +825,18 @@ private:
         }
         if (config.conf[name][selectedDemod->getName()].contains("noiseBlankerLevel")) {
             nbLevel = config.conf[name][selectedDemod->getName()]["noiseBlankerLevel"];
+        }
+        {
+            auto& conf = config.conf[name][selectedDemod->getName()];
+            if (conf.contains("toneIdEnabled")) { toneIdEnabled = conf["toneIdEnabled"]; }
+            if (conf.contains("toneSquelchEnabled")) { toneSqEnabled = conf["toneSquelchEnabled"]; }
+            if (conf.contains("toneSquelchMode")) {
+                int m = conf["toneSquelchMode"];
+                if (m >= 0 && m <= (int)tonedetect::Target::DCS) { toneTarget.mode = (tonedetect::Target::Mode)m; }
+            }
+            if (conf.contains("toneSquelchCtcss")) { toneTarget.ctcssFreq = conf["toneSquelchCtcss"]; }
+            if (conf.contains("toneSquelchDcsCode")) { toneTarget.dcsCode = conf["toneSquelchDcsCode"]; }
+            if (conf.contains("toneSquelchDcsInverted")) { toneTarget.dcsInverted = conf["toneSquelchDcsInverted"]; }
         }
         config.release();
 
@@ -786,6 +880,12 @@ private:
             afChain.disableAllBlocks([=](dsp::stream<dsp::stereo_t>* out){ afsplitter.setInput(out); });
         }
 
+        // Configure tone identification and squelch, after the AF chain rather than
+        // before it: disableAllBlocks above would otherwise undo this, and it is also
+        // where the block leaves the chain when the new demodulator carries no tones.
+        toneDetector.reset();
+        updateToneBlock(false);
+
         // Start new demodulator
         selectedDemod->start();
     }
@@ -826,6 +926,9 @@ private:
         // Configure deemphasis sample rate
         deemp.setSamplerate(audioSampleRate);
 
+        // The detector decimates from the audio rate, so it has to be told too
+        toneDetector.setInputSampleRate(audioSampleRate);
+
         afChain.start();
     }
 
@@ -860,6 +963,77 @@ private:
         // Save config
         config.acquire();
         config.conf[name][selectedDemod->getName()]["squelchEnabled"] = squelchEnabled;
+        config.release(true);
+    }
+
+    // The tone and code pickers. Both lists are fixed, so they are built once and
+    // handed to ImGui as its null separated combo strings.
+    static const std::vector<int>& dcsCodes() {
+        static const std::vector<int> codes = tonedetect::dcsCodeList();
+        return codes;
+    }
+
+    static const char* dcsCodeNames() {
+        static const std::string names = [] {
+            std::string s;
+            char buf[16];
+            for (int c : dcsCodes()) {
+                snprintf(buf, sizeof buf, "D%03d", c);
+                s += buf;
+                s += '\0';
+            }
+            s += '\0';
+            return s;
+        }();
+        return names.c_str();
+    }
+
+    static int dcsCodeIndex(int code) {
+        const auto& codes = dcsCodes();
+        auto it = std::find(codes.begin(), codes.end(), code);
+        return (it == codes.end()) ? 0 : (int)std::distance(codes.begin(), it);
+    }
+
+    static const char* ctcssToneNames() {
+        static const std::string names = [] {
+            std::string s;
+            char buf[16];
+            for (int i = 0; i < tonedetect::CTCSS_TONE_COUNT; i++) {
+                snprintf(buf, sizeof buf, "%.1f Hz", tonedetect::CTCSS_TONES[i]);
+                s += buf;
+                s += '\0';
+            }
+            s += '\0';
+            return s;
+        }();
+        return names.c_str();
+    }
+
+    static int ctcssToneIndex(float freq) {
+        for (int i = 0; i < tonedetect::CTCSS_TONE_COUNT; i++) {
+            if (std::fabs(tonedetect::CTCSS_TONES[i] - freq) < 0.05f) { return i; }
+        }
+        return 0;
+    }
+
+    // Sub-audible signalling only exists on FM, so the block is only ever in circuit
+    // for NFM. It carries a decimation and an FFT twice a second, so it is taken out
+    // of the chain rather than left idling when neither feature is on.
+    void updateToneBlock(bool save) {
+        bool allowed = toneIdAllowed && selectedDemod != NULL;
+        toneDetector.setSquelch(toneSqEnabled && allowed, toneTarget);
+        afChain.setBlockEnabled(&toneDetector, allowed && (toneIdEnabled || toneSqEnabled),
+                                [=](dsp::stream<dsp::stereo_t>* out) { afsplitter.setInput(out); });
+
+        if (!save || !selectedDemod) { return; }
+        config.acquire();
+        auto& conf = config.conf[name][selectedDemod->getName()];
+        conf["toneIdEnabled"] = toneIdEnabled;
+        conf["toneSquelchEnabled"] = toneSqEnabled;
+        conf["toneSquelchMode"] = (int)toneTarget.mode;
+        conf["toneSquelchCtcss"] = toneTarget.ctcssFreq;
+        conf["toneSquelchDcsCode"] = toneTarget.dcsCode;
+        conf["toneSquelchDcsInverted"] = toneTarget.dcsInverted;
         config.release(true);
     }
 
@@ -983,14 +1157,48 @@ private:
 
     static void fftRedraw(ImGui::WaterFall::FFTRedrawArgs args, void* ctx) {
         RadioModule* _this = (RadioModule*)ctx;
-        if (!_this->squelchEnabled || _this->selectedDemod == nullptr) { return; }
-        // Cheap place to pick up FFT size / sample rate changes, neither of which
-        // notifies us but both of which move the squelch threshold.
-        _this->updateSquelchScaling();
-        double bPos = args.max.y - ((_this->squelchLevel - gui::waterfall.getFFTMin()) * (args.max.y - args.min.y) / (gui::waterfall.getFFTMax() - gui::waterfall.getFFTMin()));
-        if (bPos >= args.min.y && bPos <= args.max.y) {
-            args.window->DrawList->AddLine(ImVec2(args.min.x, roundf(bPos)), ImVec2(args.max.x, roundf(bPos)), ImGui::ColorConvertFloat4ToU32(gui::themeManager.squelchColor), 1.0);
+        if (_this->selectedDemod == nullptr) { return; }
+
+        if (_this->squelchEnabled) {
+            // Cheap place to pick up FFT size / sample rate changes, neither of which
+            // notifies us but both of which move the squelch threshold.
+            _this->updateSquelchScaling();
+            double bPos = args.max.y - ((_this->squelchLevel - gui::waterfall.getFFTMin()) * (args.max.y - args.min.y) / (gui::waterfall.getFFTMax() - gui::waterfall.getFFTMin()));
+            if (bPos >= args.min.y && bPos <= args.max.y) {
+                args.window->DrawList->AddLine(ImVec2(args.min.x, roundf(bPos)), ImVec2(args.max.x, roundf(bPos)), ImGui::ColorConvertFloat4ToU32(gui::themeManager.squelchColor), 1.0);
+            }
         }
+
+        _this->drawToneBadge(args);
+    }
+
+    // The identified tone goes in the top right of the FFT area. That corner is free
+    // in both the desktop and the phone layout, the timestamp already has the top
+    // left, and drawing into the waterfall costs no layout space at all - so it
+    // cannot push anything out of its bounds on a narrow screen the way another
+    // widget in the top bar would.
+    void drawToneBadge(const ImGui::WaterFall::FFTRedrawArgs& args) {
+        if (!toneIdAllowed || !toneIdEnabled) { return; }
+        tonedetect::Result r = toneDetector.getResult();
+        if (r.kind == tonedetect::Result::NONE) { return; }
+
+        // A muted signal is worth flagging: the tone is there, it is just not the
+        // one the squelch was told to open for.
+        std::string label = r.label();
+        if (toneSqEnabled && !toneDetector.isGateOpen()) { label += " (muted)"; }
+        ImVec2 sz = ImGui::CalcTextSize(label.c_str());
+        float pad = 4.0f * style::uiScale;
+
+        ImVec2 textPos(args.max.x - pad - sz.x, args.min.y + pad);
+        ImVec2 bgMin(textPos.x - pad, textPos.y - (pad * 0.5f));
+        ImVec2 bgMax(args.max.x, textPos.y + sz.y + (pad * 0.5f));
+
+        // On a phone in portrait the spectrum can be narrower than the badge. Better
+        // no badge than one lying across the whole trace.
+        if (bgMin.x < args.min.x) { return; }
+
+        args.window->DrawList->AddRectFilled(bgMin, bgMax, IM_COL32(0, 0, 0, 140));
+        args.window->DrawList->AddText(textPos, ImGui::GetColorU32(ImGuiCol_Text), label.c_str());
     }
 
     static void sampleRateChangeHandler(float sampleRate, void* ctx) {
@@ -1117,6 +1325,15 @@ private:
     dsp::routing::Splitter<dsp::stereo_t> afsplitter;
     std::vector<std::shared_ptr<SinkManager::Stream>> streams;
     std::vector<std::string> streamNames;
+
+    // CTCSS / DCS identification and tone squelch. One block does both: the squelch
+    // has to gate the samples on their way through, and the detection deciding the
+    // gate has to see the audio before it is muted.
+    tonedetect::ToneDetector toneDetector;
+    bool toneIdAllowed = false;
+    bool toneIdEnabled = false;
+    bool toneSqEnabled = false;
+    tonedetect::Target toneTarget;
 
 
     demod::Demodulator* selectedDemod = NULL;
