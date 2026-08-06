@@ -2,6 +2,7 @@
 #include <gui/gui.h>
 #include <core.h>
 #include <gui/style.h>
+#include <utils/flog.h>
 #include <fstream>
 #include <cstring>
 #include <imgui.h>
@@ -20,14 +21,23 @@ namespace thememenu {
         }
     }
 
-    void loadStyle() {
+    // The saved style is the scaled one, since that is what is live by the time
+    // anything saves it. Reports whether it was applied so init knows not to scale on
+    // top of it.
+    bool loadStyle() {
         std::string path = std::string(core::getRoot()) + "/imgui_style_v1.bin";
         std::ifstream file(path, std::ios::binary);
-        if (file) {
-            ImGuiStyle style;
-            file.read((char*)&style, sizeof(ImGuiStyle));
-            ImGui::GetStyle() = style;
+        if (!file) { return false; }
+        ImGuiStyle style;
+        file.read((char*)&style, sizeof(ImGuiStyle));
+        // A truncated file leaves the rest of the struct uninitialised, and a style
+        // full of garbage paddings lays the whole UI out somewhere off screen.
+        if ((size_t)file.gcount() != sizeof(ImGuiStyle)) {
+            flog::warn("Ignoring incomplete saved ImGui style: {0}", path);
+            return false;
         }
+        ImGui::GetStyle() = style;
+        return true;
     }
 
     void init(std::string resDir) {
@@ -53,11 +63,23 @@ namespace thememenu {
         }
         core::configManager.release();
 
-        // Load saved style if exists
-        loadStyle();
+        // The waterfall background, the GL clear colour, the FFT hold and the squelch
+        // colours live outside ImGuiStyle, so loadStyle cannot restore them - only
+        // applying the theme sets them. Without this they sat at their defaults until
+        // the user touched the theme combo, which is why picking any theme, even the
+        // one already selected, visibly changed the waterfall.
+        applyTheme();
 
-        // Apply scaling
-        ImGui::GetStyle().ScaleAllSizes(style::uiScale);
+        // Load saved style if exists
+        bool styleLoaded = loadStyle();
+
+        // Apply scaling. The saved style was scaled before it was written, so scaling
+        // it again multiplied every padding, spacing and item size by uiScale a second
+        // time on each start - which on anything but a 1.0 scale pushed the layout,
+        // and the waterfall inside it, out of shape.
+        if (!styleLoaded) {
+            ImGui::GetStyle().ScaleAllSizes(style::uiScale);
+        }
 
         themeNamesTxt = "";
         for (auto name : themeNames) {
