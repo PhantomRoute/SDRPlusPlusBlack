@@ -263,6 +263,7 @@ namespace ImGui {
         void processInputs();
         void onPositionChange();
         void onResize();
+        void updateAreaRects();
         void updateWaterfallTexture();
 
         enum {

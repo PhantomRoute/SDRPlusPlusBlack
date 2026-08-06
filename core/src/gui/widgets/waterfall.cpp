@@ -997,8 +997,36 @@ namespace ImGui {
         glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, dataWidth, waterfallMaxSectionHeight, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
     }
 
+    // The areas below are absolute screen coordinates, so they are only valid for the
+    // position the widget had when they were worked out.
+    void WaterFall::updateAreaRects() {
+        fftAreaMin = ImVec2(widgetPos.x + (50.0f * style::uiScale), widgetPos.y + (9.0f * style::uiScale));
+        fftAreaMax = ImVec2(fftAreaMin.x + dataWidth, fftAreaMin.y + fftHeight + 1);
+
+        freqAreaMin = ImVec2(fftAreaMin.x, fftAreaMax.y + 1);
+        freqAreaMax = ImVec2(fftAreaMax.x, fftAreaMax.y + (40.0f * style::uiScale));
+
+        if (!horizontalScaleVisible) {
+            freqAreaMax.y = freqAreaMin.y;
+        }
+
+        wfMin = ImVec2(fftAreaMin.x, freqAreaMax.y + 1);
+        wfMax = ImVec2(fftAreaMin.x + dataWidth, wfMin.y + waterfallHeight);
+    }
+
     void WaterFall::onPositionChange() {
-        // Nothing to see here...
+        // onResize used to be the only thing that laid these areas out, so a widget
+        // that moved without changing size kept drawing its scales, FFT trace and
+        // waterfall image at the coordinates it had before the move - outside the
+        // background rect draw() had just filled from this frame's widgetPos. The
+        // audio waterfall hits this every time: its window is placed at
+        // gui::waterfall.wfMax.y each frame while its size is a fixed fraction of the
+        // display, so anything that shifts the layout above it - changing the theme,
+        // toggling the menu, showing or hiding the frequency scale - slides it down
+        // with its size untouched.
+        if (dataWidth <= 0) { return; }
+        updateAreaRects();
+        updateAllVFOs();
     }
 
     void WaterFall::onResize() {
@@ -1091,18 +1119,7 @@ namespace ImGui {
             latestFFT[i] = -1000.0f; // Hide everything
             latestFFTHold[i] = -1000.0f;
         }
-        fftAreaMin = ImVec2(widgetPos.x + (50.0f * style::uiScale), widgetPos.y + (9.0f * style::uiScale));
-        fftAreaMax = ImVec2(fftAreaMin.x + dataWidth, fftAreaMin.y + fftHeight + 1);
-
-        freqAreaMin = ImVec2(fftAreaMin.x, fftAreaMax.y + 1);
-        freqAreaMax = ImVec2(fftAreaMax.x, fftAreaMax.y + (40.0f * style::uiScale));
-
-        if (!horizontalScaleVisible) {
-            freqAreaMax.y = freqAreaMin.y;
-        }
-
-        wfMin = ImVec2(fftAreaMin.x, freqAreaMax.y + 1);
-        wfMax = ImVec2(fftAreaMin.x + dataWidth, wfMin.y + waterfallHeight);
+        updateAreaRects();
 
         maxHSteps = dataWidth / (ImGui::CalcTextSize("000.000").x + 10);
         maxVSteps = fftHeight / (ImGui::CalcTextSize("000.000").y);
