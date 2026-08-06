@@ -567,52 +567,41 @@ int sdrpp_main(int argc, char* argv[]) {
     defConfig["fullscreen"] = false;
     defConfig["theme"] = "Dark";
 
-    // Menu
+    // Menu. Only used for a config that does not exist yet - an existing one is
+    // loaded as it stands, so nobody's arrangement gets rearranged under them.
+    //
+    // Ordered by what a new user needs in the order they need it: the signal path
+    // first, from the radio in to the audio out, then the things touched while
+    // actually operating, then appearance, then the optional decoders, and last the
+    // two that are set once and forgotten.
     defConfig["menuElements"] = json::array();
     auto& menuElements = defConfig["menuElements"];
     std::vector<std::pair<const char*, bool>> openState = {
+        // Signal path
         { "Source", true },
         { "Radio", true },
-        { "Recorder", false },
         { "Sinks", false },
+        { "Recorder", false },
+        // Operating
         { "Frequency Manager", false },
-        { "VFO Color", false },
         { "Band Plan", false },
+        // Appearance
         { "Display", true },
-        { "WebSDR View", false },
+        { "VFO Color", false },
+        // Optional processing and decoders
         { "Noise Reduction logmmse", false },
         { "FT8/FT4 Decoder", false },
+        { "WebSDR View", false },
+        // Set once
         { "Rigctl Server", false },
         { "Module Manager", false },
     };
     for (auto& p : openState) {
-        menuElements[menuElements.size() - 0]["name"] = p.first;
-        menuElements[menuElements.size() - 1]["open"] = p.second;
+        json elem;
+        elem["name"] = p.first;
+        elem["open"] = p.second;
+        menuElements.push_back(elem);
     }
-
-    defConfig["menuElements"][0]["name"] = "Source";
-    defConfig["menuElements"][0]["open"] = true;
-
-    defConfig["menuElements"][1]["name"] = "Radio";
-    defConfig["menuElements"][1]["open"] = true;
-
-    defConfig["menuElements"][2]["name"] = "Recorder";
-    defConfig["menuElements"][2]["open"] = true;
-
-    defConfig["menuElements"][3]["name"] = "Sinks";
-    defConfig["menuElements"][3]["open"] = true;
-
-    defConfig["menuElements"][4]["name"] = "Frequency Manager";
-    defConfig["menuElements"][4]["open"] = true;
-
-    defConfig["menuElements"][5]["name"] = "VFO Color";
-    defConfig["menuElements"][5]["open"] = true;
-
-    defConfig["menuElements"][6]["name"] = "Band Plan";
-    defConfig["menuElements"][6]["open"] = true;
-
-    defConfig["menuElements"][7]["name"] = "Display";
-    defConfig["menuElements"][7]["open"] = true;
 
 #ifdef __ANDROID__
     defConfig["menuWidth"] = 700;
