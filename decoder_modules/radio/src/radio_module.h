@@ -623,6 +623,16 @@ private:
                 }
             }
 
+            if (ImGui::Checkbox(("Remove tone from audio##_radio_tonefilt_ena_" + _this->name).c_str(), &_this->toneFilterEnabled)) {
+                _this->updateToneBlock(true);
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("High passes the audio at 300 Hz so the sub-audible tone is\n"
+                                  "not heard, the way a handheld does. Use this rather than the\n"
+                                  "demodulator's own High Pass, which strips the tone before it\n"
+                                  "can be identified.");
+            }
+
             if (ImGui::Checkbox(("Tone squelch##_radio_tonesq_ena_" + _this->name).c_str(), &_this->toneSqEnabled)) {
                 // Ticking it with nothing chosen would mute the radio outright, so
                 // default to the mode the pickers below are already showing.
@@ -784,6 +794,7 @@ private:
         // either, so this is narrow FM only.
         toneIdAllowed = (selectedDemodID == RADIO_DEMOD_NFM);
         toneIdEnabled = false;
+        toneFilterEnabled = false;
         toneSqEnabled = false;
         toneTarget = tonedetect::Target();
         double ifSamplerate = selectedDemod->getIFSampleRate();
@@ -829,6 +840,7 @@ private:
         {
             auto& conf = config.conf[name][selectedDemod->getName()];
             if (conf.contains("toneIdEnabled")) { toneIdEnabled = conf["toneIdEnabled"]; }
+            if (conf.contains("toneFilterEnabled")) { toneFilterEnabled = conf["toneFilterEnabled"]; }
             if (conf.contains("toneSquelchEnabled")) { toneSqEnabled = conf["toneSquelchEnabled"]; }
             if (conf.contains("toneSquelchMode")) {
                 int m = conf["toneSquelchMode"];
@@ -1022,13 +1034,15 @@ private:
     void updateToneBlock(bool save) {
         bool allowed = toneIdAllowed && selectedDemod != NULL;
         toneDetector.setSquelch(toneSqEnabled && allowed, toneTarget);
-        afChain.setBlockEnabled(&toneDetector, allowed && (toneIdEnabled || toneSqEnabled),
+        toneDetector.setToneFilter(toneFilterEnabled && allowed);
+        afChain.setBlockEnabled(&toneDetector, allowed && (toneIdEnabled || toneSqEnabled || toneFilterEnabled),
                                 [=](dsp::stream<dsp::stereo_t>* out) { afsplitter.setInput(out); });
 
         if (!save || !selectedDemod) { return; }
         config.acquire();
         auto& conf = config.conf[name][selectedDemod->getName()];
         conf["toneIdEnabled"] = toneIdEnabled;
+        conf["toneFilterEnabled"] = toneFilterEnabled;
         conf["toneSquelchEnabled"] = toneSqEnabled;
         conf["toneSquelchMode"] = (int)toneTarget.mode;
         conf["toneSquelchCtcss"] = toneTarget.ctcssFreq;
@@ -1332,6 +1346,7 @@ private:
     tonedetect::ToneDetector toneDetector;
     bool toneIdAllowed = false;
     bool toneIdEnabled = false;
+    bool toneFilterEnabled = false;
     bool toneSqEnabled = false;
     tonedetect::Target toneTarget;
 

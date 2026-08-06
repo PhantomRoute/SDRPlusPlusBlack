@@ -2,6 +2,9 @@
 #include <dsp/processor.h>
 #include <dsp/types.h>
 #include <dsp/multirate/rational_resampler.h>
+#include <dsp/filter/fir.h>
+#include <dsp/taps/high_pass.h>
+#include <dsp/taps/tap.h>
 #include <fftw3.h>
 #include <volk/volk.h>
 #include <algorithm>
@@ -263,6 +266,7 @@ namespace tonedetect {
             fftwf_destroy_plan(fftPlan);
             fftwf_free(fftIn);
             fftwf_free(fftOut);
+            dsp::taps::free(filterTaps);
         }
 
         void init(dsp::stream<dsp::stereo_t>* in, double inputSampleRate) {
@@ -297,6 +301,8 @@ namespace tonedetect {
             base_type::tempStop();
             _inputSampleRate = inputSampleRate;
             resamp.setInSamplerate(inputSampleRate);
+            // The taps are cut for a specific rate, so they have to be recut
+            if (filterEnabled) { buildFilter(); }
             reset();
             base_type::tempStart();
         }
@@ -317,6 +323,23 @@ namespace tonedetect {
         }
 
     private:
+        // 300 Hz corner with a 100 Hz transition, the same numbers the FM
+        // demodulator's own high pass uses: it puts the stopband edge just below
+        // 254.1, the highest CTCSS tone, while leaving speech alone.
+        void buildFilter() {
+            dsp::tap<float> newTaps = dsp::taps::highPass(FILTER_CUTOFF_HZ, FILTER_TRANS_HZ, _inputSampleRate);
+            dsp::tap<float> oldTaps = filterTaps;
+            if (!filterReady) {
+                toneFilter.init(NULL, newTaps);
+                filterReady = true;
+            }
+            else {
+                toneFilter.setTaps(newTaps);
+            }
+            filterTaps = newTaps;
+            dsp::taps::free(oldTaps);
+        }
+
         void resetState() {
             std::lock_guard<std::mutex> lck(resultMtx);
             std::fill(window.begin(), window.end(), 0.0f);
@@ -353,6 +376,31 @@ namespace tonedetect {
             return !squelchEnabled || gateHold > 0;
         }
 
+        // Strips the tone out of what reaches the speaker, the way a radio does it.
+        //
+        // It has to live here rather than in the demodulator, which already has a
+        // high pass with these exact settings: that one runs before the audio chain,
+        // so switching it on removes the tone before this block ever sees it and
+        // detection stops working. A radio wires the discriminator to the tone
+        // decoder and, separately, through a high pass to the audio. So does this -
+        // the filter is applied on the way out, and detection keeps reading the
+        // untouched input.
+        //
+        // The filter is built on first use. It is a windowed sinc of a few thousand
+        // taps at audio rate, so it is not cheap and not something to allocate for
+        // people who leave it off.
+        void setToneFilter(bool enable) {
+            if (!base_type::_block_init) {
+                filterEnabled = enable;
+                return;
+            }
+            std::lock_guard<std::recursive_mutex> lck(base_type::ctrlMtx);
+            base_type::tempStop();
+            filterEnabled = enable;
+            if (filterEnabled) { buildFilter(); }
+            base_type::tempStart();
+        }
+
         void setSquelch(bool enabled, const Target& target) {
             std::lock_guard<std::mutex> lck(resultMtx);
             bool wasEnabled = squelchEnabled;
@@ -385,15 +433,27 @@ namespace tonedetect {
                 feedCTCSS(s);
             }
 
+            // Filter first, gate second. The convolution has to keep running while
+            // the gate is shut or its history would be full of silence and the first
+            // moment after it opens would be a thump.
+            if (filterEnabled && filterReady) {
+                if ((int)filteredBuf.size() < count) { filteredBuf.resize(count); }
+                toneFilter.process(count, monoBuf.data(), filteredBuf.data());
+                for (int i = 0; i < count; i++) {
+                    out[i].l = filteredBuf[i];
+                    out[i].r = filteredBuf[i];
+                }
+            }
+            else {
+                memcpy(out, in, count * sizeof(dsp::stereo_t));
+            }
+
             bool pass;
             {
                 std::lock_guard<std::mutex> lck(resultMtx);
                 pass = !squelchEnabled || gateHold > 0;
             }
-            if (pass) {
-                memcpy(out, in, count * sizeof(dsp::stereo_t));
-            }
-            else {
+            if (!pass) {
                 memset(out, 0, count * sizeof(dsp::stereo_t));
             }
             return count;
@@ -600,6 +660,8 @@ namespace tonedetect {
         static constexpr float CTCSS_MIN_SNR_DB = 10.0f;
         static constexpr float SNAP_TOLERANCE_HZ = 0.6f; // < half the 1.4 Hz 150.0/151.4 gap
         static constexpr float DC_ALPHA = 0.002f;
+        static constexpr double FILTER_CUTOFF_HZ = 300.0;
+        static constexpr double FILTER_TRANS_HZ = 100.0;
 
         double _inputSampleRate = 48000.0;
         dsp::multirate::RationalResampler<float> resamp;
@@ -637,5 +699,17 @@ namespace tonedetect {
         bool squelchEnabled = false;
         Target _target;
         int gateHold = 0;
+
+        // Deliberately the mono filter, not FIR<stereo_t, float>. That specialisation
+        // hands volk `&buffer[i].l` and a tap count, but stereo_t is interleaved, so
+        // the dot product walks L,R,L,R and convolves the taps against both channels
+        // woven together rather than against one channel. NFM audio is mono
+        // duplicated to both channels anyway, so filtering once and copying is both
+        // correct and half the work.
+        dsp::filter::FIR<float, float> toneFilter;
+        std::vector<float> filteredBuf;
+        dsp::tap<float> filterTaps;
+        bool filterEnabled = false;
+        bool filterReady = false;
     };
 }
