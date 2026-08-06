@@ -700,12 +700,10 @@ namespace tonedetect {
         Target _target;
         int gateHold = 0;
 
-        // Deliberately the mono filter, not FIR<stereo_t, float>. That specialisation
-        // hands volk `&buffer[i].l` and a tap count, but stereo_t is interleaved, so
-        // the dot product walks L,R,L,R and convolves the taps against both channels
-        // woven together rather than against one channel. NFM audio is mono
-        // duplicated to both channels anyway, so filtering once and copying is both
-        // correct and half the work.
+        // The mono filter rather than FIR<stereo_t, float>, because NFM audio is mono
+        // duplicated across both channels: filtering once and copying is half the
+        // convolution for the same result. The stereo form is correct now, it is just
+        // twice the work here.
         dsp::filter::FIR<float, float> toneFilter;
         std::vector<float> filteredBuf;
         dsp::tap<float> filterTaps;

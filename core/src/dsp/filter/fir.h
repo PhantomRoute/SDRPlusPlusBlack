@@ -69,13 +69,25 @@ namespace dsp::filter {
             for (int i = 0; i < count; i++) {
                 if constexpr (std::is_same_v<D, float> && std::is_same_v<T, float>) {
                     volk_32f_x2_dot_prod_32f(&out[i], &buffer[i], _taps.taps, _taps.size);
-                } else if constexpr ((std::is_same_v<D, complex_t>) && std::is_same_v<T, float>) {
+                } else if constexpr ((std::is_same_v<D, complex_t> || std::is_same_v<D, stereo_t>) && std::is_same_v<T, float>) {
+                    // Stereo goes through the complex dot product because both types
+                    // are two contiguous floats and, with real taps, that product is
+                    // exactly the per channel filter:
+                    //   sum(taps[k] * (l[k], r[k])) == (sum taps[k]*l[k], sum taps[k]*r[k])
+                    //
+                    // Stereo used to have a branch of its own that handed volk
+                    // &buffer[i].l together with a tap count. The samples are
+                    // interleaved, so that walked l,r,l,r and convolved the taps
+                    // against both channels woven together. It was not a per channel
+                    // filter, and it was wrong even when the two channels were
+                    // identical, because every sample got multiplied by two adjacent
+                    // taps. The one caller, the transmit microphone low pass in
+                    // MobileMainWindow, was not filtering anything like what it asked
+                    // for.
+                    static_assert(sizeof(D) == 2 * sizeof(float), "interleaved dot product assumes two bare floats");
                     volk_32fc_32f_dot_prod_32fc((lv_32fc_t*)&out[i], (lv_32fc_t*)&buffer[i], _taps.taps, _taps.size);
                 } else  if constexpr ((std::is_same_v<D, complex_t> || std::is_same_v<D, stereo_t>) && (std::is_same_v<T, complex_t>)) {
                     volk_32fc_x2_dot_prod_32fc((lv_32fc_t*)&out[i], (lv_32fc_t*)&buffer[i], (lv_32fc_t*)_taps.taps, _taps.size);
-                } else if constexpr (std::is_same_v<D, stereo_t> && std::is_same_v<T, float_t>) {
-                  volk_32f_x2_dot_prod_32f(&out[i].l, &buffer[i].l, _taps.taps, _taps.size);
-                  volk_32f_x2_dot_prod_32f(&out[i].r, &buffer[i].r, _taps.taps, _taps.size);
                 } else {
                   static_assert((D)0, "type error"); // compile-time error
                 }
