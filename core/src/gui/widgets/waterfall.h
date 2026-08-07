@@ -192,7 +192,6 @@ namespace ImGui {
         std::map<std::string, WaterfallVFO*> vfos;
         std::string selectedVFO = "";
         bool selectedVFOChanged = false;
-        bool quiet = false;
 
         struct FFTRedrawArgs {
             ImVec2 min;
@@ -365,7 +364,7 @@ namespace ImGui {
 
         bool _fullUpdate = true;
 
-        int bandPlanPos = BANDPLAN_POS_BOTTOM;
+        int bandPlanPos = BANDPLAN_POS_TOP;
 
         bool fftHold = false;
         float fftHoldSpeed = 0.3f;

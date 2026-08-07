@@ -18,7 +18,6 @@ namespace displaymenu {
     bool showMicHistogram = false;
     bool fullWaterfallUpdate = true;
     bool showBattery = true;
-    bool showClock = true;
     bool detectSignals = false;
 
     // Handler for center frequency changes
@@ -135,9 +134,6 @@ namespace displaymenu {
 
         if (core::configManager.conf.contains("showBattery")) {
             showBattery = core::configManager.conf["showBattery"];
-        }
-        if (core::configManager.conf.contains("showClock")) {
-            showClock = core::configManager.conf["showClock"];
         }
         if (core::configManager.conf.contains("detectSignals")) {
             detectSignals = core::configManager.conf["detectSignals"];
@@ -319,12 +315,6 @@ namespace displaymenu {
             core::configManager.release(true);
         }
 #endif
-        if (ImGui::Checkbox("Show Clock##_sdrpp", &showClock)) {
-            gui::waterfall.setFullWaterfallUpdate(fullWaterfallUpdate);
-            core::configManager.acquire();
-            core::configManager.conf["showClock"] = showClock;
-            core::configManager.release(true);
-        }
 #if 0
         if (ImGui::Checkbox("Detect Signals##_sdrpp", &detectSignals)) {
             sigpath::iqFrontEnd.togglePreprocessor(&sigpath::iqFrontEnd.detectorPreprocessor, detectSignals);

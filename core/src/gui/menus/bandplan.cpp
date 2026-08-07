@@ -7,7 +7,7 @@
 namespace bandplanmenu {
     int bandplanId;
     bool bandPlanEnabled;
-    int bandPlanPos = 0;
+    int bandPlanPos = 1; // Top, matching the default in core.cpp
 
     const char* bandPlanPosTxt = "Bottom\0Top\0";
 

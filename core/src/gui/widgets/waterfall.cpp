@@ -1212,19 +1212,6 @@ namespace ImGui {
         if (bandplan != NULL && bandplanVisible) {
             drawBandPlan();
         }
-        if (displaymenu::showClock && !quiet) {
-            auto streamTime = sigpath::iqFrontEnd.getCurrentStreamTime();
-            const time_t epochTime = streamTime / 1000;
-
-            tm* local_time = localtime(&epochTime);
-
-            // Array to hold the formatted time string
-            char time_str[1024];
-
-            // Format the local time string using strftime
-            strftime(time_str, sizeof(time_str), "  %Y-%m-%d %H:%M:%S", local_time);
-            window->DrawList->AddText(ImVec2(fftAreaMin.x, fftAreaMin.y), ImGui::GetColorU32(ImGuiCol_TextDisabled), time_str);
-        }
     }
 
     float* WaterFall::getFFTBuffer() {

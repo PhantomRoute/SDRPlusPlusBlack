@@ -25,7 +25,6 @@ namespace displaymenu {
 #endif
     extern Event<ImGuiContext *> onDisplayDraw;
     extern bool showBattery;
-    extern bool showClock;
     extern bool detectSignals;
     extern bool showFFT;
     extern bool showFFTShadows;
