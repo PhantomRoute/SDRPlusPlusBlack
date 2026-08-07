@@ -321,6 +321,12 @@ private:
         if (radio == nullptr || editedBookmark.modeIndex < 0) { return; }
         if (radio->getDemodByIndex(editedBookmark.modeIndex) != RADIO_DEMOD_NFM) { return; }
 
+        // Showing the rows is what makes this bookmark one that carries tone
+        // settings, so the flag is set here rather than waiting for the round trip
+        // through the config file - otherwise a bookmark just added would not apply
+        // its own tone until the list was next reloaded.
+        editedBookmark.hasTone = true;
+
         RadioToneSettings& t = editedBookmark.tone;
 
         ImGui::TableNextRow();
@@ -569,6 +575,7 @@ private:
                 int mode = config.conf["lists"][listName]["bookmarks"][bookmarkName]["mode"];
                 wbm.bookmark.modeIndex = (radio != nullptr) ? radio->getDemodIndex(mode) : -1;
                 wbm.bookmark.vfoName = config.conf["lists"][listName]["bookmarks"][bookmarkName].value("vfo", "");
+                wbm.bookmark.hasTone = hasTone(config.conf["lists"][listName]["bookmarks"][bookmarkName]);
                 wbm.bookmark.tone = loadTone(config.conf["lists"][listName]["bookmarks"][bookmarkName]);
                 wbm.bookmark.selected = false;
                 wbm.notValidAfter = 0;
@@ -613,6 +620,7 @@ private:
             fbm.bandwidth = bm["bandwidth"];
             fbm.modeIndex = (radio != nullptr) ? radio->getDemodIndex(bm["mode"]) : -1;
             fbm.vfoName = bm.value("vfo", "");
+            fbm.hasTone = hasTone(bm);
             fbm.tone = loadTone(bm);
             fbm.selected = false;
             bookmarks[bmName] = fbm;
@@ -620,11 +628,12 @@ private:
         config.release();
     }
 
-    // Only written when there is something to say, so a list full of plain
-    // bookmarks does not grow a block of "off" keys apiece.
+    // Written for every NFM bookmark and no other, so one saved by this version
+    // always says what it wants - including "everything off". The alternative,
+    // writing it only when something is switched on, makes "no tone" and "saved
+    // before tones existed" the same thing on disk, and then recalling any old
+    // bookmark would quietly clear whatever the radio was set to.
     static void saveTone(json& bm, const RadioToneSettings& t) {
-        bm.erase("tone");
-        if (!t.squelchEnabled && !t.filterEnabled && !t.identifyEnabled) { return; }
         bm["tone"]["squelch"] = t.squelchEnabled;
         bm["tone"]["mode"] = t.mode;
         bm["tone"]["ctcss"] = t.ctcssFreq;
@@ -634,11 +643,17 @@ private:
         bm["tone"]["identify"] = t.identifyEnabled;
     }
 
-    // Absent on every bookmark saved before tones existed, so each key is optional
-    // and the defaults mean "no tone".
+    // Absent on every bookmark saved before tones existed, hence the flag: those are
+    // recalled without touching the radio's tone settings. Individual keys are
+    // optional too, so a block written by a future version that drops one still
+    // loads.
+    static bool hasTone(const json& bm) {
+        return bm.contains("tone") && bm["tone"].is_object();
+    }
+
     static RadioToneSettings loadTone(const json& bm) {
         RadioToneSettings t;
-        if (!bm.contains("tone") || !bm["tone"].is_object()) { return t; }
+        if (!hasTone(bm)) { return t; }
         const json& j = bm["tone"];
         t.squelchEnabled = j.value("squelch", false);
         t.mode = j.value("mode", 0);
@@ -674,7 +689,9 @@ private:
             flog::info("bm.modeIndex={}, demodId={}", (int)bm.modeIndex, (int)demodId);
             config.conf["lists"][listName]["bookmarks"][bmName]["mode"] = demodId;
             config.conf["lists"][listName]["bookmarks"][bmName]["vfo"] = bm.vfoName;
-            saveTone(config.conf["lists"][listName]["bookmarks"][bmName], bm.tone);
+            if (demodId == RADIO_DEMOD_NFM) {
+                saveTone(config.conf["lists"][listName]["bookmarks"][bmName], bm.tone);
+            }
         }
         refreshWaterfallBookmarks(false);
         config.release(true);
@@ -1252,9 +1269,13 @@ void applyBookmark(FrequencyBookmark bm, std::string vfoName) {
             core::modComManager.callInterface(targetVfo, RADIO_IFACE_CMD_SET_MODE, &mode, NULL);
             core::modComManager.callInterface(targetVfo, RADIO_IFACE_CMD_SET_BANDWIDTH, &bandwidth, NULL);
             // After the mode, since the radio ignores tone settings unless the
-            // demodulator it just switched to is one that carries them.
-            RadioToneSettings tone = bm.tone;
-            core::modComManager.callInterface(targetVfo, RADIO_IFACE_CMD_SET_TONE_SETTINGS, &tone, NULL);
+            // demodulator it just switched to is one that carries them. Skipped
+            // entirely for a bookmark saved before tones existed, so recalling an
+            // old list leaves whatever the radio is set to alone.
+            if (bm.hasTone) {
+                RadioToneSettings tone = bm.tone;
+                core::modComManager.callInterface(targetVfo, RADIO_IFACE_CMD_SET_TONE_SETTINGS, &tone, NULL);
+            }
         }
     }
     tuner::tune(tuner::TUNER_MODE_NORMAL, targetVfo, bm.frequency);

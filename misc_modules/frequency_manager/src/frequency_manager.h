@@ -2,7 +2,9 @@
 
 #include <string>
 #include "config.h"
-#include <radio_interface.h>
+// Relative, not <radio_interface.h>: core builds mobile_main_window.cpp, which
+// includes this header, and core has no include path into the decoder modules.
+#include "../../../decoder_modules/radio/src/radio_interface.h"
 
 struct FrequencyBookmark {
     double frequency;
@@ -11,8 +13,10 @@ struct FrequencyBookmark {
     bool selected;
     std::string vfoName; // VFO/radio this bookmark belongs to; empty = legacy (apply to currently selected VFO)
     // A repeater's tone is a property of the channel, so it belongs on the
-    // bookmark. Defaults are "no tone", which is what every bookmark saved before
-    // this existed gets when it loads.
+    // bookmark. hasTone is false for bookmarks saved before this existed; those are
+    // recalled without touching the radio's tone settings, rather than silently
+    // clearing them.
+    bool hasTone = false;
     RadioToneSettings tone;
 };
 

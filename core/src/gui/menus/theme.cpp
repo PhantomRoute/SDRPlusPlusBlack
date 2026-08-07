@@ -13,7 +13,7 @@ namespace thememenu {
     std::string themeNamesTxt;
 
     void saveStyle() {
-        std::string path = std::string(core::getRoot()) + "/imgui_style_v1.bin";
+        std::string path = std::string(core::getRoot()) + "/imgui_style_v2.bin";
         std::ofstream file(path, std::ios::binary);
         if (file) {
             ImGuiStyle style = ImGui::GetStyle();
@@ -24,8 +24,14 @@ namespace thememenu {
     // The saved style is the scaled one, since that is what is live by the time
     // anything saves it. Reports whether it was applied so init knows not to scale on
     // top of it.
+    //
+    // v2, not v1: a v1 file was written by the build that scaled the style again on
+    // every start, so any of them that a theme change ever saved has uiScale baked
+    // into it one or more times over. Not scaling it again stops the compounding but
+    // cannot undo what is already in the file, so the old name is abandoned and the
+    // style rebuilt from the theme.
     bool loadStyle() {
-        std::string path = std::string(core::getRoot()) + "/imgui_style_v1.bin";
+        std::string path = std::string(core::getRoot()) + "/imgui_style_v2.bin";
         std::ifstream file(path, std::ios::binary);
         if (!file) { return false; }
         ImGuiStyle style;
