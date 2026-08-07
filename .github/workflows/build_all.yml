@@ -5,6 +5,13 @@ on:
     pull_request:
         branches:
         - master
+    # A "Run workflow" button. Without one the only way to start a build is to push,
+    # which is no help when a run has to be restarted and cannot be: a run that ends
+    # in startup_failure - a rejected action, an unparseable workflow - is never
+    # retryable, because there was no valid workflow to retry. That is exactly the
+    # state an Actions allow-list rejection leaves behind, and it cost a round of
+    # empty commits to get out of.
+    workflow_dispatch:
 
 # Every job ends in "gh release upload rolling", which needs write access to
 # contents. Without this the default token is read only and the upload fails
