@@ -311,7 +311,10 @@ namespace tonedetect {
             }
             else if (_target.mode == Target::CTCSS) {
                 if (_target.ctcssFreq != fastTunedTo) { retuneFast(_target.ctcssFreq); }
-                float reference = std::max(power[1], power[2]);
+                // Not std::max: core compiles this header through
+                // mobile_main_window.cpp, which drags in windows.h, where max is a
+                // function-like macro and std::max(a, b) becomes std::(a, b).
+                float reference = (power[1] > power[2]) ? power[1] : power[2];
                 fastPresent = power[0] > FAST_MIN_RATIO * reference;
             }
             else {
