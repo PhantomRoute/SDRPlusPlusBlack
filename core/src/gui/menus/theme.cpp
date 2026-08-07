@@ -129,12 +129,15 @@ namespace thememenu {
         }
         core::configManager.release();
 
+        // applyTheme(false): displaymenu::init runs after this and applies the gradient
+        // the config remembers, and the colormaps aren't even loaded yet.
+        //
         // The waterfall background, the GL clear colour, the FFT hold and the squelch
         // colours live outside ImGuiStyle, so loadStyle cannot restore them - only
         // applying the theme sets them. Without this they sat at their defaults until
         // the user touched the theme combo, which is why picking any theme, even the
         // one already selected, visibly changed the waterfall.
-        applyTheme();
+        applyTheme(false);
 
         // Load saved style if exists
         bool styleLoaded = loadStyle();
@@ -148,7 +151,7 @@ namespace thememenu {
         }
     }
 
-    void applyTheme() {
+    void applyTheme(bool applyColorMap) {
         std::string name = (themeId >= 0 && themeId < (int)themeNames.size()) ? themeNames[themeId] : "Dark";
 
         if (name == "ImGUI Dark") {
@@ -166,6 +169,17 @@ namespace thememenu {
         else {
             gui::themeManager.applyTheme(name);
         }
+
+        // A theme names its waterfall gradient, so picking one switches it and makes
+        // that the live choice the config remembers. Changing the gradient by hand
+        // afterwards overrides it until the next theme change - one setting, one place
+        // it is stored, no argument between the theme file and the config at startup.
+        if (applyColorMap && !gui::themeManager.colorMap.empty()) {
+            if (!displaymenu::setColorMapByName(gui::themeManager.colorMap)) {
+                flog::warn("Theme '{0}' asks for colormap '{1}', which isn't installed", name, gui::themeManager.colorMap);
+            }
+        }
+
         core::configManager.acquire();
         core::configManager.conf["theme"] = name;
         core::configManager.release(true);
@@ -199,6 +213,9 @@ namespace thememenu {
             }
         }
 
+        // The Theme menu's Color Map combo is the one control for the gradient, so the
+        // editor just records whatever it currently says rather than duplicating it.
+        gui::themeManager.colorMap = displaymenu::getColorMapName();
         editData = gui::themeManager.dumpLiveTheme(editableName, author);
         copyToBuf(editName, sizeof editName, editableName);
         copyToBuf(editAuthor, sizeof editAuthor, author);
@@ -325,7 +342,7 @@ namespace thememenu {
         if (!ImGui::Begin("Theme editor##theme_editor", &editorOpen)) {
             ImGui::End();
             // Collapsing the window keeps it open; closing it drops the live preview.
-            if (!editorOpen) { applyTheme(); }
+            if (!editorOpen) { applyTheme(false); }
             return;
         }
 
@@ -367,6 +384,10 @@ namespace thememenu {
         std::string name = editName;
         editData["name"] = name;
         editData["author"] = std::string(editAuthor);
+        // Re-read every frame so changing the gradient in the menu while the editor is
+        // open is picked up by Save and Export.
+        std::string liveColorMap = displaymenu::getColorMapName();
+        if (!liveColorMap.empty()) { editData[ThemeManager::COLOR_MAP_KEY] = liveColorMap; }
 
         const Theme* existing = gui::themeManager.getTheme(name);
         bool canSave = !name.empty() && (existing == NULL || !existing->readOnly);
@@ -399,7 +420,8 @@ namespace thememenu {
 
         ImGui::SameLine();
         if (ImGui::Button("Revert##theme_edit_revert")) {
-            applyTheme();
+            // false: the editor never edits the gradient, so reverting must not move it.
+            applyTheme(false);
             openEditor();
         }
 
@@ -434,7 +456,8 @@ namespace thememenu {
         ImGui::End();
 
         // Closing without saving throws the live preview away and puts the selected
-        // theme back, so an experiment can't leak into the next session.
-        if (!editorOpen) { applyTheme(); }
+        // theme back, so an experiment can't leak into the next session. Not the
+        // gradient though: that is the menu's control, not the editor's.
+        if (!editorOpen) { applyTheme(false); }
     }
 }

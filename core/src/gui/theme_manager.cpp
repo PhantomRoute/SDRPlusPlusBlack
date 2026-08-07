@@ -160,6 +160,12 @@ json ThemeManager::sanitizeThemeData(const json& data, const std::string& src) {
             flog::warn("Theme {0}: field {1} is not a string, ignoring it", src, param);
             continue;
         }
+        if (param == COLOR_MAP_KEY) {
+            // Not a colour, and not checked against the loaded colormaps: those load
+            // after the themes do. An unknown name is ignored when it is applied.
+            cleaned[param] = val;
+            continue;
+        }
         if (!customColorsByKey.count(param) && !getImGuiColIds().count(param)) {
             flog::warn("Theme {0} contains unknown {1} field, ignoring it", src, param);
             continue;
@@ -174,6 +180,7 @@ json ThemeManager::sanitizeThemeData(const json& data, const std::string& src) {
 }
 
 void ThemeManager::resetToDefaults() {
+    colorMap.clear();
     for (auto& group : customColorGroups) {
         for (auto& col : group.colors) {
             *col.value = col.def;
@@ -208,6 +215,10 @@ bool ThemeManager::applyThemeData(const json& data) {
     for (auto const& [param, val] : data.items()) {
         if (param == "name" || param == "author") { continue; }
         if (!val.is_string()) { continue; }
+        if (param == COLOR_MAP_KEY) {
+            colorMap = val.get<std::string>();
+            continue;
+        }
         if (!decodeRGBA(val.get<std::string>(), ret)) { continue; }
 
         ImVec4 col((float)ret[0] / 255.0f, (float)ret[1] / 255.0f, (float)ret[2] / 255.0f, (float)ret[3] / 255.0f);
@@ -254,6 +265,7 @@ json ThemeManager::dumpLiveTheme(std::string name, std::string author) {
             data[col.key] = encodeRGBA(*col.value);
         }
     }
+    if (!colorMap.empty()) { data[COLOR_MAP_KEY] = colorMap; }
     return data;
 }
 

@@ -43,7 +43,9 @@ namespace backend {
         backend::init();
         style::loadFonts(root + "/res"); // TODO: Don't hardcode, use config
         icons::load(root + "/res");
-        thememenu::applyTheme();
+        // false: a re-init after the activity was recreated, not the user picking a
+        // theme, so it must not pull the waterfall gradient back to the theme's.
+        thememenu::applyTheme(false);
         ImGui::GetStyle().ScaleAllSizes(style::uiScale);
         gui::mainWindow.setFirstMenuRender();
     }

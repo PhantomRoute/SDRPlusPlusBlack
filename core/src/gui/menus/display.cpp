@@ -229,6 +229,29 @@ namespace displaymenu {
     }
 
 
+    std::string getColorMapName() {
+        if (colorMapId < 0 || colorMapId >= (int)colorMapNames.size()) { return ""; }
+        return colorMapNames[colorMapId];
+    }
+
+    // Returns false for a gradient this install doesn't have, which is what a theme
+    // from someone with extra colormaps installed will ask for. The rest of the theme
+    // still applies; only the gradient is left alone.
+    bool setColorMapByName(const std::string& name) {
+        auto it = std::find(colorMapNames.begin(), colorMapNames.end(), name);
+        if (it == colorMapNames.end() || colormaps::maps.find(name) == colormaps::maps.end()) {
+            return false;
+        }
+        colorMapId = std::distance(colorMapNames.begin(), it);
+        colormaps::Map map = colormaps::maps[name];
+        gui::waterfall.updatePalletteFromArray(map.map, map.entryCount);
+        colorMapAuthor = map.author;
+        core::configManager.acquire();
+        core::configManager.conf["colorMap"] = name;
+        core::configManager.release(true);
+        return true;
+    }
+
     void drawColorMapSelector() {
         if (colorMapNames.empty()) { return; }
         float menuWidth = ImGui::GetContentRegionAvail().x;

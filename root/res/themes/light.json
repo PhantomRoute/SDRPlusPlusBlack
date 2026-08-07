@@ -56,5 +56,6 @@
     "TitleBgCollapsed": "#FFFFFF82",
     "WindowBg": "#EFEFEFEF",
     "ClearColor": "#E6E6E6FF",
-    "WaterfallBackground": "#FFFFFFFF"
+    "WaterfallBackground": "#FFFFFFFF",
+    "ColorMap": "Classic"
 }

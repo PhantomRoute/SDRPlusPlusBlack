@@ -105,6 +105,13 @@ public:
     ImVec4 freqSelectUpColor = ImVec4(1.0f, 0.0f, 0.0f, 75.0f / 255.0f);
     ImVec4 freqSelectDownColor = ImVec4(0.0f, 0.0f, 1.0f, 75.0f / 255.0f);
 
+    // The waterfall gradient the theme asks for, by name, or empty if it doesn't name
+    // one. Not an ImVec4 like the rest, and not applied here: the colormaps are loaded
+    // after the theme is, and the menu owns the config key that remembers the live
+    // choice, so thememenu reads this and applies it.
+    static constexpr const char* COLOR_MAP_KEY = "ColorMap";
+    std::string colorMap;
+
 private:
     // Drops keys this build doesn't know about, isn't a colour, or isn't valid hex
     // RGBA, keeping everything else. src names the file for the log message.

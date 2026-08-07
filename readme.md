@@ -35,9 +35,15 @@ it. Give the theme a name and hit **Save** and it lands in `themes/` next to you
 survives upgrades. The shipped themes are read-only - editing one and saving suggests a name for
 your own copy instead of overwriting it.
 
+A theme also names its waterfall gradient, so picking one switches the colour map too and a theme
+you send someone arrives looking the way you built it. Changing the colour map by hand afterwards
+overrides it and sticks - including across restarts - until you pick a different theme. The theme
+file is where a gradient choice comes *from*; your config is what remembers the one you're on.
+
 **Export** writes the theme out as a self-contained `.json` with every colour spelled out, so
 sending someone a theme is sending them one file. **Import** on the Theme menu reads one back; if
-you already have a theme by that name, the imported one is renamed rather than replacing yours.
+you already have a theme by that name, the imported one is renamed rather than replacing yours. A
+theme asking for a gradient you don't have applies everything else and leaves the gradient alone.
 
 **Please do not report bugs in this fork to Alexandre Rouma or sannysanoff.** They did not write this code and cannot fix it. If something is broken in SDR++Black, file an [issue](https://github.com/PhantomRoute/SDRPlusPlusBlack/issues) here.
 

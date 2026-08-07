@@ -15,6 +15,10 @@ namespace displaymenu {
     // Drawn by the Theme menu, which is where every colour setting lives. The state
     // it edits stays here because init() is what loads it and applies the palette.
     void drawColorMapSelector();
+    // The live gradient's name, and a way to set it. Themes name a gradient, so
+    // selecting one has to be able to switch it; saving a theme records the live one.
+    std::string getColorMapName();
+    bool setColorMapByName(const std::string& name);
     extern bool phoneLayout;
 #ifdef __ANDROID__
     extern float displayDensity;
