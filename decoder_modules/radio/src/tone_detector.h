@@ -45,7 +45,8 @@ namespace tonedetect {
         static const int DCS_SPS = 5;
         static const int CONFIRMATIONS = 2;
         static const int HOLD_TICKS = 6;       // ~3 s of analyses, for the readout
-        static const int GATE_HOLD_TICKS = 2;  // ~1 s squelch tail
+        static const int GATE_ARM_TICKS = 2;   // how long an identification stays valid
+        static const int FAST_WINDOW = 112;    // 1/6 s - the squelch's closing latency
 
     public:
         ToneDetector() {}
@@ -76,6 +77,12 @@ namespace tonedetect {
             hann.resize(CTCSS_WINDOW);
             for (int i = 0; i < CTCSS_WINDOW; i++) {
                 hann[i] = 0.5f - 0.5f * cosf(TWO_PI * (float)i / (float)(CTCSS_WINDOW - 1));
+            }
+
+            // Its own, much shorter Hann for the fast presence check
+            fastHann.resize(FAST_WINDOW);
+            for (int i = 0; i < FAST_WINDOW; i++) {
+                fastHann[i] = 0.5f - 0.5f * cosf(TWO_PI * (float)i / (float)(FAST_WINDOW - 1));
             }
 
             window.assign(CTCSS_WINDOW, 0.0f);
@@ -150,7 +157,12 @@ namespace tonedetect {
             published = Result();
             // Closed until something is heard, never open-by-default: a squelch that
             // fails open is not a squelch.
-            gateHold = 0;
+            gateArmed = 0;
+            fastPresent = false;
+            fastPos = 0;
+            fastTunedTo = 0.0f;
+            lastDcsMatchSample = -DCS_PRESENCE_SAMPLES;
+            for (int k = 0; k < 3; k++) { fastS1[k] = 0.0f; fastS2[k] = 0.0f; }
         }
 
     public:
@@ -163,7 +175,7 @@ namespace tonedetect {
         // squelch off this is always true.
         bool isGateOpen() {
             std::lock_guard<std::mutex> lck(resultMtx);
-            return !squelchEnabled || gateHold > 0;
+            return !squelchEnabled || (gateArmed > 0 && fastPresent);
         }
 
         // Strips the tone out of what reaches the speaker, the way a radio does it.
@@ -198,7 +210,9 @@ namespace tonedetect {
             _target = target;
             // Start closed on every change, so switching to a different tone cannot
             // leave audio passing on the strength of the previous one's evidence.
-            if (!wasEnabled || !squelchEnabled) { gateHold = 0; }
+            if (!wasEnabled || !squelchEnabled) { gateArmed = 0; }
+            fastPresent = false;
+            fastTunedTo = 0.0f;
         }
 
         inline int process(int count, const dsp::stereo_t* in, dsp::stereo_t* out) {
@@ -220,6 +234,7 @@ namespace tonedetect {
                 float s = workBuf[i] - dcBlockState;
 
                 feedDCS(s);
+                feedFast(s);
                 feedCTCSS(s);
             }
 
@@ -241,7 +256,7 @@ namespace tonedetect {
             bool pass;
             {
                 std::lock_guard<std::mutex> lck(resultMtx);
-                pass = !squelchEnabled || gateHold > 0;
+                pass = !squelchEnabled || (gateArmed > 0 && fastPresent);
             }
             if (!pass) {
                 memset(out, 0, count * sizeof(dsp::stereo_t));
@@ -252,6 +267,68 @@ namespace tonedetect {
         DEFAULT_PROC_RUN
 
     private:
+        // Opening and closing are not the same problem, and using one mechanism for
+        // both is what made the squelch hang open for up to a second and a half after
+        // a transmission - a carrier drop turns into full scale hiss, so that is a
+        // second and a half of noise at whatever volume was set for a weak signal.
+        //
+        // Opening has to decide which tone this is, which needs the long window: at a
+        // quarter of a second 150.0 and 151.4 are inside each other's mainlobe.
+        // Closing only has to answer whether the tone that was already identified is
+        // still there, and that is one Goertzel at a frequency already known. So the
+        // slow path still arms the gate and the fast path holds it open, which closes
+        // it within a sixth of a second of the tone stopping.
+        void feedFast(float s) {
+            float w = fastHann[fastPos];
+            for (int k = 0; k < 3; k++) {
+                float s0 = (s * w) + fastCoeff[k] * fastS1[k] - fastS2[k];
+                fastS2[k] = fastS1[k];
+                fastS1[k] = s0;
+            }
+            if (++fastPos < FAST_WINDOW) { return; }
+            fastPos = 0;
+            evaluateFast();
+            for (int k = 0; k < 3; k++) { fastS1[k] = 0.0f; fastS2[k] = 0.0f; }
+        }
+
+        // Runs six times a second, so reading the target under the lock here costs
+        // nothing, unlike doing it per sample.
+        void evaluateFast() {
+            float power[3];
+            for (int k = 0; k < 3; k++) {
+                power[k] = (fastS1[k] * fastS1[k]) + (fastS2[k] * fastS2[k]) - (fastCoeff[k] * fastS1[k] * fastS2[k]);
+            }
+
+            std::lock_guard<std::mutex> lck(resultMtx);
+
+            // The references sit far enough off the tone to be outside the mainlobe
+            // of a Hann window this short, so they read the noise either side of it.
+            // Comparing against them rather than against the block's total energy is
+            // what stops speech - which is far louder than the tone - from reading as
+            // the tone having gone.
+            if (_target.mode == Target::DCS) {
+                fastPresent = (sampleIndex - lastDcsMatchSample) < DCS_PRESENCE_SAMPLES;
+            }
+            else if (_target.mode == Target::CTCSS) {
+                if (_target.ctcssFreq != fastTunedTo) { retuneFast(_target.ctcssFreq); }
+                float reference = std::max(power[1], power[2]);
+                fastPresent = power[0] > FAST_MIN_RATIO * reference;
+            }
+            else {
+                fastPresent = false;
+            }
+        }
+
+        void retuneFast(float freq) {
+            fastTunedTo = freq;
+            const float f[3] = { freq, freq - FAST_REF_OFFSET_HZ, freq + FAST_REF_OFFSET_HZ };
+            for (int k = 0; k < 3; k++) {
+                fastCoeff[k] = 2.0f * cosf(TWO_PI * f[k] / (float)WORK_RATE);
+                fastS1[k] = 0.0f;
+                fastS2[k] = 0.0f;
+            }
+        }
+
         void feedCTCSS(float s) {
             window[windowPos] = s;
             windowPos = (windowPos + 1) % CTCSS_WINDOW;
@@ -378,6 +455,9 @@ namespace tonedetect {
                 dcsCount = 1;
             }
             dcsSeenThisTick = true;
+            // Only a match on the code actually being listened for keeps the gate
+            // open, hence the target check rather than just "some code decoded".
+            if (_target.matches(r)) { lastDcsMatchSample = sampleIndex; }
         }
 
         // The half second CTCSS analysis is also the clock for publishing and for
@@ -429,8 +509,11 @@ namespace tonedetect {
             // chopped once it is open.
             bool matched = (dcsSeenThisTick && dcsCount >= 1 && _target.matches(dcsCandidate)) ||
                            (ctcssCount >= 1 && _target.matches(ctcssCandidate));
-            if (matched) { gateHold = GATE_HOLD_TICKS; }
-            else if (gateHold > 0) { gateHold--; }
+            // Arms the gate; the fast presence check is what actually holds it
+            // open, so this only has to remember that the right tone was identified
+            // recently enough for a momentary dropout not to need re-deciding.
+            if (matched) { gateArmed = GATE_ARM_TICKS; }
+            else if (gateArmed > 0) { gateArmed--; }
 
             if (!dcsSeenThisTick) {
                 dcsCandidate = Result();
@@ -450,6 +533,14 @@ namespace tonedetect {
         static constexpr float CTCSS_MIN_SNR_DB = 10.0f;
         static constexpr float SNAP_TOLERANCE_HZ = 0.6f; // < half the 1.4 Hz 150.0/151.4 gap
         static constexpr float DC_ALPHA = 0.002f;
+        // References either side of the tone, far enough out to clear the mainlobe of
+        // a Hann window FAST_WINDOW long, so they measure the noise beside the tone
+        // rather than the tone itself.
+        static constexpr float FAST_REF_OFFSET_HZ = 20.0f;
+        static constexpr float FAST_MIN_RATIO = 4.0f; // 6 dB over the noise beside it
+        // A locked DCS decoder produces a match every bit, so a quarter second
+        // without one means it has stopped.
+        static const int DCS_PRESENCE_SAMPLES = 168;
         static constexpr double FILTER_CUTOFF_HZ = 300.0;
         static constexpr double FILTER_TRANS_HZ = 100.0;
 
@@ -488,7 +579,17 @@ namespace tonedetect {
 
         bool squelchEnabled = false;
         Target _target;
-        int gateHold = 0;
+        int gateArmed = 0;
+
+        // Fast "is that tone still there" monitor, for closing
+        std::vector<float> fastHann;
+        float fastCoeff[3] = { 0.0f, 0.0f, 0.0f };
+        float fastS1[3] = { 0.0f, 0.0f, 0.0f };
+        float fastS2[3] = { 0.0f, 0.0f, 0.0f };
+        int fastPos = 0;
+        float fastTunedTo = 0.0f;
+        bool fastPresent = false;
+        long long lastDcsMatchSample = 0;
 
         // The mono filter rather than FIR<stereo_t, float>, because NFM audio is mono
         // duplicated across both channels: filtering once and copying is half the
