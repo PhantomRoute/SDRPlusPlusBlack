@@ -311,7 +311,7 @@ namespace ImGui {
         }
         ImVec2 mPos = ImGui::GetMousePos();
 
-        if (IS_IN_AREA(mPos, wfMin, wfMax) && !gui::mainWindow.lockWaterfallControls && !inputHandled && ImGui::GetTopMostPopupModal() == NULL || alwaysDrawLine) {
+        if (IS_IN_AREA(mPos, wfMin, wfMax) && mouseOverWaterfallWindow && !gui::mainWindow.lockWaterfallControls && !inputHandled && ImGui::GetTopMostPopupModal() == NULL || alwaysDrawLine) {
             for (auto const& [name, vfo] : vfos) {
                 window->DrawList->AddRectFilled(vfo->wfRectMin, vfo->wfRectMax, vfo->color);
                 if (!vfo->lineVisible) { continue; }
@@ -383,10 +383,17 @@ namespace ImGui {
         bool mouseClicked = ImGui::ButtonBehavior(ImRect(fftAreaMin, wfMax), GetID("WaterfallID"), &mouseHovered, &mouseHeld,
                                                   ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_PressedOnClick);
 
-        mouseInFFTResize = (dragOrigin.x > widgetPos.x && dragOrigin.x < widgetPos.x + widgetSize.x && dragOrigin.y >= widgetPos.y + newFFTAreaHeight - (2.0f * style::uiScale) && dragOrigin.y <= widgetPos.y + newFFTAreaHeight + (2.0f * style::uiScale));
-        mouseInFreq = IS_IN_AREA(dragOrigin, freqAreaMin, freqAreaMax);
-        mouseInFFT = IS_IN_AREA(dragOrigin, fftAreaMin, fftAreaMax);
-        mouseInWaterfall = IS_IN_AREA(dragOrigin, wfMin, wfMax);
+        // A drag that started on the waterfall keeps the mouse until the button is
+        // released, so wandering over a floating window mid-drag doesn't drop the pan,
+        // the resize or the bandwidth adjustment. These flags are cleared further down
+        // on mouse release, so here they still hold the in-progress state.
+        bool dragInProgress = fftResizeSelect || freqScaleSelect || vfoSelect || vfoBorderSelect;
+        bool hasMouse = mouseOverWaterfallWindow || dragInProgress;
+
+        mouseInFFTResize = hasMouse && (dragOrigin.x > widgetPos.x && dragOrigin.x < widgetPos.x + widgetSize.x && dragOrigin.y >= widgetPos.y + newFFTAreaHeight - (2.0f * style::uiScale) && dragOrigin.y <= widgetPos.y + newFFTAreaHeight + (2.0f * style::uiScale));
+        mouseInFreq = hasMouse && IS_IN_AREA(dragOrigin, freqAreaMin, freqAreaMax);
+        mouseInFFT = hasMouse && IS_IN_AREA(dragOrigin, fftAreaMin, fftAreaMax);
+        mouseInWaterfall = hasMouse && IS_IN_AREA(dragOrigin, wfMin, wfMax);
 
         int mouseWheel = ImGui::GetIO().MouseWheel;
 
@@ -557,9 +564,10 @@ namespace ImGui {
             return;
         }
 
-        // If the left and right keys are pressed while hovering the freq scale, move it too
+        // If the left and right keys are pressed while hovering the freq scale, move it
+        // too - unless a text field has the keyboard, where the arrows move the caret.
         bool leftKeyPressed = ImGui::IsKeyPressed(ImGuiKey_LeftArrow);
-        if ((leftKeyPressed || ImGui::IsKeyPressed(ImGuiKey_RightArrow)) && mouseInFreq) {
+        if ((leftKeyPressed || ImGui::IsKeyPressed(ImGuiKey_RightArrow)) && mouseInFreq && !gui::imguiWantsKeyboard()) {
             viewOffset += leftKeyPressed ? (viewBandwidth / 20.0) : (-viewBandwidth / 20.0);
 
             if (viewOffset + (viewBandwidth / 2.0) > wholeBandwidth / 2.0) {
@@ -642,7 +650,7 @@ namespace ImGui {
         }
 
         // Handle Page Up to cycle through VFOs
-        if (ImGui::IsKeyPressed(ImGuiKey_PageUp) && selVfo != NULL) {
+        if (ImGui::IsKeyPressed(ImGuiKey_PageUp) && selVfo != NULL && !gui::imguiWantsKeyboard()) {
             std::string next = (--vfos.end())->first;
             std::string lowest = "";
             double lowestOffset = INFINITY;
@@ -665,7 +673,7 @@ namespace ImGui {
         }
 
         // Handle Page Down to cycle through VFOs
-        if (ImGui::IsKeyPressed(ImGuiKey_PageDown) && selVfo != NULL) {
+        if (ImGui::IsKeyPressed(ImGuiKey_PageDown) && selVfo != NULL && !gui::imguiWantsKeyboard()) {
             std::string next = (--vfos.end())->first;
             std::string highest = "";
             double highestOffset = -INFINITY;
@@ -1137,6 +1145,17 @@ namespace ImGui {
     void WaterFall::draw() {
         MEASURE_LOCK_GUARD(buf_mtx);
         window = GetCurrentWindow();
+
+        // ImGui gives the mouse to the topmost window under the pointer. The waterfall
+        // hit tests are plain rectangle checks that know nothing about that, so without
+        // this a scroll or a click landing on a floating window drawn over the
+        // waterfall - the theme editor, the log window, a module popup - still reached
+        // the waterfall underneath and moved the frequency. Set here rather than in
+        // processInputs so the module input handlers, which run first, see this frame's
+        // value and so it stays correct while the waterfall controls are locked.
+        // ButtonBehavior does its own equivalent test, which is why VFO selection and
+        // frequency scale dragging were already unaffected.
+        mouseOverWaterfallWindow = (GImGui->HoveredWindow == window);
 
         widgetPos = ImGui::GetWindowContentRegionMin();
         widgetEndPos = ImGui::GetWindowContentRegionMax();
@@ -1783,7 +1802,10 @@ namespace ImGui {
             window->DrawList->AddRectFilled(notchMin, notchMax, ImGui::ColorConvertFloat4ToU32(gui::themeManager.notchColor));
         }
 
-        if (!gui::mainWindow.lockWaterfallControls && !gui::waterfall.inputHandled && ImGui::GetTopMostPopupModal() == NULL) {
+        // mouseOverWaterfallWindow: otherwise the bandwidth grips flipped the cursor to
+        // the resize arrows while the pointer was over a window drawn on top of them.
+        if (!gui::mainWindow.lockWaterfallControls && !gui::waterfall.inputHandled &&
+            gui::waterfall.mouseOverWaterfallWindow && ImGui::GetTopMostPopupModal() == NULL) {
             ImVec2 mousePos = ImGui::GetMousePos();
             if (rectMax.x - rectMin.x < 10) { return; }
             if (reference != REF_LOWER && !bandwidthLocked && !leftClamped) {

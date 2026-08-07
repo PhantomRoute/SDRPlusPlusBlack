@@ -174,6 +174,11 @@ namespace ImGui {
         bool bandplanEnabled = false;
         bandplan::BandPlan_t* bandplan = NULL;
 
+        // False when a floating window (the theme editor, the log window, a module
+        // popup) is between the pointer and the waterfall. The mouseIn* flags below
+        // are plain rectangle tests, so without it a scroll or a click landing on
+        // such a window still reached the waterfall underneath.
+        bool mouseOverWaterfallWindow = false;
         bool mouseInFFTResize = false;
         bool mouseInFreq = false;
         bool mouseInFFT = false;

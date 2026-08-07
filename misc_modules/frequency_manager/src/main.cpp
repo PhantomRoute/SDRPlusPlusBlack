@@ -1117,16 +1117,23 @@ private:
         WaterfallBookmark hoveredBookmark;
         std::string hoveredBookmarkName;
 
-        for(auto &d: _this->rects) {
-            if (ImGui::IsMouseHoveringRect(d.rect.Min, d.rect.Max)) {
-                // rects is rebuilt from waterfallBookmarks on every redraw, so the
-                // index should always be live. Check it regardless - the cost of
-                // being wrong here is an out of bounds read on a vector.
-                if (d.index < 0 || d.index >= (int)_this->waterfallBookmarks.size()) { continue; }
-                inALabel = true;
-                hoveredBookmark = _this->waterfallBookmarks[d.index];
-                hoveredBookmarkName = hoveredBookmark.bookmarkName;
-                break;
+        // IsMouseHoveringRect doesn't know that a floating window drawn over the
+        // waterfall owns the mouse, so without this gate a click landing on one
+        // reached the bookmark label underneath and retuned the radio. Leaving
+        // inALabel false rather than returning early keeps the button bookkeeping
+        // below running, so releasing the mouse over such a window still clears state.
+        if (gui::waterfall.mouseOverWaterfallWindow) {
+            for(auto &d: _this->rects) {
+                if (ImGui::IsMouseHoveringRect(d.rect.Min, d.rect.Max)) {
+                    // rects is rebuilt from waterfallBookmarks on every redraw, so the
+                    // index should always be live. Check it regardless - the cost of
+                    // being wrong here is an out of bounds read on a vector.
+                    if (d.index < 0 || d.index >= (int)_this->waterfallBookmarks.size()) { continue; }
+                    inALabel = true;
+                    hoveredBookmark = _this->waterfallBookmarks[d.index];
+                    hoveredBookmarkName = hoveredBookmark.bookmarkName;
+                    break;
+                }
             }
         }
 

@@ -357,14 +357,14 @@ void MainWindow::drawUpperLine(ImGui::WaterfallVFO* vfo) {
     if (playButtonLocked && !tmpPlaySate) { style::beginDisabled(); }
     if (playing) {
         ImGui::PushID(ImGui::GetID("sdrpp_stop_btn"));
-        if (ImGui::ImageButton(icons::STOP, btnSize, ImVec2(0, 0), ImVec2(1, 1), 5, ImVec4(0, 0, 0, 0), textCol) || ImGui::IsKeyPressed(ImGuiKey_End, false)) {
+        if (ImGui::ImageButton(icons::STOP, btnSize, ImVec2(0, 0), ImVec2(1, 1), 5, ImVec4(0, 0, 0, 0), textCol) || (ImGui::IsKeyPressed(ImGuiKey_End, false) && !gui::imguiWantsKeyboard())) {
             setPlayState(false);
         }
         ImGui::PopID();
     }
     else { // TODO: Might need to check if there even is a device
         ImGui::PushID(ImGui::GetID("sdrpp_play_btn"));
-        if (ImGui::ImageButton(icons::PLAY, btnSize, ImVec2(0, 0), ImVec2(1, 1), 5, ImVec4(0, 0, 0, 0), textCol) || ImGui::IsKeyPressed(ImGuiKey_End, false)) {
+        if (ImGui::ImageButton(icons::PLAY, btnSize, ImVec2(0, 0), ImVec2(1, 1), 5, ImVec4(0, 0, 0, 0), textCol) || (ImGui::IsKeyPressed(ImGuiKey_End, false) && !gui::imguiWantsKeyboard())) {
             if (!playButtonLocked) {
                 setPlayState(true);
             }
@@ -564,7 +564,7 @@ void MainWindow::draw() {
     // ImGui::BeginChild("TopBarChild", ImVec2(0, 49.0f * style::uiScale), false, ImGuiWindowFlags_HorizontalScrollbar);
     ImVec2 btnSize(30 * style::uiScale, 30 * style::uiScale);
     ImGui::PushID(ImGui::GetID("sdrpp_menu_btn"));
-    if (ImGui::ImageButton(icons::MENU, btnSize, ImVec2(0, 0), ImVec2(1, 1), 5, ImVec4(0, 0, 0, 0), textCol) || ImGui::IsKeyPressed(ImGuiKey_Menu, false)) {
+    if (ImGui::ImageButton(icons::MENU, btnSize, ImVec2(0, 0), ImVec2(1, 1), 5, ImVec4(0, 0, 0, 0), textCol) || (ImGui::IsKeyPressed(ImGuiKey_Menu, false) && !gui::imguiWantsKeyboard())) {
         showMenu = !showMenu;
         core::configManager.acquire();
         core::configManager.conf["showMenu"] = showMenu;
@@ -576,7 +576,7 @@ void MainWindow::draw() {
     static bool wasSpacePressed = false;
     static std::vector<dsp::stereo_t> micSamples;
 
-    if (ImGui::IsKeyPressed(ImGuiKey_Space, false) && sigpath::sinkManager.defaultInputAudio.hasInput()) {
+    if (ImGui::IsKeyPressed(ImGuiKey_Space, false) && !gui::imguiWantsKeyboard() && sigpath::sinkManager.defaultInputAudio.hasInput()) {
         spacePressed = true;
         if (!wasSpacePressed) {
             sigpath::sinkManager.setAllMuted(true);
@@ -1125,8 +1125,9 @@ void MainWindow::updateWaterfallZoomBandwidth(float bw) {
 
 void MainWindow::handleWaterfallInput(ImGui::WaterfallVFO* vfo) {
     if (!lockWaterfallControls && ImGui::GetTopMostPopupModal() == NULL) {
-        // Handle arrow keys
-        if (vfo != NULL && (gui::waterfall.mouseInFFT || gui::waterfall.mouseInWaterfall)) {
+        // Handle arrow keys. Not while a text field has the keyboard - there the
+        // arrows move the caret, and tuning at the same time is nobody's intent.
+        if (vfo != NULL && !gui::imguiWantsKeyboard() && (gui::waterfall.mouseInFFT || gui::waterfall.mouseInWaterfall)) {
             bool freqChanged = false;
             if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) && !gui::freqSelect.digitHovered) {
                 double nfreq = gui::waterfall.getCenterFrequency() + vfo->generalOffset - vfo->snapInterval;

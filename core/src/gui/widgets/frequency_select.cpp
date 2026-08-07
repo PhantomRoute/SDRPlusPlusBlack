@@ -139,7 +139,25 @@ void FrequencySelect::draw() {
         }
     }
 
-    if (!gui::mainWindow.lockWaterfallControls && ImGui::GetTopMostPopupModal() == NULL) {
+    // isInArea below is a plain rectangle test that knows nothing about ImGui giving
+    // the mouse to the topmost window under the pointer, so a floating window drawn
+    // over the digits - the theme editor, the log window - let clicks and wheel ticks
+    // through and moved the frequency. There is no drag to keep alive here: every
+    // interaction is a click, a wheel tick or a key press while hovering.
+    //
+    // keyboardFree guards the key handling below for the same reason in the other
+    // direction: with a text field active the arrows move its caret and its digits
+    // belong to it, not to the frequency underneath whatever the mouse happens to
+    // be resting on.
+    bool pointerOnSelector = (GImGui->HoveredWindow == window);
+    bool keyboardFree = !gui::imguiWantsKeyboard();
+
+    // Assigned inside the block below when it runs. Cleared here so that skipping the
+    // block doesn't leave the last frame's value standing - main_window reads this to
+    // decide whether the arrow keys tune, and a stale true would wedge that off.
+    digitHovered = false;
+
+    if (pointerOnSelector && !gui::mainWindow.lockWaterfallControls && ImGui::GetTopMostPopupModal() == NULL) {
         ImVec2 mousePos = ImGui::GetMousePos();
         bool leftClick = ImGui::IsMouseClicked(ImGuiMouseButton_Left);
         bool rightClick = ImGui::IsMouseClicked(ImGuiMouseButton_Right);
@@ -165,34 +183,36 @@ void FrequencySelect::draw() {
             }
             if (onDigit) {
                 hovered = true;
-                if (rightClick || (ImGui::IsKeyPressed(ImGuiKey_Delete) || ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter))) {
+                if (rightClick || (keyboardFree && (ImGui::IsKeyPressed(ImGuiKey_Delete) || ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter)))) {
                     for (int j = i; j < getNumberOfDigits(); j++) {
                         digits[j] = 0;
                     }
 
                     frequencyChanged = true;
                 }
-                if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) {
-                    incrementDigit(i);
-                }
-                if (ImGui::IsKeyPressed(ImGuiKey_DownArrow)) {
-                    decrementDigit(i);
-                }
-                if ((ImGui::IsKeyPressed(ImGuiKey_LeftArrow) || ImGui::IsKeyPressed(ImGuiKey_Backspace)) && i > 0) {
-                    moveCursorToDigit(i - 1);
-                }
-                if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) && i < getNumberOfDigits()-1) {
-                    moveCursorToDigit(i + 1);
-                }
+                if (keyboardFree) {
+                    if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) {
+                        incrementDigit(i);
+                    }
+                    if (ImGui::IsKeyPressed(ImGuiKey_DownArrow)) {
+                        decrementDigit(i);
+                    }
+                    if ((ImGui::IsKeyPressed(ImGuiKey_LeftArrow) || ImGui::IsKeyPressed(ImGuiKey_Backspace)) && i > 0) {
+                        moveCursorToDigit(i - 1);
+                    }
+                    if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) && i < getNumberOfDigits()-1) {
+                        moveCursorToDigit(i + 1);
+                    }
 
-                auto chars = io.InputQueueCharacters;
+                    auto chars = io.InputQueueCharacters;
 
-                // For each keyboard characters, type it
-                for (int j = 0; j < chars.Size; j++) {
-                    if (chars[j] >= '0' && chars[j] <= '9') {
-                        digits[i + j] = chars[j] - '0';
-                        if ((i + j) < getNumberOfDigits()-1) { moveCursorToDigit(i + j + 1); }
-                        frequencyChanged = true;
+                    // For each keyboard characters, type it
+                    for (int j = 0; j < chars.Size; j++) {
+                        if (chars[j] >= '0' && chars[j] <= '9') {
+                            digits[i + j] = chars[j] - '0';
+                            if ((i + j) < getNumberOfDigits()-1) { moveCursorToDigit(i + j + 1); }
+                            frequencyChanged = true;
+                        }
                     }
                 }
 
@@ -210,8 +230,8 @@ void FrequencySelect::draw() {
             bool shortcutKey = io.ConfigMacOSXBehaviors ? (io.KeyMods == ImGuiKeyModFlags_Super) : (io.KeyMods == ImGuiKeyModFlags_Ctrl);
             bool ctrlOnly = (io.KeyMods == ImGuiKeyModFlags_Ctrl);
             bool shiftOnly = (io.KeyMods == ImGuiKeyModFlags_Shift);
-            bool copy  = ((shortcutKey && ImGui::IsKeyPressed(ImGuiKey_C)) || (ctrlOnly  && ImGui::IsKeyPressed(ImGuiKey_Insert)));
-            bool paste = ((shortcutKey && ImGui::IsKeyPressed(ImGuiKey_V)) || (shiftOnly && ImGui::IsKeyPressed(ImGuiKey_Insert)));
+            bool copy  = keyboardFree && ((shortcutKey && ImGui::IsKeyPressed(ImGuiKey_C)) || (ctrlOnly  && ImGui::IsKeyPressed(ImGuiKey_Insert)));
+            bool paste = keyboardFree && ((shortcutKey && ImGui::IsKeyPressed(ImGuiKey_V)) || (shiftOnly && ImGui::IsKeyPressed(ImGuiKey_Insert)));
             if (copy) {
                 // Convert the freqency to a string
                 std::string freqStr = hrfreq::toString(frequency);
