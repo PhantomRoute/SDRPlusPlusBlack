@@ -22,6 +22,9 @@ Your selection is saved per VFO, so NXDN96 (which is off by default) stays on on
 
 ## Themes
 
+Every colour setting lives in the **Theme** menu - the theme itself, the waterfall colour map (was
+in Display), and the per-VFO colours (was a top-level section of its own).
+
 Everything the UI draws is themable, not just the ImGui widgets: the waterfall background, the FFT
 grid and trace, the squelch and scanner bars, the VFO and notch markers, the band plan, the SNR and
 volume meters, and the frequency selector.

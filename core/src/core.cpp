@@ -587,7 +587,7 @@ int sdrpp_main(int argc, char* argv[]) {
         { "Band Plan", false },
         // Appearance
         { "Display", true },
-        { "VFO Color", false },
+        { "Theme", false },
         // Optional processing and decoders
         { "Noise Reduction logmmse", false },
         { "FT8/FT4 Decoder", false },

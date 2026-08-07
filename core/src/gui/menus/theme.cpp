@@ -1,4 +1,6 @@
 #include <gui/menus/theme.h>
+#include <gui/menus/display.h>
+#include <gui/menus/vfo_color.h>
 #include <gui/gui.h>
 #include <core.h>
 #include <gui/style.h>
@@ -255,6 +257,17 @@ namespace thememenu {
         if (ImGui::Button("Import##theme_import", ImVec2(ImGui::GetContentRegionAvail().x, 0)) && !importOpen) {
             importOpen = true;
             importDialog = new pfd::open_file("Import theme", "", { "Theme files (*.json)", "*.json", "All Files", "*" });
+        }
+
+        // The waterfall gradient and the per-VFO colours used to live in the Display
+        // menu and in a top level section of their own. They are colour settings, so
+        // this is where anyone looking for them will look.
+        ImGui::Spacing();
+        displaymenu::drawColorMapSelector();
+
+        ImGui::Spacing();
+        if (ImGui::CollapsingHeader("VFO colors##theme_vfo_colors", ImGuiTreeNodeFlags_DefaultOpen)) {
+            vfo_color_menu::draw(ctx);
         }
     }
 

@@ -91,8 +91,9 @@ void MainWindow::init() {
     gui::menu.registerEntry("Sinks", sinkmenu::draw, NULL);
     gui::menu.registerEntry("Band Plan", bandplanmenu::draw, NULL);
     gui::menu.registerEntry("Display", displaymenu::draw, NULL);
+    // No VFO Color entry: the Theme menu draws it, along with every other colour
+    // setting, so they are all in one place.
     gui::menu.registerEntry("Theme", thememenu::draw, NULL);
-    gui::menu.registerEntry("VFO Color", vfo_color_menu::draw, NULL);
     gui::menu.registerEntry("Module Manager", module_manager_menu::draw, NULL);
 
     gui::freqSelect.init();

@@ -229,6 +229,22 @@ namespace displaymenu {
     }
 
 
+    void drawColorMapSelector() {
+        if (colorMapNames.empty()) { return; }
+        float menuWidth = ImGui::GetContentRegionAvail().x;
+        ImGui::LeftLabel("Color Map");
+        ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());
+        if (ImGui::Combo("##_sdrpp_color_map_sel", &colorMapId, colorMapNamesTxt.c_str())) {
+            colormaps::Map map = colormaps::maps[colorMapNames[colorMapId]];
+            gui::waterfall.updatePalletteFromArray(map.map, map.entryCount);
+            core::configManager.acquire();
+            core::configManager.conf["colorMap"] = colorMapNames[colorMapId];
+            core::configManager.release(true);
+            colorMapAuthor = map.author;
+        }
+        ImGui::Text("Color map Author: %s", colorMapAuthor.c_str());
+    }
+
     void draw(void* ctx) {
         float menuWidth = ImGui::GetContentRegionAvail().x;
         if (ImGui::Checkbox("Small screen / thick fingers##_sdrpp", &phoneLayout)) {
@@ -399,20 +415,6 @@ namespace displaymenu {
             core::configManager.acquire();
             core::configManager.conf["fftWindow"] = selectedWindow;
             core::configManager.release(true);
-        }
-
-        if (colorMapNames.size() > 0) {
-            ImGui::LeftLabel("Color Map");
-            ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());
-            if (ImGui::Combo("##_sdrpp_color_map_sel", &colorMapId, colorMapNamesTxt.c_str())) {
-                colormaps::Map map = colormaps::maps[colorMapNames[colorMapId]];
-                gui::waterfall.updatePalletteFromArray(map.map, map.entryCount);
-                core::configManager.acquire();
-                core::configManager.conf["colorMap"] = colorMapNames[colorMapId];
-                core::configManager.release(true);
-                colorMapAuthor = map.author;
-            }
-            ImGui::Text("Color map Author: %s", colorMapAuthor.c_str());
         }
 
         onDisplayDraw.emit(GImGui);

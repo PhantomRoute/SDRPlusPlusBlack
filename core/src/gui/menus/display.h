@@ -12,6 +12,9 @@ namespace displaymenu {
     void init();
     void checkKeybinds();
     void draw(void* ctx);
+    // Drawn by the Theme menu, which is where every colour setting lives. The state
+    // it edits stays here because init() is what loads it and applies the palette.
+    void drawColorMapSelector();
     extern bool phoneLayout;
 #ifdef __ANDROID__
     extern float displayDensity;
