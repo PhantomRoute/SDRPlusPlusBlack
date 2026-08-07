@@ -2140,6 +2140,10 @@ void MobileMainWindow::draw() {
 
     ImGui::End();
 
+    // A floating window, so it stays up while the Theme menu section is collapsed and
+    // the colours it changes can be judged against the live waterfall.
+    thememenu::drawEditor();
+
     if (this->callCQ.isLongPress()) {
         if (!ImGui::IsPopupOpen(RecordCallCQPopup)) {
             ImGui::OpenPopup(RecordCallCQPopup);

@@ -205,6 +205,7 @@ namespace ImGui {
         ImU32 traceHold = ImGui::ColorConvertFloat4ToU32(gui::themeManager.fftHoldColor);
         ImU32 shadow = ImGui::GetColorU32(ImGuiCol_PlotLines, 0.2);
         ImU32 text = ImGui::GetColorU32(ImGuiCol_Text);
+        ImU32 grid = ImGui::ColorConvertFloat4ToU32(gui::themeManager.fftGridColor);
         float textVOffset = 10.0f * style::uiScale;
 
         // Vertical scale
@@ -212,7 +213,7 @@ namespace ImGui {
             float yPos = fftAreaMax.y - ((line - fftMin) * scaleFactor);
             window->DrawList->AddLine(ImVec2(fftAreaMin.x, roundf(yPos)),
                                       ImVec2(fftAreaMax.x, roundf(yPos)),
-                                      IM_COL32(50, 50, 50, 255), style::uiScale);
+                                      grid, style::uiScale);
             snprintf(buf, sizeof buf, "%d", (int)line);
             ImVec2 txtSz = ImGui::CalcTextSize(buf);
             window->DrawList->AddText(ImVec2(fftAreaMin.x - txtSz.x - textVOffset, roundf(yPos - (txtSz.y / 2.0))), text, buf);
@@ -227,7 +228,7 @@ namespace ImGui {
                 double xPos = fftAreaMin.x + ((freq - lowerFreq) * horizScale);
                 window->DrawList->AddLine(ImVec2(roundf(xPos), fftAreaMin.y + 1),
                                           ImVec2(roundf(xPos), fftAreaMax.y),
-                                          IM_COL32(50, 50, 50, 255), style::uiScale);
+                                          grid, style::uiScale);
                 window->DrawList->AddLine(ImVec2(roundf(xPos), fftAreaMax.y),
                                           ImVec2(roundf(xPos), fftAreaMax.y + scaleVOfsset),
                                           text, style::uiScale);
@@ -296,7 +297,7 @@ namespace ImGui {
             float markerSize = 4.0f * style::uiScale;
             ImVec2 markerMin(centerFreqPos - markerSize, fftAreaMax.y - markerSize);
             ImVec2 markerMax(centerFreqPos + markerSize, fftAreaMax.y + markerSize);
-            window->DrawList->AddRectFilled(markerMin, markerMax, IM_COL32(255, 255, 255, 255));
+            window->DrawList->AddRectFilled(markerMin, markerMax, ImGui::ColorConvertFloat4ToU32(gui::themeManager.fftCenterMarkerColor));
         }
     }
 
@@ -314,7 +315,9 @@ namespace ImGui {
             for (auto const& [name, vfo] : vfos) {
                 window->DrawList->AddRectFilled(vfo->wfRectMin, vfo->wfRectMax, vfo->color);
                 if (!vfo->lineVisible) { continue; }
-                window->DrawList->AddLine(vfo->wfLineMin, vfo->wfLineMax, (name == selectedVFO) ? IM_COL32(255, 0, 0, 255) : IM_COL32(255, 255, 0, 255), style::uiScale);
+                window->DrawList->AddLine(vfo->wfLineMin, vfo->wfLineMax,
+                                          ImGui::ColorConvertFloat4ToU32((name == selectedVFO) ? gui::themeManager.vfoSelectedLineColor : gui::themeManager.vfoLineColor),
+                                          style::uiScale);
             }
         }
 
@@ -913,8 +916,8 @@ namespace ImGui {
                 colorTrans = bandplan::colorTable[bandplan->bands[i].type].transColorValue;
             }
             else {
-                color = IM_COL32(255, 255, 255, 255);
-                colorTrans = IM_COL32(255, 255, 255, 100);
+                color = ImGui::ColorConvertFloat4ToU32(gui::themeManager.bandPlanDefaultColor);
+                colorTrans = ImGui::ColorConvertFloat4ToU32(gui::themeManager.bandPlanDefaultFillColor);
             }
             if (aPos <= fftAreaMin.x) {
                 aPos = fftAreaMin.x + 1;
@@ -936,7 +939,7 @@ namespace ImGui {
             }
             if (txtSz.x <= width) {
                 window->DrawList->AddText(ImVec2(cPos - (txtSz.x / 2.0), bpBottom - (height / 2.0f) - (txtSz.y / 2.0f)),
-                                          IM_COL32(255, 255, 255, 255), bandplan->bands[i].name.c_str());
+                                          ImGui::ColorConvertFloat4ToU32(gui::themeManager.bandPlanTextColor), bandplan->bands[i].name.c_str());
             }
         }
     }
@@ -1158,9 +1161,10 @@ namespace ImGui {
 
         // window->DrawList->AddRectFilled(widgetPos, widgetEndPos, IM_COL32( 0, 0, 0, 255 ));
         ImU32 bg = ImGui::ColorConvertFloat4ToU32(gui::themeManager.waterfallBg);
+        ImU32 border = ImGui::ColorConvertFloat4ToU32(gui::themeManager.fftBorderColor);
         window->DrawList->AddRectFilled(widgetPos, widgetEndPos, bg);
-        window->DrawList->AddRect(widgetPos, widgetEndPos, IM_COL32(50, 50, 50, 255), 0.0, 0, style::uiScale);
-        window->DrawList->AddLine(ImVec2(widgetPos.x, freqAreaMax.y), ImVec2(widgetPos.x + widgetSize.x, freqAreaMax.y), IM_COL32(50, 50, 50, 255), style::uiScale);
+        window->DrawList->AddRect(widgetPos, widgetEndPos, border, 0.0, 0, style::uiScale);
+        window->DrawList->AddLine(ImVec2(widgetPos.x, freqAreaMax.y), ImVec2(widgetPos.x + widgetSize.x, freqAreaMax.y), border, style::uiScale);
 
         if (!gui::mainWindow.lockWaterfallControls && ImGui::GetTopMostPopupModal() == NULL) {
             inputHandled = false;
@@ -1770,11 +1774,13 @@ namespace ImGui {
     void WaterfallVFO::draw(ImGuiWindow* window, bool selected) {
         window->DrawList->AddRectFilled(rectMin, rectMax, color);
         if (lineVisible) {
-            window->DrawList->AddLine(lineMin, lineMax, selected ? IM_COL32(255, 0, 0, 255) : IM_COL32(255, 255, 0, 255), style::uiScale);
+            window->DrawList->AddLine(lineMin, lineMax,
+                                      ImGui::ColorConvertFloat4ToU32(selected ? gui::themeManager.vfoSelectedLineColor : gui::themeManager.vfoLineColor),
+                                      style::uiScale);
         }
 
         if (notchVisible) {
-            window->DrawList->AddRectFilled(notchMin, notchMax, IM_COL32(255, 0, 0, 127));
+            window->DrawList->AddRectFilled(notchMin, notchMax, ImGui::ColorConvertFloat4ToU32(gui::themeManager.notchColor));
         }
 
         if (!gui::mainWindow.lockWaterfallControls && !gui::waterfall.inputHandled && ImGui::GetTopMostPopupModal() == NULL) {

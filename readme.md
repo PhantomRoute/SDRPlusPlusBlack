@@ -20,6 +20,22 @@ Both digital voice modes in the Radio module now have a **Protocols** dropdown. 
 
 Your selection is saved per VFO, so NXDN96 (which is off by default) stays on once you enable it.
 
+## Themes
+
+Everything the UI draws is themable, not just the ImGui widgets: the waterfall background, the FFT
+grid and trace, the squelch and scanner bars, the VFO and notch markers, the band plan, the SNR and
+volume meters, and the frequency selector.
+
+**Theme > Customize** opens an editor with a colour picker for every one of them. Changes preview
+live against the running waterfall, so you can judge a colour where you'll actually be looking at
+it. Give the theme a name and hit **Save** and it lands in `themes/` next to your config, where it
+survives upgrades. The shipped themes are read-only - editing one and saving suggests a name for
+your own copy instead of overwriting it.
+
+**Export** writes the theme out as a self-contained `.json` with every colour spelled out, so
+sending someone a theme is sending them one file. **Import** on the Theme menu reads one back; if
+you already have a theme by that name, the imported one is renamed rather than replacing yours.
+
 **Please do not report bugs in this fork to Alexandre Rouma or sannysanoff.** They did not write this code and cannot fix it. If something is broken in SDR++Black, file an [issue](https://github.com/PhantomRoute/SDRPlusPlusBlack/issues) here.
 
 [Changelog](changelog.md)

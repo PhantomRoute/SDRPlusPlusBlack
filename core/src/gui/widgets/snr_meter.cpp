@@ -1,10 +1,13 @@
-#include <gui/widgets/volume_meter.h>
-#include <algorithm>
-#include <gui/style.h>
-
+// Must come before anything that pulls in imgui_internal.h, which is where the ImVec2
+// operators used below are defined.
 #ifndef IMGUI_DEFINE_MATH_OPERATORS
 #define IMGUI_DEFINE_MATH_OPERATORS
 #endif
+
+#include <gui/widgets/volume_meter.h>
+#include <algorithm>
+#include <gui/style.h>
+#include <gui/gui.h>
 #include <imgui/imgui_internal.h>
 #include "snr_meter.h"
 
@@ -32,7 +35,7 @@ namespace ImGui {
         char buf[32];
         float drawVal = (float) val * ratio;
 
-        window->DrawList->AddRectFilled(min + ImVec2(0, 1), min + ImVec2(roundf(drawVal), 10 * style::uiScale), IM_COL32(0, 136, 255, 255));
+        window->DrawList->AddRectFilled(min + ImVec2(0, 1), min + ImVec2(roundf(drawVal), 10 * style::uiScale), ColorConvertFloat4ToU32(gui::themeManager.snrMeterColor));
         window->DrawList->AddLine(min, min + ImVec2(0, (10.0f * style::uiScale) - 1), text, style::uiScale);
         window->DrawList->AddLine(min + ImVec2(0, (10.0f * style::uiScale) - 1), min + ImVec2(size.x + 1, (10.0f * style::uiScale) - 1), text, style::uiScale);
 

@@ -889,6 +889,9 @@ void MainWindow::draw() {
 
     ImGui::End();
 
+    // A floating window, so it stays up while the Theme menu section is collapsed and
+    // the colours it changes can be judged against the live waterfall.
+    thememenu::drawEditor();
 
     // Draw listening popup if space is pressed
     if (spacePressed) {

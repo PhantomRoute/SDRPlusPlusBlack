@@ -150,14 +150,14 @@ void FrequencySelect::draw() {
         for (int i = 0; i < getNumberOfDigits(); i++) {
             onDigit = false;
             if (isInArea(mousePos, digitTopMins[i], digitTopMaxs[i])) {
-                window->DrawList->AddRectFilled(digitTopMins[i], digitTopMaxs[i], IM_COL32(255, 0, 0, 75));
+                window->DrawList->AddRectFilled(digitTopMins[i], digitTopMaxs[i], ImGui::ColorConvertFloat4ToU32(gui::themeManager.freqSelectUpColor));
                 if (leftClick) {
                     incrementDigit(i);
                 }
                 onDigit = true;
             }
             if (isInArea(mousePos, digitBottomMins[i], digitBottomMaxs[i])) {
-                window->DrawList->AddRectFilled(digitBottomMins[i], digitBottomMaxs[i], IM_COL32(0, 0, 255, 75));
+                window->DrawList->AddRectFilled(digitBottomMins[i], digitBottomMaxs[i], ImGui::ColorConvertFloat4ToU32(gui::themeManager.freqSelectDownColor));
                 if (leftClick) {
                     decrementDigit(i);
                 }
