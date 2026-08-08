@@ -10,6 +10,7 @@
 #include <fstream>
 #include <cstring>
 #include <algorithm>
+#include <cmath>
 #include <imgui.h>
 
 namespace thememenu {
@@ -84,6 +85,8 @@ namespace thememenu {
         for (const auto& slider : gui::themeManager.getSliders()) {
             core::configManager.conf[slider.key] = ThemeManager::roundSetting(*slider.value);
         }
+        core::configManager.conf[ThemeManager::GRADIENT_KEY] =
+            ThemeManager::encodeGradient(gui::themeManager.fftGradient);
         core::configManager.release(true);
     }
 
@@ -101,6 +104,10 @@ namespace thememenu {
         for (const auto& slider : gui::themeManager.getSliders()) {
             if (!conf.contains(slider.key) || !conf[slider.key].is_number()) { continue; }
             *slider.value = std::clamp(conf[slider.key].get<float>(), slider.min, slider.max);
+        }
+
+        if (conf.contains(ThemeManager::GRADIENT_KEY)) {
+            gui::themeManager.setGradient(conf[ThemeManager::GRADIENT_KEY]);
         }
 
         // The fill used to be the Display menu's "Shadow" checkbox, which is now the
@@ -304,6 +311,117 @@ namespace thememenu {
         return changed;
     }
 
+    // A strip of the gradient as it will be drawn, over the waterfall background so the
+    // stops' alpha reads the way it will on screen. Marks where each stop sits.
+    static void drawGradientPreview(float height) {
+        const auto& stops = gui::themeManager.fftGradient;
+        ImVec2 pos = ImGui::GetCursorScreenPos();
+        float width = ImGui::GetContentRegionAvail().x;
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        ImVec2 min = pos;
+        ImVec2 max = ImVec2(pos.x + width, pos.y + height);
+
+        dl->AddRectFilled(min, max, ImGui::ColorConvertFloat4ToU32(gui::themeManager.waterfallBg));
+
+        // The bar runs left to right, the spectrum bottom to top, so position 0 is at
+        // the left end.
+        for (size_t i = 0; i + 1 < stops.size(); i++) {
+            ImU32 left = ImGui::ColorConvertFloat4ToU32(stops[i].color);
+            ImU32 right = ImGui::ColorConvertFloat4ToU32(stops[i + 1].color);
+            dl->AddRectFilledMultiColor(ImVec2(min.x + (width * stops[i].pos), min.y),
+                                        ImVec2(min.x + (width * stops[i + 1].pos), max.y),
+                                        left, right, right, left);
+        }
+        // Flat past the ends, which is what sampling does too.
+        if (!stops.empty()) {
+            ImU32 first = ImGui::ColorConvertFloat4ToU32(stops.front().color);
+            ImU32 last = ImGui::ColorConvertFloat4ToU32(stops.back().color);
+            dl->AddRectFilled(min, ImVec2(min.x + (width * stops.front().pos), max.y), first);
+            dl->AddRectFilled(ImVec2(min.x + (width * stops.back().pos), min.y), max, last);
+        }
+
+        ImU32 marker = ImGui::GetColorU32(ImGuiCol_Text);
+        for (const auto& stop : stops) {
+            float x = roundf(min.x + (width * stop.pos));
+            dl->AddLine(ImVec2(x, min.y), ImVec2(x, max.y), marker, style::uiScale);
+        }
+        dl->AddRect(min, max, ImGui::GetColorU32(ImGuiCol_Border));
+
+        ImGui::Dummy(ImVec2(width, height));
+    }
+
+    // Colour, position and a remove button per stop, plus a way to add one. Rows are
+    // keyed on the stop's id rather than its index, so re-sorting after a position drag
+    // doesn't pull the slider out from under the mouse.
+    static void drawGradientEditor() {
+        auto& stops = gui::themeManager.fftGradient;
+        bool changed = false;
+        int removeAt = -1;
+
+        drawGradientPreview(ImGui::GetFrameHeight());
+
+        float buttonWidth = ImGui::GetFrameHeight();
+        float spacing = ImGui::GetStyle().ItemSpacing.x;
+        for (int i = 0; i < (int)stops.size(); i++) {
+            ImGui::PushID(stops[i].id);
+
+            ImVec4 color = stops[i].color;
+            if (ImGui::ColorEdit4("##theme_gradient_color", (float*)&color,
+                                  ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_AlphaBar |
+                                      ImGuiColorEditFlags_AlphaPreviewHalf)) {
+                stops[i].color = color;
+                changed = true;
+            }
+
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - buttonWidth - spacing);
+            if (ImGui::SliderFloat("##theme_gradient_pos", &stops[i].pos, 0.0f, 1.0f, "%.2f")) {
+                changed = true;
+            }
+
+            ImGui::SameLine();
+            // Two stops are the least that is still a gradient.
+            bool canRemove = stops.size() > 2;
+            if (!canRemove) { style::beginDisabled(); }
+            if (ImGui::Button("x##theme_gradient_del", ImVec2(buttonWidth, 0)) && canRemove) {
+                removeAt = i;
+            }
+            if (!canRemove) { style::endDisabled(); }
+
+            ImGui::PopID();
+        }
+
+        if (removeAt >= 0) {
+            stops.erase(stops.begin() + removeAt);
+            changed = true;
+        }
+
+        if (ImGui::Button("Add stop##theme_gradient_add", ImVec2(ImGui::GetContentRegionAvail().x, 0))) {
+            // Into the widest gap, in the colour the gradient already has there, so a
+            // new stop is a handle to pull rather than a jump in the colours.
+            float bestPos = 0.5f;
+            float bestGap = -1.0f;
+            for (size_t i = 0; i + 1 < stops.size(); i++) {
+                float gap = stops[i + 1].pos - stops[i].pos;
+                if (gap > bestGap) {
+                    bestGap = gap;
+                    bestPos = (stops[i].pos + stops[i + 1].pos) / 2.0f;
+                }
+            }
+            GradientStop stop;
+            stop.pos = bestPos;
+            stop.color = gui::themeManager.sampleGradient(bestPos);
+            stop.id = gui::themeManager.nextGradientStopId();
+            stops.push_back(stop);
+            changed = true;
+        }
+
+        if (changed) {
+            gui::themeManager.normalizeGradient();
+            saveSpectrumStyle();
+        }
+    }
+
     // Combos and sliders for the parts of the theme that aren't colours. Generic, so a
     // new setting only has to be added to the theme manager's tables to appear here.
     static void drawSpectrumStyle() {
@@ -329,6 +447,13 @@ namespace thememenu {
         }
 
         if (changed) { saveSpectrumStyle(); }
+
+        // Only worth the room when something is actually drawn with it.
+        if (gui::themeManager.fftTraceStyle == FFT_TRACE_GRADIENT ||
+            gui::themeManager.fftFillStyle == FFT_FILL_GRADIENT) {
+            ImGui::Spacing();
+            drawGradientEditor();
+        }
     }
 
     void draw(void* ctx) {
@@ -480,6 +605,7 @@ namespace thememenu {
         for (const auto& slider : gui::themeManager.getSliders()) {
             editData[slider.key] = ThemeManager::roundSetting(*slider.value);
         }
+        editData[ThemeManager::GRADIENT_KEY] = ThemeManager::encodeGradient(gui::themeManager.fftGradient);
 
         const Theme* existing = gui::themeManager.getTheme(name);
         bool canSave = !name.empty() && (existing == NULL || !existing->readOnly);

@@ -45,17 +45,26 @@ file is where a gradient choice comes *from*; your config is what remembers the 
 The **Spectrum** section of the Theme menu controls how the live FFT trace is drawn, the way
 SDRangel does it:
 
-* **Trace style** - *Solid* draws it in the theme's FFT trace colour. *Gradient* colours it by the
-  waterfall colour map, so a peak takes the colour it would have in the waterfall below it.
-* **Fill style** - what goes under the trace. *None*, *Solid* in the trace colour, or *Gradient*,
-  which fades from the colour map's value at the signal's level down to its value at the bottom of
+* **Trace style** - *Solid* draws it in the theme's FFT trace colour. *Reflection* colours it by the
+  waterfall colour map, so a peak takes the colour it would have in the waterfall below it and the
+  spectrum reflects the waterfall. *Gradient* colours it by the theme's own gradient instead.
+* **Fill style** - what goes under the trace: *None*, *Solid* in the trace colour, or *Reflection* /
+  *Gradient*, which fade from the colour at the signal's level down to the colour at the bottom of
   the spectrum.
 * **Trace intensity** / **Fill intensity** - how strongly each is drawn.
 
-These are part of the theme like the colours are, so they save, export and import with it, and they
-behave like the gradient does: picking a theme takes its styling, changing one by hand afterwards
-overrides it until the next theme change. Fill style replaces the Display menu's old **Shadow**
-checkbox, which is now *Fill style: None* - if you had it off, it stays off.
+Pick *Gradient* for either and a gradient editor appears: a preview strip, then one row per colour
+stop with a colour picker, its position on the spectrum's vertical range (0 at the bottom, 1 at the
+top) and a remove button, plus **Add stop**, which drops a new stop into the widest gap in the
+colour it already has there so you get a handle to pull rather than a jump. Stops can be dragged
+past each other, there is no limit on how many you use, and the colours' own alpha is multiplied by
+the intensity slider - so a stop can fade out entirely while its neighbours stay solid.
+
+All of it, the gradient included, is part of the theme like the colours are, so it saves, exports and
+imports with it, and it behaves like the colour map does: picking a theme takes its styling,
+changing something by hand afterwards overrides it until the next theme change. Fill style replaces
+the Display menu's old **Shadow** checkbox, which is now *Fill style: None* - if you had it off, it
+stays off.
 
 **Export** writes the theme out as a self-contained `.json` with every colour spelled out, so
 sending someone a theme is sending them one file. **Import** on the Theme menu reads one back; if

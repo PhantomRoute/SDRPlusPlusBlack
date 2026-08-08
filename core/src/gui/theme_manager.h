@@ -36,16 +36,30 @@ struct ThemeColorGroup {
 // How the live spectrum trace is drawn.
 enum FFTTraceStyle {
     FFT_TRACE_SOLID = 0,
-    // Coloured by the waterfall gradient, so a peak takes the colour it would have in
-    // the waterfall below it.
-    FFT_TRACE_GRADIENT = 1,
+    // Coloured by the waterfall colour map, so a peak takes the colour it would have in
+    // the waterfall below it - the spectrum reflects the waterfall.
+    FFT_TRACE_REFLECTION = 1,
+    // Coloured by the theme's own gradient, which is edited in the Theme menu and has
+    // nothing to do with the waterfall.
+    FFT_TRACE_GRADIENT = 2,
 };
 
 // How the area under the live spectrum trace is filled.
 enum FFTFillStyle {
     FFT_FILL_NONE = 0,
     FFT_FILL_SOLID = 1,
-    FFT_FILL_GRADIENT = 2,
+    FFT_FILL_REFLECTION = 2,
+    FFT_FILL_GRADIENT = 3,
+};
+
+// One colour stop of the theme's spectrum gradient. pos is where it sits on the
+// spectrum's vertical range: 0 at the bottom of the FFT area, 1 at the top.
+struct GradientStop {
+    float pos;
+    ImVec4 color;
+    // Identity that survives the list being re-sorted, so dragging a stop past its
+    // neighbour doesn't hand the drag to a different row. Runtime only, never stored.
+    int id = 0;
 };
 
 // A theme value that isn't a colour but a choice between named options. Written to the
@@ -162,6 +176,31 @@ public:
     static constexpr const char* COLOR_MAP_KEY = "ColorMap";
     std::string colorMap;
 
+    // The theme's own spectrum gradient, used by the trace and fill styles that ask for
+    // it. Kept sorted by position; sampleGradient relies on that.
+    static constexpr const char* GRADIENT_KEY = "FFTGradient";
+    std::vector<GradientStop> fftGradient;
+
+    static std::vector<GradientStop> defaultGradient();
+    // Sorts and clamps after an edit. Also what makes a hand written theme with its
+    // stops in any order behave.
+    void normalizeGradient();
+    // A fresh id, so a stop added by the editor can be told apart from its neighbours.
+    int nextGradientStopId() { return ++lastGradientStopId; }
+
+    // t is 0 at the bottom of the spectrum and 1 at the top. Flat below the first stop
+    // and above the last one rather than fading out, so a gradient that doesn't span
+    // the full range still fills.
+    ImVec4 sampleGradient(float t) const;
+    ImU32 sampleGradientU32(float t, float alphaMul) const;
+
+    static json encodeGradient(const std::vector<GradientStop>& stops);
+    // Returns false for anything that isn't a usable list of stops, leaving out alone.
+    static bool decodeGradient(const json& val, std::vector<GradientStop>& out);
+    // Replaces the live gradient from a theme or config value, ids and sorting included.
+    // Returns false and keeps the current gradient if the value isn't usable.
+    bool setGradient(const json& val);
+
     // Spectrum trace and fill styling. Part of the theme like the colours are, but not
     // colours, so they live in the choice/slider tables below rather than in a group.
     int fftTraceStyle = FFT_TRACE_SOLID;
@@ -184,6 +223,7 @@ private:
 
     std::vector<ThemeChoice> choices;
     std::vector<ThemeSlider> sliders;
+    int lastGradientStopId = 0;
 
     std::vector<ThemeColorGroup> customColorGroups;
     // Flattened index into customColorGroups so applying a theme is a lookup per key

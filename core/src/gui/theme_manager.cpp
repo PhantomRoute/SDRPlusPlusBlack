@@ -11,17 +11,109 @@
 ThemeManager::ThemeManager() {
     initCustomColors();
     initSettings();
+    fftGradient = defaultGradient();
+    for (auto& stop : fftGradient) { stop.id = nextGradientStopId(); }
+}
+
+// Dark at the noise floor rising to white at the top, which reads on any theme and is
+// an obvious starting point to drag around.
+std::vector<GradientStop> ThemeManager::defaultGradient() {
+    return {
+        { 0.0f, ImVec4(0.04f, 0.09f, 0.20f, 1.0f) },
+        { 0.55f, ImVec4(0.12f, 0.59f, 0.98f, 1.0f) },
+        { 1.0f, ImVec4(1.0f, 1.0f, 1.0f, 1.0f) },
+    };
+}
+
+void ThemeManager::normalizeGradient() {
+    if (fftGradient.empty()) {
+        fftGradient = defaultGradient();
+        for (auto& stop : fftGradient) { stop.id = nextGradientStopId(); }
+    }
+    for (auto& stop : fftGradient) { stop.pos = std::clamp(stop.pos, 0.0f, 1.0f); }
+    // Stable, so two stops dragged onto the same position keep the order the user put
+    // them in instead of flipping every frame.
+    std::stable_sort(fftGradient.begin(), fftGradient.end(),
+                     [](const GradientStop& a, const GradientStop& b) { return a.pos < b.pos; });
+}
+
+ImVec4 ThemeManager::sampleGradient(float t) const {
+    if (fftGradient.empty()) { return ImVec4(0, 0, 0, 0); }
+    t = std::clamp(t, 0.0f, 1.0f);
+
+    const GradientStop* prev = &fftGradient.front();
+    if (t <= prev->pos) { return prev->color; }
+
+    for (const auto& stop : fftGradient) {
+        if (stop.pos < t) {
+            prev = &stop;
+            continue;
+        }
+        float span = stop.pos - prev->pos;
+        // Two stops at the same position are a hard edge, not a division by zero.
+        float f = (span > 0.0f) ? ((t - prev->pos) / span) : 1.0f;
+        return ImVec4(prev->color.x + (stop.color.x - prev->color.x) * f,
+                      prev->color.y + (stop.color.y - prev->color.y) * f,
+                      prev->color.z + (stop.color.z - prev->color.z) * f,
+                      prev->color.w + (stop.color.w - prev->color.w) * f);
+    }
+    return fftGradient.back().color;
+}
+
+ImU32 ThemeManager::sampleGradientU32(float t, float alphaMul) const {
+    ImVec4 col = sampleGradient(t);
+    col.w = std::clamp(col.w * alphaMul, 0.0f, 1.0f);
+    return ImGui::ColorConvertFloat4ToU32(col);
+}
+
+json ThemeManager::encodeGradient(const std::vector<GradientStop>& stops) {
+    json out = json::array();
+    for (const auto& stop : stops) {
+        json entry = json::object();
+        entry["pos"] = roundSetting(stop.pos);
+        entry["color"] = encodeRGBA(stop.color);
+        out.push_back(entry);
+    }
+    return out;
+}
+
+bool ThemeManager::decodeGradient(const json& val, std::vector<GradientStop>& out) {
+    if (!val.is_array() || val.empty()) { return false; }
+
+    std::vector<GradientStop> stops;
+    uint8_t rgba[4];
+    for (const auto& entry : val) {
+        if (!entry.is_object() || !entry.contains("pos") || !entry.contains("color")) { return false; }
+        if (!entry["pos"].is_number() || !entry["color"].is_string()) { return false; }
+        if (!decodeRGBA(entry["color"].get<std::string>(), rgba)) { return false; }
+        GradientStop stop;
+        stop.pos = std::clamp(entry["pos"].get<float>(), 0.0f, 1.0f);
+        stop.color = ImVec4(rgba[0] / 255.0f, rgba[1] / 255.0f, rgba[2] / 255.0f, rgba[3] / 255.0f);
+        stops.push_back(stop);
+    }
+
+    out = stops;
+    return true;
+}
+
+bool ThemeManager::setGradient(const json& val) {
+    std::vector<GradientStop> stops;
+    if (!decodeGradient(val, stops)) { return false; }
+    fftGradient = stops;
+    for (auto& stop : fftGradient) { stop.id = nextGradientStopId(); }
+    normalizeGradient();
+    return true;
 }
 
 void ThemeManager::initSettings() {
     choices = {
         { "FFTTraceStyle", "Trace style",
-          { "solid", "gradient" },
-          { "Solid", "Gradient" },
+          { "solid", "reflection", "gradient" },
+          { "Solid", "Reflection", "Gradient" },
           &fftTraceStyle, fftTraceStyle },
         { "FFTFillStyle", "Fill style",
-          { "none", "solid", "gradient" },
-          { "None", "Solid", "Gradient" },
+          { "none", "solid", "reflection", "gradient" },
+          { "None", "Solid", "Reflection", "Gradient" },
           &fftFillStyle, fftFillStyle },
     };
 
@@ -209,6 +301,18 @@ json ThemeManager::sanitizeThemeData(const json& data, const std::string& src) {
             cleaned[param] = val;
             continue;
         }
+        if (param == GRADIENT_KEY) {
+            std::vector<GradientStop> stops;
+            if (!decodeGradient(val, stops)) {
+                flog::warn("Theme {0}: field {1} is not a list of gradient stops, ignoring it", src, param);
+                continue;
+            }
+            // Written back sorted and clamped, so the file matches what it will do.
+            std::stable_sort(stops.begin(), stops.end(),
+                             [](const GradientStop& a, const GradientStop& b) { return a.pos < b.pos; });
+            cleaned[param] = encodeGradient(stops);
+            continue;
+        }
         if (const ThemeSlider* slider = findSlider(param)) {
             if (!val.is_number()) {
                 flog::warn("Theme {0}: field {1} is not a number, ignoring it", src, param);
@@ -251,6 +355,8 @@ json ThemeManager::sanitizeThemeData(const json& data, const std::string& src) {
 
 void ThemeManager::resetToDefaults() {
     colorMap.clear();
+    fftGradient = defaultGradient();
+    for (auto& stop : fftGradient) { stop.id = nextGradientStopId(); }
     for (auto& choice : choices) { *choice.value = choice.def; }
     for (auto& slider : sliders) { *slider.value = slider.def; }
     for (auto& group : customColorGroups) {
@@ -286,6 +392,10 @@ bool ThemeManager::applyThemeData(const json& data) {
 
     for (auto const& [param, val] : data.items()) {
         if (param == "name" || param == "author") { continue; }
+        if (param == GRADIENT_KEY) {
+            setGradient(val);
+            continue;
+        }
         if (ThemeSlider* slider = findSlider(param)) {
             if (val.is_number()) { *slider->value = std::clamp(val.get<float>(), slider->min, slider->max); }
             continue;
@@ -355,6 +465,7 @@ json ThemeManager::dumpLiveTheme(std::string name, std::string author) {
     for (auto const& slider : sliders) {
         data[slider.key] = roundSetting(*slider.value);
     }
+    data[GRADIENT_KEY] = encodeGradient(fftGradient);
     if (!colorMap.empty()) { data[COLOR_MAP_KEY] = colorMap; }
     return data;
 }
