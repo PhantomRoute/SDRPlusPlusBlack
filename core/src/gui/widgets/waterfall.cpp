@@ -193,6 +193,16 @@ namespace ImGui {
         }
     }
 
+    ImU32 WaterFall::palletteColorFor(float level, float alpha) const {
+        float range = fftMax - fftMin;
+        float norm = (range > 0.0f) ? ((level - fftMin) / range) : 0.0f;
+        int id = (int)(std::clamp<float>(norm, 0.0f, 1.0f) * (WATERFALL_RESOLUTION - 1));
+        // The palette is already packed the way ImGui wants it (alpha in the top byte,
+        // then B, G, R), so only the alpha has to be replaced.
+        uint32_t a = (uint32_t)(std::clamp<float>(alpha, 0.0f, 1.0f) * 255.0f + 0.5f);
+        return (waterfallPallet[id] & 0x00FFFFFF) | (a << 24);
+    }
+
     void WaterFall::drawFFT() {
 
         // Calculate scaling factor
@@ -201,9 +211,9 @@ namespace ImGui {
         float scaleFactor = fftHeight / vertRange;
         char buf[100];
 
-        ImU32 trace = ImGui::GetColorU32(ImGuiCol_PlotLines);
+        ImU32 trace = ImGui::GetColorU32(ImGuiCol_PlotLines, gui::themeManager.fftTraceIntensity);
         ImU32 traceHold = ImGui::ColorConvertFloat4ToU32(gui::themeManager.fftHoldColor);
-        ImU32 shadow = ImGui::GetColorU32(ImGuiCol_PlotLines, 0.2);
+        ImU32 fill = ImGui::GetColorU32(ImGuiCol_PlotLines, gui::themeManager.fftFillIntensity);
         ImU32 text = ImGui::GetColorU32(ImGuiCol_Text);
         ImU32 grid = ImGui::ColorConvertFloat4ToU32(gui::themeManager.fftGridColor);
         float textVOffset = 10.0f * style::uiScale;
@@ -241,22 +251,41 @@ namespace ImGui {
         // Data
         if (displaymenu::showFFT) {
             if (latestFFT != NULL && fftLines != 0) {
+                int fillStyle = gui::themeManager.fftFillStyle;
+                float fillIntensity = gui::themeManager.fftFillIntensity;
+                // A gradient fill fades down to the colour the gradient gives the
+                // quietest signal on screen, which is the waterfall's own floor colour.
+                ImU32 fillBottom = palletteColorFor(fftMin, fillIntensity);
+
                 std::vector<ImVec2> traces(dataWidth);
-                //                std::vector<ImVec2> shadows(dataWidth);
                 for (int i = 0; i < dataWidth; i++) {
                     double bPos = fftAreaMax.y - ((latestFFT[i] - fftMin) * scaleFactor);
                     bPos = std::clamp<double>(bPos, fftAreaMin.y + 1, fftAreaMax.y);
                     traces[i] = ImVec2(fftAreaMin.x + i, roundf(bPos));
-                    //                shadows[i] = ImVec2(fftAreaMin.x + i, roundf(bPos));
-                    if (displaymenu::showFFTShadows) {
-                        //                        double aPos = fftAreaMax.y - ((latestFFT[i - 1] - fftMin) * scaleFactor);
-                        //                        window->DrawList->AddLine(ImVec2(fftAreaMin.x + i - 1, roundf(aPos)),
-                        //                                                  ImVec2(fftAreaMin.x + i, roundf(bPos)), trace, 1.0);
-                        window->DrawList->AddLine(ImVec2(fftAreaMin.x + i, roundf(bPos)),
-                                                  ImVec2(fftAreaMin.x + i, fftAreaMax.y), shadow, 1.0);
+
+                    if (fillStyle == FFT_FILL_SOLID) {
+                        window->DrawList->AddLine(traces[i], ImVec2(traces[i].x, fftAreaMax.y), fill, 1.0);
+                    }
+                    else if (fillStyle == FFT_FILL_GRADIENT) {
+                        // One column at a time rather than one shape for the whole
+                        // spectrum: the gradient has to run vertically per column, and
+                        // each column's top is a different height and a different colour.
+                        ImU32 fillTop = palletteColorFor(latestFFT[i], fillIntensity);
+                        window->DrawList->AddRectFilledMultiColor(traces[i], ImVec2(traces[i].x + 1.0f, fftAreaMax.y),
+                                                                  fillTop, fillTop, fillBottom, fillBottom);
                     }
                 }
-                window->DrawList->AddPolyline(traces.data(), traces.size(), trace, 0, 1.0);
+
+                if (gui::themeManager.fftTraceStyle == FFT_TRACE_GRADIENT) {
+                    // Per segment, since a polyline is a single colour.
+                    for (int i = 1; i < dataWidth; i++) {
+                        window->DrawList->AddLine(traces[i - 1], traces[i],
+                                                  palletteColorFor(latestFFT[i], gui::themeManager.fftTraceIntensity), 1.0);
+                    }
+                }
+                else {
+                    window->DrawList->AddPolyline(traces.data(), traces.size(), trace, 0, 1.0);
+                }
             }
 
             // Hold

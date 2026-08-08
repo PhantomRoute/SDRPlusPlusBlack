@@ -14,7 +14,6 @@
 namespace displaymenu {
     bool showWaterfall;
     bool showFFT = true;
-    bool showFFTShadows = true;
     bool showMicHistogram = false;
     bool fullWaterfallUpdate = true;
     bool showBattery = true;
@@ -104,9 +103,6 @@ namespace displaymenu {
     void init() {
         if (core::configManager.conf.contains("showFFT")) {
             showFFT = core::configManager.conf["showFFT"];
-        }
-        if (core::configManager.conf.contains("showFFTShadows")) {
-            showFFTShadows = core::configManager.conf["showFFTShadows"];
         }
         if (core::configManager.conf.contains("showMicHistogram")) {
             showMicHistogram = core::configManager.conf["showMicHistogram"];
@@ -292,12 +288,6 @@ namespace displaymenu {
         if (ImGui::Checkbox("FFT##_sdrpp", &showFFT)) {
             core::configManager.acquire();
             core::configManager.conf["showFFT"] = showFFT;
-            core::configManager.release(true);
-        }
-        ImGui::SameLine();
-        if (ImGui::Checkbox("Shadow##_sdrpp", &showFFTShadows)) {
-            core::configManager.acquire();
-            core::configManager.conf["showFFTShadows"] = showFFTShadows;
             core::configManager.release(true);
         }
 

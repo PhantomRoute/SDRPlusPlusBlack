@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <cstring>
+#include <algorithm>
 #include <imgui.h>
 
 namespace thememenu {
@@ -68,6 +69,49 @@ namespace thememenu {
         }
         ImGui::GetStyle() = style;
         return true;
+    }
+
+    // The spectrum styling is part of the theme, but like the waterfall gradient it is
+    // also a control of its own, so the config remembers the live value under the same
+    // key the theme file uses. Picking a theme overwrites it; changing it by hand
+    // overrides the theme until the next theme change.
+    static void saveSpectrumStyle() {
+        core::configManager.acquire();
+        for (const auto& choice : gui::themeManager.getChoices()) {
+            int id = std::clamp(*choice.value, 0, (int)choice.options.size() - 1);
+            core::configManager.conf[choice.key] = choice.options[id];
+        }
+        for (const auto& slider : gui::themeManager.getSliders()) {
+            core::configManager.conf[slider.key] = ThemeManager::roundSetting(*slider.value);
+        }
+        core::configManager.release(true);
+    }
+
+    static void loadSpectrumStyle() {
+        core::configManager.acquire();
+        auto& conf = core::configManager.conf;
+
+        for (const auto& choice : gui::themeManager.getChoices()) {
+            if (!conf.contains(choice.key) || !conf[choice.key].is_string()) { continue; }
+            int decoded;
+            if (ThemeManager::decodeChoice(choice, conf[choice.key].get<std::string>(), decoded)) {
+                *choice.value = decoded;
+            }
+        }
+        for (const auto& slider : gui::themeManager.getSliders()) {
+            if (!conf.contains(slider.key) || !conf[slider.key].is_number()) { continue; }
+            *slider.value = std::clamp(conf[slider.key].get<float>(), slider.min, slider.max);
+        }
+
+        // The fill used to be the Display menu's "Shadow" checkbox, which is now the
+        // "None" fill style. Carry the old setting over rather than silently turning
+        // the fill back on for anyone who had it off.
+        if (!conf.contains("FFTFillStyle") && conf.contains("showFFTShadows") &&
+            conf["showFFTShadows"].is_boolean() && !conf["showFFTShadows"].get<bool>()) {
+            gui::themeManager.fftFillStyle = FFT_FILL_NONE;
+        }
+
+        core::configManager.release();
     }
 
     void rebuildThemeList() {
@@ -151,7 +195,7 @@ namespace thememenu {
         }
     }
 
-    void applyTheme(bool applyColorMap) {
+    void applyTheme(bool userSelected) {
         std::string name = (themeId >= 0 && themeId < (int)themeNames.size()) ? themeNames[themeId] : "Dark";
 
         if (name == "ImGUI Dark") {
@@ -170,14 +214,23 @@ namespace thememenu {
             gui::themeManager.applyTheme(name);
         }
 
-        // A theme names its waterfall gradient, so picking one switches it and makes
-        // that the live choice the config remembers. Changing the gradient by hand
-        // afterwards overrides it until the next theme change - one setting, one place
-        // it is stored, no argument between the theme file and the config at startup.
-        if (applyColorMap && !gui::themeManager.colorMap.empty()) {
-            if (!displaymenu::setColorMapByName(gui::themeManager.colorMap)) {
+        // A theme names its waterfall gradient and its spectrum styling, so picking one
+        // switches them and makes those the live choices the config remembers. Changing
+        // either by hand afterwards overrides it until the next theme change - one
+        // setting, one place it is stored, no argument between the theme file and the
+        // config at startup.
+        if (userSelected) {
+            if (!gui::themeManager.colorMap.empty() &&
+                !displaymenu::setColorMapByName(gui::themeManager.colorMap)) {
                 flog::warn("Theme '{0}' asks for colormap '{1}', which isn't installed", name, gui::themeManager.colorMap);
             }
+            saveSpectrumStyle();
+        }
+        else {
+            // Only re-applying the theme that is already selected, so what the config
+            // holds wins: at startup it is the user's last choice, and after the editor
+            // closes it is whatever they had before the preview started.
+            loadSpectrumStyle();
         }
 
         core::configManager.acquire();
@@ -251,6 +304,33 @@ namespace thememenu {
         return changed;
     }
 
+    // Combos and sliders for the parts of the theme that aren't colours. Generic, so a
+    // new setting only has to be added to the theme manager's tables to appear here.
+    static void drawSpectrumStyle() {
+        float menuWidth = ImGui::GetContentRegionAvail().x;
+        bool changed = false;
+
+        for (const auto& choice : gui::themeManager.getChoices()) {
+            std::string items;
+            for (const auto& label : choice.labels) {
+                items += label;
+                items += '\0';
+            }
+            ImGui::LeftLabel(choice.name.c_str());
+            ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());
+            changed |= ImGui::Combo(("##theme_choice_" + choice.key).c_str(), choice.value, items.c_str());
+        }
+
+        for (const auto& slider : gui::themeManager.getSliders()) {
+            ImGui::LeftLabel(slider.name.c_str());
+            ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());
+            changed |= ImGui::SliderFloat(("##theme_slider_" + slider.key).c_str(), slider.value,
+                                          slider.min, slider.max, "%.2f");
+        }
+
+        if (changed) { saveSpectrumStyle(); }
+    }
+
     void draw(void* ctx) {
         float menuWidth = ImGui::GetContentRegionAvail().x;
         ImGui::LeftLabel("Theme");
@@ -281,6 +361,11 @@ namespace thememenu {
         // this is where anyone looking for them will look.
         ImGui::Spacing();
         displaymenu::drawColorMapSelector();
+
+        ImGui::Spacing();
+        if (ImGui::CollapsingHeader("Spectrum##theme_spectrum", ImGuiTreeNodeFlags_DefaultOpen)) {
+            drawSpectrumStyle();
+        }
 
         ImGui::Spacing();
         if (ImGui::CollapsingHeader("VFO colors##theme_vfo_colors", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -384,10 +469,17 @@ namespace thememenu {
         std::string name = editName;
         editData["name"] = name;
         editData["author"] = std::string(editAuthor);
-        // Re-read every frame so changing the gradient in the menu while the editor is
-        // open is picked up by Save and Export.
+        // Re-read every frame so changing the gradient or the spectrum styling in the
+        // menu while the editor is open is picked up by Save and Export.
         std::string liveColorMap = displaymenu::getColorMapName();
         if (!liveColorMap.empty()) { editData[ThemeManager::COLOR_MAP_KEY] = liveColorMap; }
+        for (const auto& choice : gui::themeManager.getChoices()) {
+            int id = std::clamp(*choice.value, 0, (int)choice.options.size() - 1);
+            editData[choice.key] = choice.options[id];
+        }
+        for (const auto& slider : gui::themeManager.getSliders()) {
+            editData[slider.key] = ThemeManager::roundSetting(*slider.value);
+        }
 
         const Theme* existing = gui::themeManager.getTheme(name);
         bool canSave = !name.empty() && (existing == NULL || !existing->readOnly);

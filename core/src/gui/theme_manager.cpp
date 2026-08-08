@@ -10,6 +10,59 @@
 
 ThemeManager::ThemeManager() {
     initCustomColors();
+    initSettings();
+}
+
+void ThemeManager::initSettings() {
+    choices = {
+        { "FFTTraceStyle", "Trace style",
+          { "solid", "gradient" },
+          { "Solid", "Gradient" },
+          &fftTraceStyle, fftTraceStyle },
+        { "FFTFillStyle", "Fill style",
+          { "none", "solid", "gradient" },
+          { "None", "Solid", "Gradient" },
+          &fftFillStyle, fftFillStyle },
+    };
+
+    sliders = {
+        // Not down to zero: a trace nobody can see looks like the spectrum is broken.
+        { "FFTTraceIntensity", "Trace intensity", &fftTraceIntensity, 0.05f, 1.0f, fftTraceIntensity },
+        { "FFTFillIntensity", "Fill intensity", &fftFillIntensity, 0.0f, 1.0f, fftFillIntensity },
+    };
+}
+
+// A float written straight to JSON comes out as 0.20000000298023224, which makes a
+// hand edited theme file unpleasant to read for no gain: the sliders are worth three
+// decimals at most.
+double ThemeManager::roundSetting(float value) {
+    return (double)(long long)((value * 1000.0f) + 0.5f) / 1000.0;
+}
+
+ThemeChoice* ThemeManager::findChoice(const std::string& key) {
+    for (auto& choice : choices) {
+        if (choice.key == key) { return &choice; }
+    }
+    return NULL;
+}
+
+ThemeSlider* ThemeManager::findSlider(const std::string& key) {
+    for (auto& slider : sliders) {
+        if (slider.key == key) { return &slider; }
+    }
+    return NULL;
+}
+
+bool ThemeManager::decodeChoice(const ThemeChoice& choice, const std::string& val, int& out) {
+    std::string lower;
+    for (char c : val) { lower += (char)std::tolower((unsigned char)c); }
+    for (int i = 0; i < (int)choice.options.size(); i++) {
+        if (choice.options[i] == lower) {
+            out = i;
+            return true;
+        }
+    }
+    return false;
 }
 
 void ThemeManager::initCustomColors() {
@@ -156,6 +209,23 @@ json ThemeManager::sanitizeThemeData(const json& data, const std::string& src) {
             cleaned[param] = val;
             continue;
         }
+        if (const ThemeSlider* slider = findSlider(param)) {
+            if (!val.is_number()) {
+                flog::warn("Theme {0}: field {1} is not a number, ignoring it", src, param);
+                continue;
+            }
+            cleaned[param] = roundSetting(std::clamp(val.get<float>(), slider->min, slider->max));
+            continue;
+        }
+        if (const ThemeChoice* choice = findChoice(param)) {
+            int dummy;
+            if (!val.is_string() || !decodeChoice(*choice, val.get<std::string>(), dummy)) {
+                flog::warn("Theme {0} contains invalid {1} field, ignoring it", src, param);
+                continue;
+            }
+            cleaned[param] = val;
+            continue;
+        }
         if (!val.is_string()) {
             flog::warn("Theme {0}: field {1} is not a string, ignoring it", src, param);
             continue;
@@ -181,6 +251,8 @@ json ThemeManager::sanitizeThemeData(const json& data, const std::string& src) {
 
 void ThemeManager::resetToDefaults() {
     colorMap.clear();
+    for (auto& choice : choices) { *choice.value = choice.def; }
+    for (auto& slider : sliders) { *slider.value = slider.def; }
     for (auto& group : customColorGroups) {
         for (auto& col : group.colors) {
             *col.value = col.def;
@@ -214,6 +286,17 @@ bool ThemeManager::applyThemeData(const json& data) {
 
     for (auto const& [param, val] : data.items()) {
         if (param == "name" || param == "author") { continue; }
+        if (ThemeSlider* slider = findSlider(param)) {
+            if (val.is_number()) { *slider->value = std::clamp(val.get<float>(), slider->min, slider->max); }
+            continue;
+        }
+        if (ThemeChoice* choice = findChoice(param)) {
+            int decoded;
+            if (val.is_string() && decodeChoice(*choice, val.get<std::string>(), decoded)) {
+                *choice->value = decoded;
+            }
+            continue;
+        }
         if (!val.is_string()) { continue; }
         if (param == COLOR_MAP_KEY) {
             colorMap = val.get<std::string>();
@@ -264,6 +347,13 @@ json ThemeManager::dumpLiveTheme(std::string name, std::string author) {
         for (auto const& col : group.colors) {
             data[col.key] = encodeRGBA(*col.value);
         }
+    }
+    for (auto const& choice : choices) {
+        int id = std::clamp(*choice.value, 0, (int)choice.options.size() - 1);
+        data[choice.key] = choice.options[id];
+    }
+    for (auto const& slider : sliders) {
+        data[slider.key] = roundSetting(*slider.value);
     }
     if (!colorMap.empty()) { data[COLOR_MAP_KEY] = colorMap; }
     return data;

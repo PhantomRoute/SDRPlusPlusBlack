@@ -27,7 +27,8 @@ namespace displaymenu {
     extern bool showBattery;
     extern bool detectSignals;
     extern bool showFFT;
-    extern bool showFFTShadows;
+    // The FFT shadow became the Theme menu's "Fill style", which does the same thing
+    // with a choice of solid or gradient and an adjustable strength.
     extern bool showMicHistogram;
 
     // Handler for center frequency changes

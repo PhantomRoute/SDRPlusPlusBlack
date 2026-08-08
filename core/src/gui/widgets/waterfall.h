@@ -262,6 +262,10 @@ namespace ImGui {
     private:
         void drawWaterfall();
         void drawFFT();
+        // The waterfall gradient's colour for a power level, so the spectrum can be
+        // drawn in the same colours as the waterfall under it. level is in dB and is
+        // mapped over the FFT's own vertical range, not the waterfall's.
+        ImU32 palletteColorFor(float level, float alpha) const;
         void drawVFOs();
         void drawBandPlan();
         void processInputs();

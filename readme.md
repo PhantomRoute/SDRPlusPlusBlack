@@ -40,6 +40,23 @@ you send someone arrives looking the way you built it. Changing the colour map b
 overrides it and sticks - including across restarts - until you pick a different theme. The theme
 file is where a gradient choice comes *from*; your config is what remembers the one you're on.
 
+### Spectrum style
+
+The **Spectrum** section of the Theme menu controls how the live FFT trace is drawn, the way
+SDRangel does it:
+
+* **Trace style** - *Solid* draws it in the theme's FFT trace colour. *Gradient* colours it by the
+  waterfall colour map, so a peak takes the colour it would have in the waterfall below it.
+* **Fill style** - what goes under the trace. *None*, *Solid* in the trace colour, or *Gradient*,
+  which fades from the colour map's value at the signal's level down to its value at the bottom of
+  the spectrum.
+* **Trace intensity** / **Fill intensity** - how strongly each is drawn.
+
+These are part of the theme like the colours are, so they save, export and import with it, and they
+behave like the gradient does: picking a theme takes its styling, changing one by hand afterwards
+overrides it until the next theme change. Fill style replaces the Display menu's old **Shadow**
+checkbox, which is now *Fill style: None* - if you had it off, it stays off.
+
 **Export** writes the theme out as a self-contained `.json` with every colour spelled out, so
 sending someone a theme is sending them one file. **Import** on the Theme menu reads one back; if
 you already have a theme by that name, the imported one is renamed rather than replacing yours. A

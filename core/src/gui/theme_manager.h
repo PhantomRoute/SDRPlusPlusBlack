@@ -33,6 +33,43 @@ struct ThemeColorGroup {
     std::vector<ThemeColor> colors;
 };
 
+// How the live spectrum trace is drawn.
+enum FFTTraceStyle {
+    FFT_TRACE_SOLID = 0,
+    // Coloured by the waterfall gradient, so a peak takes the colour it would have in
+    // the waterfall below it.
+    FFT_TRACE_GRADIENT = 1,
+};
+
+// How the area under the live spectrum trace is filled.
+enum FFTFillStyle {
+    FFT_FILL_NONE = 0,
+    FFT_FILL_SOLID = 1,
+    FFT_FILL_GRADIENT = 2,
+};
+
+// A theme value that isn't a colour but a choice between named options. Written to the
+// theme file by option name rather than by index, so a file stays readable and doesn't
+// break if options are ever added in the middle of the list.
+struct ThemeChoice {
+    std::string key;                   // key used in the theme JSON
+    std::string name;                  // label shown in the menu
+    std::vector<std::string> options;  // stored lowercase, matched case insensitively
+    std::vector<std::string> labels;   // what the combo shows, one per option
+    int* value;                        // live value the drawing code reads
+    int def;
+};
+
+// A theme value that is a plain number, drawn as a slider.
+struct ThemeSlider {
+    std::string key;
+    std::string name;
+    float* value;
+    float min;
+    float max;
+    float def;
+};
+
 class ThemeManager {
 public:
     ThemeManager();
@@ -71,6 +108,19 @@ public:
 
     static const std::vector<ThemeColorGroup>& getImGuiColorGroups();
     const std::vector<ThemeColorGroup>& getCustomColorGroups() { return customColorGroups; }
+
+    // The non-colour theme values, for the menu that draws them. Everything needed to
+    // draw, store and load one is in the entry, so adding a setting is a single edit.
+    const std::vector<ThemeChoice>& getChoices() { return choices; }
+    const std::vector<ThemeSlider>& getSliders() { return sliders; }
+
+    // Case insensitive lookup of an option name. Returns false for a name this build
+    // doesn't have, which is what a theme written by a newer version would contain.
+    static bool decodeChoice(const ThemeChoice& choice, const std::string& val, int& out);
+
+    // Slider values are only worth a few decimals, and rounding keeps the theme and
+    // config files readable instead of full of float noise.
+    static double roundSetting(float value);
 
     static bool decodeRGBA(std::string str, uint8_t out[4]);
     static std::string encodeRGBA(const ImVec4& col);
@@ -112,13 +162,28 @@ public:
     static constexpr const char* COLOR_MAP_KEY = "ColorMap";
     std::string colorMap;
 
+    // Spectrum trace and fill styling. Part of the theme like the colours are, but not
+    // colours, so they live in the choice/slider tables below rather than in a group.
+    int fftTraceStyle = FFT_TRACE_SOLID;
+    int fftFillStyle = FFT_FILL_SOLID;
+    float fftTraceIntensity = 1.0f;
+    // 0.2 is what the old hardcoded FFT shadow used, so the default look is unchanged.
+    float fftFillIntensity = 0.2f;
+
 private:
     // Drops keys this build doesn't know about, isn't a colour, or isn't valid hex
     // RGBA, keeping everything else. src names the file for the log message.
     json sanitizeThemeData(const json& data, const std::string& src);
     void initCustomColors();
+    void initSettings();
     static void maybeInitThemeManager();
     static const std::map<std::string, int>& getImGuiColIds();
+
+    ThemeChoice* findChoice(const std::string& key);
+    ThemeSlider* findSlider(const std::string& key);
+
+    std::vector<ThemeChoice> choices;
+    std::vector<ThemeSlider> sliders;
 
     std::vector<ThemeColorGroup> customColorGroups;
     // Flattened index into customColorGroups so applying a theme is a lookup per key
