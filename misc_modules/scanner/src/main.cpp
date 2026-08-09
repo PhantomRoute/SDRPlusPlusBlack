@@ -59,7 +59,10 @@ private:
         ImGui::LeftLabel("Interval");
         ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());
         if (ImGui::InputDouble("##interval_scanner", &_this->interval, 100.0, 100000.0, "%0.0f")) {
-            _this->interval = round(_this->interval);
+            // A zero or negative interval never advances findSignal's loop
+            // variable, so the worker spins forever holding scanMtx and the whole
+            // UI freezes the moment anything else takes that lock.
+            _this->interval = std::max<double>(round(_this->interval), 1.0);
         }
         ImGui::LeftLabel("Passband Ratio (%)");
         ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());
@@ -131,6 +134,12 @@ private:
             workerThread.join();
         }
         current = startFreq;
+        // receiving starts out true and was never reset, so a fresh scan began in
+        // the receiving state against a lastSignalTime from the epoch.
+        receiving = false;
+        tuning = false;
+        reverseLock = false;
+        interval = std::max<double>(interval, 1.0);
         running = true;
         workerThread = std::thread(&ScannerModule::worker, this);
     }
@@ -194,6 +203,10 @@ private:
                     
                     // Search for a signal in scan direction
                     if (findSignal(scanUp, bottomLimit, topLimit, wfStart, wfEnd, wfWidth, vfoWidth, data, dataWidth)) {
+                        // Without this the linger countdown starts from whenever
+                        // the last signal was seen, which is usually long enough
+                        // ago that the first quiet tick abandons the new one.
+                        lastSignalTime = now;
                         gui::waterfall.releaseLatestFFT();
                         continue;
                     }
@@ -201,6 +214,7 @@ private:
                     // Search for signal in the inverse scan direction if direction isn't enforced
                     if (!reverseLock) {
                         if (findSignal(!scanUp, bottomLimit, topLimit, wfStart, wfEnd, wfWidth, vfoWidth, data, dataWidth)) {
+                            lastSignalTime = now;
                             gui::waterfall.releaseLatestFFT();
                             continue;
                         }

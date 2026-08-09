@@ -88,6 +88,15 @@ public:
     // from there and leave only the drawing to the menu.
     static void scannerTick(ImGuiContext* ctx, void* c) {
         FrequencyManagerModule* _this = (FrequencyManagerModule*)c;
+        // Handing the list over from the menu handler meant the scanner had no
+        // channels at all until the Frequency Manager section had been expanded
+        // once, and never saw an edit made while it was collapsed.
+        std::vector<std::string> bookmarkNames;
+        bookmarkNames.reserve(_this->bookmarks.size());
+        for (auto& [name, bm] : _this->bookmarks) {
+            bookmarkNames.push_back(name);
+        }
+        _this->scanner.setBookmarks(bookmarkNames, _this->bookmarks);
         _this->scanner.update(ImGui::GetIO().DeltaTime);
     }
 
@@ -257,13 +266,18 @@ public:
             return json{{"status", "ok"}, {"applied", args}, {"frequency", bm.frequency}, {"bandwidth", bm.bandwidth}, {"vfo", targetVfo.empty() ? "center" : targetVfo}}.dump();
         }
         if (cmd == "get_scanner_status") {
-            return json{{"scanning", scanner.isScanning()}, {"current_station", scanner.getCurrentStation()}, {"bookmark_count", (int)bookmarks.size()}}.dump();
+            return json{{"scanning", scanner.isScanning()}, {"state", Scanner::stateName(scanner.getState())}, {"current_station", scanner.getCurrentStation()}, {"bookmark_count", (int)bookmarks.size()}}.dump();
         }
         if (cmd == "start_scanner") {
             if (bookmarks.empty()) {
                 return json{{"error", "no bookmarks to scan"}}.dump();
             }
             scanner.startScanner();
+            // The scan can refuse to start - no radio loaded, every channel
+            // skipped - so report what actually happened rather than "ok".
+            if (!scanner.isScanning()) {
+                return json{{"error", scanner.getStatusMessage()}, {"scanning", false}}.dump();
+            }
             return json{{"status", "ok"}, {"scanning", true}}.dump();
         }
         if (cmd == "stop_scanner") {
@@ -754,15 +768,8 @@ private:
         }
         if (_this->selectedListName == "") { style::endDisabled(); }
 
-        // Update scanner with current bookmarks
-        std::vector<std::string> bookmarkNames;
-        for (auto& [name, bm] : _this->bookmarks) {
-            bookmarkNames.push_back(name);
-        }
-        _this->scanner.setBookmarks(bookmarkNames, _this->bookmarks);
-        
-        // Render only - the scanner is ticked from scannerTick, so that collapsing
-        // this menu does not stop it.
+        // Render only - the scanner is fed its channels and ticked from
+        // scannerTick, so that collapsing this menu does not stop it.
         _this->scanner.render();
 
         // List delete confirmation
@@ -871,6 +878,13 @@ private:
             for (auto& [name, bm] : _this->bookmarks) {
                 bool vfoMissing = !bm.vfoName.empty() && !sigpath::vfoManager.vfoExists(bm.vfoName);
                 ImGui::TableNextRow();
+                // Mark the channel the scanner is on, so the list says where the
+                // scan is instead of leaving it to be read off the frequency.
+                if (_this->scanner.isScanning() && name == _this->scanner.getCurrentStation()) {
+                    bool listening = (_this->scanner.getState() == Scanner::SCAN_LISTENING);
+                    ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1,
+                                           ImGui::ColorConvertFloat4ToU32(listening ? ImVec4(0.15f, 0.45f, 0.2f, 1.0f) : ImVec4(0.4f, 0.33f, 0.1f, 1.0f)));
+                }
                 ImGui::TableSetColumnIndex(0);
                 ImVec2 min = ImGui::GetCursorPos();
 
@@ -1009,12 +1023,12 @@ private:
         FrequencyManagerModule* _this = (FrequencyManagerModule*)ctx;
 
         _this->rects.clear();
-        if (_this->scanner.isScanning() && _this->scanner.isSquelchEnabled()) {
-            double scanBPos = args.max.y - ((_this->scanner.getNoiseFloor() + _this->scanner.getSignalMarginDb() - gui::waterfall.getFFTMin()) * (args.max.y - args.min.y) / (gui::waterfall.getFFTMax() - gui::waterfall.getFFTMin()));
-            if (scanBPos >= args.min.y && scanBPos <= args.max.y) {
-                args.window->DrawList->AddLine(ImVec2(args.min.x, roundf(scanBPos)), ImVec2(args.max.x, roundf(scanBPos)), ImGui::ColorConvertFloat4ToU32(gui::themeManager.scannerSquelchColor), 1.0);
-            }
-        }
+
+        // Which channel the scan is on, where it goes next, and the level it is
+        // comparing against. The line used to be plotted at the trigger level as if
+        // it were an absolute dBFS value, when it is dB over the local noise, so it
+        // sat far off the top of the chart and was never visible.
+        _this->scanner.drawWaterfallOverlay(args);
 
 
         if (_this->bookmarkDisplayMode == BOOKMARK_DISP_MODE_OFF) { return; }
@@ -1273,7 +1287,14 @@ void applyBookmark(FrequencyBookmark bm, std::string vfoName) {
         if (radio && x.first == targetVfo) {
             int mode = radio->getDemodByIndex(bm.modeIndex);
             float bandwidth = bm.bandwidth;
-            core::modComManager.callInterface(targetVfo, RADIO_IFACE_CMD_SET_MODE, &mode, NULL);
+            // Setting the mode tears the demodulator down and builds a new one even
+            // when it is the mode already selected, which the scanner would do on
+            // every hop between two bookmarks that share a mode. Ask first.
+            int currentMode = -1;
+            core::modComManager.callInterface(targetVfo, RADIO_IFACE_CMD_GET_MODE, NULL, &currentMode);
+            if (currentMode != mode) {
+                core::modComManager.callInterface(targetVfo, RADIO_IFACE_CMD_SET_MODE, &mode, NULL);
+            }
             core::modComManager.callInterface(targetVfo, RADIO_IFACE_CMD_SET_BANDWIDTH, &bandwidth, NULL);
             // After the mode, since the radio ignores tone settings unless the
             // demodulator it just switched to is one that carries them. Skipped
@@ -1299,15 +1320,17 @@ MOD_EXPORT void _INIT_() {
     
     // Scanner defaults
     def["scanner"] = json::object();
-    def["scanner"]["scanIntervalMs"] = 100.0f;
+    def["scanner"]["scanIntervalMs"] = 250.0f;
+    def["scanner"]["settleMs"] = 120.0f;
     def["scanner"]["listenTimeSec"] = 10.0f;
-    // These are on the SNR meter's scale, the same one Scanner::render clamps to
-    // 0..40, not absolute dBFS. -120 used to live here, which made every station
-    // clear the detection threshold instantly.
+    // These are in dB over the local noise, the same scale as the SNR meter and
+    // the one the scanner clamps to 0..40, not absolute dBFS. -120 used to live
+    // here, which made every station clear the detection threshold instantly.
     def["scanner"]["noiseFloor"] = 3.0f;
     def["scanner"]["signalMarginDb"] = 4.0f;
     def["scanner"]["squelchEnabled"] = false;
     def["scanner"]["carrierHoldMode"] = false;
+    def["scanner"]["skipped"] = json::array();
 
     config.setPath(std::string(core::getRoot()) + "/frequency_manager_config.json");
     config.load(def);
