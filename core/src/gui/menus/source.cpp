@@ -364,6 +364,14 @@ namespace sourcemenu {
             ImGui::SetTooltip("Stop the radio to change the source");
         }
 
+        // An empty combo with nothing said about it is the first thing a new
+        // install shows if no source module got loaded.
+        if (sources.empty()) {
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.3f, 1.0f), "No sources are loaded. Add one under Module Manager, then restart.");
+            ImGui::PopTextWrapPos();
+        }
+
         // Rescan for devices while the menu is on screen and the radio is stopped,
         // so plugging an SDR in with the application already open is enough for it
         // to show up. The rate limiting and the enumeration itself live in the

@@ -466,6 +466,35 @@ namespace displaymenu {
         }
         helpMarker("Shapes each block before the FFT. Blackman and Nuttall stop a strong\nsignal smearing across its neighbours; Rectangular is sharpest but leaks.");
 
+        sectionHeader("KEYBOARD AND MOUSE");
+
+        // All of this already worked and none of it was written down anywhere, so
+        // the only way to find out about it was to read the source.
+        if (ImGui::TreeNode("Shortcuts##_sdrpp_shortcuts")) {
+            if (ImGui::BeginTable("##_sdrpp_shortcut_table", 2, ImGuiTableFlags_SizingStretchProp)) {
+                auto row = [](const char* keys, const char* what) {
+                    ImGui::TableNextRow();
+                    ImGui::TableSetColumnIndex(0);
+                    ImGui::TextUnformatted(keys);
+                    ImGui::TableSetColumnIndex(1);
+                    ImGui::TextWrapped("%s", what);
+                };
+                row("End", "Start and stop the radio");
+                row("Home", "Show and hide the waterfall");
+                row("Page Up / Down", "Select the next or previous VFO");
+                row("< >", "Over the spectrum: tune one snap step");
+                row("Wheel", "Over the spectrum: tune. Shift for ten steps, Alt for a tenth");
+                row("Wheel", "Over the frequency scale: pan the view");
+                row("Ctrl", "Held over the spectrum: read the frequency under the pointer");
+                row("Wheel", "Over a digit of the readout: change that digit");
+                row("0-9", "Typed over a digit: enter a frequency from there on");
+                row("Right click", "Over a digit: zero it and everything after it");
+                row("Ctrl+C / Ctrl+V", "Over the readout: copy and paste the frequency");
+                ImGui::EndTable();
+            }
+            ImGui::TreePop();
+        }
+
         onDisplayDraw.emit(GImGui);
 
         if (restartRequired) {

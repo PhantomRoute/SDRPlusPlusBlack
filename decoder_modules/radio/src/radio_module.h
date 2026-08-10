@@ -554,6 +554,9 @@ private:
                 _this->bandwidth = std::clamp<float>(_this->bandwidth, _this->minBandwidth, _this->maxBandwidth);
                 _this->setBandwidth(_this->bandwidth);
             }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Width of the channel, in Hz. The slider stops at what is sensible for\nthis mode; the box on the left takes anything up to %.0f Hz.", _this->maxBandwidth);
+            }
         }
 
         // VFO snap interval
@@ -567,6 +570,9 @@ private:
                 config.conf[_this->name][_this->selectedDemod->getName()]["snapInterval"] = _this->snapInterval;
                 config.release(true);
             }
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Tuning snaps to a multiple of this many Hz, so the VFO lands on channel\nspacing rather than between channels. It is also the step the arrow keys\nand the mouse wheel tune by.");
         }
 
         // Deemphasis mode
@@ -586,10 +592,16 @@ private:
             if (!_this->nbEnabled && _this->enabled) { style::beginDisabled(); }
             ImGui::SameLine();
             ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());
-            if (ImGui::SliderFloat(("##_radio_nb_lvl_" + _this->name).c_str(), &_this->nbLevel, _this->MIN_NB, _this->MAX_NB, "%.3fdB")) {
+            // Not a dB value: the blanker squashes any sample whose amplitude is
+            // more than this many times the running average. It was labelled
+            // "%.3fdB", which is the wrong unit to three decimal places.
+            if (ImGui::SliderFloat(("##_radio_nb_lvl_" + _this->name).c_str(), &_this->nbLevel, _this->MIN_NB, _this->MAX_NB, "%.1fx")) {
                 _this->setNBLevel(_this->nbLevel);
             }
             if (!_this->nbEnabled && _this->enabled) { style::endDisabled(); }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                ImGui::SetTooltip("Squashes samples louder than this many times the running average, which\nflattens ignition and power line clicks. Lower catches more, and starts\neating the signal too.");
+            }
         }
         
 
@@ -600,10 +612,13 @@ private:
         if (!_this->squelchEnabled && _this->enabled) { style::beginDisabled(); }
         ImGui::SameLine();
         ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());
-        if (ImGui::SliderFloat(("##_radio_sqelch_lvl_" + _this->name).c_str(), &_this->squelchLevel, _this->MIN_SQUELCH, _this->MAX_SQUELCH, "%.3fdB")) {
+        if (ImGui::SliderFloat(("##_radio_sqelch_lvl_" + _this->name).c_str(), &_this->squelchLevel, _this->MIN_SQUELCH, _this->MAX_SQUELCH, "%.1f dB")) {
             _this->setSquelchLevel(_this->squelchLevel);
         }
         if (!_this->squelchEnabled && _this->enabled) { style::endDisabled(); }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            ImGui::SetTooltip("Mutes the audio until the channel is louder than this. While it is on, the\nlevel is drawn as a line across the spectrum, so set it just above where\nthe noise sits.");
+        }
 
         // CTCSS / DCS identification and tone squelch
         if (_this->toneIdAllowed) {

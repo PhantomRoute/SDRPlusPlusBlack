@@ -362,6 +362,7 @@ void MainWindow::drawUpperLine(ImGui::WaterfallVFO* vfo) {
             setPlayState(false);
         }
         ImGui::PopID();
+        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Stop the radio  (End)"); }
     }
     else { // TODO: Might need to check if there even is a device
         ImGui::PushID(ImGui::GetID("sdrpp_play_btn"));
@@ -371,6 +372,11 @@ void MainWindow::drawUpperLine(ImGui::WaterfallVFO* vfo) {
             }
         }
         ImGui::PopID();
+        // The keyboard shortcuts are the only way to find out about these, and
+        // nothing anywhere says they exist.
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            ImGui::SetTooltip("%s", playButtonLocked ? "Waiting for the source to be ready" : "Start the radio  (End)");
+        }
     }
     if (playButtonLocked && !tmpPlaySate) { style::endDisabled(); }
 
@@ -403,6 +409,11 @@ void MainWindow::drawUpperLine(ImGui::WaterfallVFO* vfo) {
             core::configManager.release(true);
         }
         ImGui::PopID();
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Centre tuning: the receiver retunes so the signal stays in the middle,\n"
+                              "and one click on the waterfall tunes there.\n"
+                              "Click this button for VFO tuning instead.");
+        }
     }
     else { // TODO: Might need to check if there even is a device
         ImGui::PushID(ImGui::GetID("sdrpp_dis_st_btn"));
@@ -415,6 +426,11 @@ void MainWindow::drawUpperLine(ImGui::WaterfallVFO* vfo) {
             core::configManager.release(true);
         }
         ImGui::PopID();
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("VFO tuning: the receiver stays put and the VFO moves inside the\n"
+                              "spectrum already on screen, so nothing has to be retuned.\n"
+                              "Click this button for centre tuning instead.");
+        }
     }
 
     ImGui::SameLine();
@@ -804,6 +820,50 @@ void MainWindow::draw() {
     if (wfSliderSize.y < MIN_SLIDER_HEIGHT) {
         wfSliderSize.y = MIN_SLIDER_HEIGHT; // Prevents dynamic adjustment too large;
     }
+
+    // These three sliders carry no value and no unit, which leaves the only way of
+    // knowing where they are set to be the position of the handle. Centred under
+    // each one, in the small font so it costs a line rather than a slider.
+    auto centeredCaption = [&](const std::string& text) {
+        ImGui::PushFont(style::tinyFont);
+        ImGui::SetCursorPosX((ImGui::GetWindowSize().x / 2.0) - (ImGui::CalcTextSize(text.c_str()).x / 2.0));
+        ImGui::TextUnformatted(text.c_str());
+        ImGui::PopFont();
+    };
+    auto shortFreq = [](double hz) {
+        char buf[32];
+        if (hz >= 1000000.0) { snprintf(buf, sizeof buf, "%.3gM", hz / 1000000.0); }
+        else if (hz >= 1000.0) { snprintf(buf, sizeof buf, "%.3gk", hz / 1000.0); }
+        else { snprintf(buf, sizeof buf, "%.0f", hz); }
+        return std::string(buf);
+    };
+
+    // Fitting the range to what is on the air is the first thing anyone wants when
+    // the waterfall comes up black or washed out. It was already here, as an
+    // invisible button laid over the word "Max", where nothing suggested it existed.
+    auto fitRange = [&]() {
+        const std::pair<int, int>& range = gui::waterfall.autoRange();
+        if (range.first == 0 && range.second == 0) { return; }
+        fftMin = range.first;
+        fftMax = range.second;
+        fftMax = std::max<float>(fftMax, fftMin + 10);
+        core::configManager.acquire();
+        core::configManager.conf["min"] = fftMin;
+        core::configManager.conf["max"] = fftMax;
+        core::configManager.release(true);
+        gui::waterfall.setFFTMin(fftMin);
+        gui::waterfall.setWaterfallMin(fftMin);
+        gui::waterfall.setFFTMax(fftMax);
+        gui::waterfall.setWaterfallMax(fftMax);
+    };
+
+    if (ImGui::Button("Auto##_wf_auto_range", ImVec2(ImGui::GetContentRegionAvail().x, 0))) {
+        fitRange();
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Set the Min and Max below from the signal on screen right now");
+    }
+
     ImGui::SetCursorPosX((ImGui::GetWindowSize().x / 2.0) - (ImGui::CalcTextSize("Zoom").x / 2.0));
     ImGui::TextUnformatted("Zoom");
     ImGui::SetCursorPosX((ImGui::GetWindowSize().x / 2.0) - wfSliderSize.x / 2);
@@ -814,25 +874,15 @@ void MainWindow::draw() {
         core::configManager.release(true);
         updateWaterfallZoomBandwidth(bw);
     }
-
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("How much spectrum is on screen: %sHz of %sHz.\nThe mouse wheel over the frequency scale pans it.",
+                          shortFreq(gui::waterfall.getViewBandwidth()).c_str(), shortFreq(gui::waterfall.getBandwidth()).c_str());
+    }
+    centeredCaption(shortFreq(gui::waterfall.getViewBandwidth()));
 
     auto addMaxSlider = [&]() {
-        ImGui::NewLine();
         ImGui::SetCursorPosX((ImGui::GetWindowSize().x / 2.0) - (ImGui::CalcTextSize("Max").x / 2.0));
         ImGui::TextUnformatted("Max");
-        ImGui::SameLine();
-        ImVec2 textSize = ImGui::CalcTextSize("Max");
-        ImGui::SetCursorPosX((ImGui::GetWindowSize().x / 2.0) - (ImGui::CalcTextSize("Max").x / 2.0));
-        if (ImGui::InvisibleButton("##max_button_auto", textSize)) {
-            const std::pair<int, int>& range = gui::waterfall.autoRange();
-            if (range.first == 0 && range.second == 0) {
-                // bad case
-            }
-            else {
-                fftMin = range.first;
-                fftMax = range.second;
-            }
-        }
         ImGui::SetCursorPosX((ImGui::GetWindowSize().x / 2.0) - wfSliderSize.x / 2);
         if (ImGui::VSliderFloat("##_8_", wfSliderSize, &fftMax, 0.0, -180.0f, "")) {
             fftMax = std::max<float>(fftMax, fftMin + 10);
@@ -842,10 +892,13 @@ void MainWindow::draw() {
             gui::waterfall.setFFTMax(fftMax);
             gui::waterfall.setWaterfallMax(fftMax);
         }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Top of the scale, %.0f dBFS. Anything at or above this is drawn\nin the brightest colour. Lower it to bring weak signals up.", fftMax);
+        }
+        centeredCaption(std::to_string((int)roundf(fftMax)));
     };
 
     auto addMinSlider = [&]() {
-        ImGui::NewLine();
         ImGui::SetCursorPosX((ImGui::GetWindowSize().x / 2.0) - (ImGui::CalcTextSize("Min").x / 2.0));
         ImGui::TextUnformatted("Min");
         ImGui::SetCursorPosX((ImGui::GetWindowSize().x / 2.0) - wfSliderSize.x / 2);
@@ -858,6 +911,10 @@ void MainWindow::draw() {
             gui::waterfall.setFFTMin(fftMin);
             gui::waterfall.setWaterfallMin(fftMin);
         }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Bottom of the scale, %.0f dBFS. Raise it until the noise goes dark;\ndrop it too far and the whole waterfall lights up.", fftMin);
+        }
+        centeredCaption(std::to_string((int)roundf(fftMin)));
     };
 
     if (displaymenu::phoneLayout) {
