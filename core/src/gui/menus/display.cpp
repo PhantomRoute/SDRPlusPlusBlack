@@ -260,14 +260,46 @@ namespace displaymenu {
         ImGui::Text("Color map Author: %s", colorMapAuthor.c_str());
     }
 
+    // A (?) that explains a control without spending a line on it.
+    void helpMarker(const char* text) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("(?)");
+        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("%s", text); }
+    }
+
+    // This menu is one long list of switches with nothing to say which of them
+    // belong together. These break it into the three things it actually covers:
+    // the window layout, what the spectrum looks like, and what it costs to run.
+    void sectionHeader(const char* title) {
+        ImGui::Spacing();
+        ImGui::TextDisabled("%s", title);
+        ImGui::Separator();
+    }
+
     void draw(void* ctx) {
-        float menuWidth = ImGui::GetContentRegionAvail().x;
-        if (ImGui::Checkbox("Small screen / thick fingers##_sdrpp", &phoneLayout)) {
+        sectionHeader("LAYOUT");
+
+        if (ImGui::Checkbox("Waterfall##_sdrpp", &showWaterfall)) {
+            setWaterfallShown(showWaterfall);
+        }
+        helpMarker("Show the scrolling history under the spectrum. The Home key toggles this too.");
+        ImGui::SameLine();
+        if (ImGui::Checkbox("FFT##_sdrpp", &showFFT)) {
+            core::configManager.acquire();
+            core::configManager.conf["showFFT"] = showFFT;
+            core::configManager.release(true);
+        }
+        helpMarker("Show the live spectrum trace above the waterfall.");
+
+        if (ImGui::Checkbox("Big controls (small screen, thick fingers)##_sdrpp", &phoneLayout)) {
             core::configManager.acquire();
             core::configManager.conf["smallScreen"] = phoneLayout;
             core::configManager.release(true);
         }
-        if (ImGui::RadioButton("Layout: default ##_sdrpp", transcieverLayout == TRAL_NONE)) {
+        helpMarker("Taller menu rows, fatter scrollbars and a shorter frequency readout,\nfor touch screens and small displays.");
+
+        ImGui::LeftLabel("Layout");
+        if (ImGui::RadioButton("Default ##_sdrpp", transcieverLayout == TRAL_NONE)) {
             core::configManager.acquire();
             transcieverLayout = TRAL_NONE;
             core::configManager.conf["transcieverLayout"] = transcieverLayout;
@@ -280,25 +312,17 @@ namespace displaymenu {
             core::configManager.conf["transcieverLayout"] = transcieverLayout;
             core::configManager.release(true);
         }
+        helpMarker("SSB trx replaces the desktop layout with the transceiver one: big TX and\nsound buttons, and the last minutes of the QSO kept for playback.");
 
-        if (ImGui::Checkbox("Waterfall##_sdrpp", &showWaterfall)) {
-            setWaterfallShown(showWaterfall);
-        }
-        ImGui::SameLine();
-        if (ImGui::Checkbox("FFT##_sdrpp", &showFFT)) {
+        if (ImGui::Checkbox("Lock menu order##_sdrpp", &gui::menu.locked)) {
             core::configManager.acquire();
-            core::configManager.conf["showFFT"] = showFFT;
+            core::configManager.conf["lockMenuOrder"] = gui::menu.locked;
             core::configManager.release(true);
         }
+        helpMarker("Stops the sections of this menu being dragged into a different order.");
 
-        if (ImGui::Checkbox("Full Waterfall Update##_sdrpp", &fullWaterfallUpdate)) {
-            gui::waterfall.setFullWaterfallUpdate(fullWaterfallUpdate);
-            core::configManager.acquire();
-            core::configManager.conf["fullWaterfallUpdate"] = fullWaterfallUpdate;
-            core::configManager.release(true);
-        }
 #ifdef __ANDROID__
-        if (ImGui::Checkbox("Show Battery##_sdrpp", &showBattery)) {
+        if (ImGui::Checkbox("Show battery##_sdrpp", &showBattery)) {
             gui::waterfall.setFullWaterfallUpdate(fullWaterfallUpdate);
             core::configManager.acquire();
             core::configManager.conf["showBattery"] = showBattery;
@@ -314,32 +338,46 @@ namespace displaymenu {
         }
 #endif
 
-        if (ImGui::Checkbox("Lock Menu Order##_sdrpp", &gui::menu.locked)) {
+        ImGui::LeftLabel("Interface size");
+        ImGui::FillWidth();
+        if (ImGui::Combo("##sdrpp_ui_scale", &uiScaleId, uiScales.txt)) {
             core::configManager.acquire();
-            core::configManager.conf["lockMenuOrder"] = gui::menu.locked;
+            core::configManager.conf["uiScale"] = uiScales[uiScaleId];
             core::configManager.release(true);
+            restartRequired = true;
         }
-        if (ImGui::Checkbox("FFT Hold##_sdrpp", &fftHold)) {
+
+        sectionHeader("SPECTRUM");
+
+        // Each of these three is a switch plus the speed it runs at, which used to
+        // be a bare number box with nothing to say what it did or what unit it was
+        // in. They are all "how many tenths of a frame it takes to catch up".
+        if (ImGui::Checkbox("Peak hold##_sdrpp", &fftHold)) {
             gui::waterfall.setFFTHold(fftHold);
             core::configManager.acquire();
             core::configManager.conf["fftHold"] = fftHold;
             core::configManager.release(true);
         }
+        helpMarker("Keeps a second trace at the highest level each frequency has reached.\nThe number is how fast that trace falls back down; bigger falls faster.");
         ImGui::SameLine();
         ImGui::FillWidth();
         if (ImGui::InputInt("##sdrpp_fft_hold_speed", &fftHoldSpeed)) {
+            // Was unclamped, unlike the two below it. Zero freezes the peak trace
+            // where it is and a negative value walks it off the top of the chart.
+            fftHoldSpeed = std::max<int>(fftHoldSpeed, 1);
             updateFFTSpeeds();
             core::configManager.acquire();
             core::configManager.conf["fftHoldSpeed"] = fftHoldSpeed;
             core::configManager.release(true);
         }
 
-        if (ImGui::Checkbox("FFT Smoothing##_sdrpp", &fftSmoothing)) {
+        if (ImGui::Checkbox("Smoothing##_sdrpp", &fftSmoothing)) {
             gui::waterfall.setFFTSmoothing(fftSmoothing);
             core::configManager.acquire();
             core::configManager.conf["fftSmoothing"] = fftSmoothing;
             core::configManager.release(true);
         }
+        helpMarker("Averages the spectrum over time, so noise stops flickering and weak\ncarriers stand out. The number is how fast it follows a change.");
         ImGui::SameLine();
         ImGui::FillWidth();
         if (ImGui::InputInt("##sdrpp_fft_smoothing_speed", &fftSmoothingSpeed)) {
@@ -350,12 +388,13 @@ namespace displaymenu {
             core::configManager.release(true);
         }
 
-        if (ImGui::Checkbox("SNR Smoothing##_sdrpp", &snrSmoothing)) {
+        if (ImGui::Checkbox("SNR meter smoothing##_sdrpp", &snrSmoothing)) {
             gui::waterfall.setSNRSmoothing(snrSmoothing);
             core::configManager.acquire();
             core::configManager.conf["snrSmoothing"] = snrSmoothing;
             core::configManager.release(true);
         }
+        helpMarker("Steadies the SNR meter next to the frequency readout. Anything that reads\nthat meter, the bookmark scanner included, sees the smoothed value.");
         ImGui::SameLine();
         ImGui::FillWidth();
         if (ImGui::InputInt("##sdrpp_snr_smoothing_speed", &snrSmoothingSpeed)) {
@@ -366,17 +405,18 @@ namespace displaymenu {
             core::configManager.release(true);
         }
 
-        ImGui::LeftLabel("High-DPI Scaling");
-        ImGui::FillWidth();
-        if (ImGui::Combo("##sdrpp_ui_scale", &uiScaleId, uiScales.txt)) {
+        if (ImGui::Checkbox("Redraw waterfall history on zoom##_sdrpp", &fullWaterfallUpdate)) {
+            gui::waterfall.setFullWaterfallUpdate(fullWaterfallUpdate);
             core::configManager.acquire();
-            core::configManager.conf["uiScale"] = uiScales[uiScaleId];
+            core::configManager.conf["fullWaterfallUpdate"] = fullWaterfallUpdate;
             core::configManager.release(true);
-            restartRequired = true;
         }
+        helpMarker("On, zooming or panning redraws the whole waterfall to match. Off is cheaper\non a slow machine, but the history stays at the old zoom until it scrolls away.");
 
-        ImGui::LeftLabel("FFT Framerate");
-        ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());
+        sectionHeader("PROCESSING");
+
+        ImGui::LeftLabel("Framerate");
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - (32.0f * style::uiScale));
         if (ImGui::InputInt("##sdrpp_fft_rate", &fftRate, 1, 10)) {
             fftRate = std::max<int>(1, fftRate);
             sigpath::iqFrontEnd.setFFTRate(fftRate);
@@ -385,10 +425,10 @@ namespace displaymenu {
             core::configManager.conf["fftRate"] = fftRate;
             core::configManager.release(true);
         }
+        helpMarker("Spectrum updates per second. Lower costs less CPU and scrolls the\nwaterfall more slowly.");
 
-        ImGui::LeftLabel("FFT Size");
-        auto textSize8888  =  ImGui::CalcTextSize("88888888");
-        ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX() - textSize8888.x);
+        ImGui::LeftLabel("FFT size");
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - (32.0f * style::uiScale));
         if (ImGui::Combo("##sdrpp_fft_size", &fftSizeId, FFTSizesStr)) {
             enableAcceleratedFFT = fftSizeId >= std::size(FFTSizes);
             sigpath::iqFrontEnd.setFFTSize(FFTSizes[fftSizeId % std::size(FFTSizes)]);
@@ -397,9 +437,9 @@ namespace displaymenu {
             core::configManager.conf["fftAccel"] = fftSizeId >= std::size(FFTSizes);
             core::configManager.release(true);
         }
+        helpMarker("Bins the spectrum is split into. Bigger resolves closer signals apart\nand costs more CPU.");
 
         {
-            ImGui::SameLine();
             static auto lastFFTReportTime = currentTimeMillis();
             static long long lastFFTReport = 0;
             auto ctm = currentTimeMillis();
@@ -408,22 +448,29 @@ namespace displaymenu {
                 lastFFTReport = fftCumulativeTime;
                 fftCumulativeTime = 0;
             }
-            ImGui::Text("%lld ms/s", lastFFTReport);
+            // The bare "12 ms/s" this used to print sat next to the size box with
+            // nothing to say what it measured.
+            ImGui::TextDisabled("Costs %lld ms of CPU per second", lastFFTReport);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Time spent computing the spectrum, out of every second. 1000 would be\none core fully busy. Framerate and FFT size above are what move it.");
+            }
         }
 
-        ImGui::LeftLabel("FFT Window");
-        ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());
+        ImGui::LeftLabel("Window");
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - (32.0f * style::uiScale));
         if (ImGui::Combo("##sdrpp_fft_window", &selectedWindow, "Rectangular\0Blackman\0Nuttall\0")) {
             sigpath::iqFrontEnd.setFFTWindow(fftWindowList[selectedWindow]);
             core::configManager.acquire();
             core::configManager.conf["fftWindow"] = selectedWindow;
             core::configManager.release(true);
         }
+        helpMarker("Shapes each block before the FFT. Blackman and Nuttall stop a strong\nsignal smearing across its neighbours; Rectangular is sharpest but leaks.");
 
         onDisplayDraw.emit(GImGui);
 
         if (restartRequired) {
-            ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), "Restart required.");
+            ImGui::Spacing();
+            ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), "Restart SDR++ to apply the interface size.");
         }
     }
 }

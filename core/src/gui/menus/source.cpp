@@ -324,6 +324,22 @@ namespace sourcemenu {
         return open;
     }
 
+    // A (?) that explains a control without spending a line on it.
+    void helpMarker(const char* text) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("(?)");
+        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("%s", text); }
+    }
+
+    // This menu holds three unrelated things: which radio to listen with, how its
+    // frequencies are corrected, and who is operating it. Without something to
+    // separate them the callsign box reads like a setting of the SDR.
+    void sectionHeader(const char* title) {
+        ImGui::Spacing();
+        ImGui::TextDisabled("%s", title);
+        ImGui::Separator();
+    }
+
     void draw(void* ctx) {
         float itemWidth = ImGui::GetContentRegionAvail().x;
         float lineHeight = ImGui::GetTextLineHeightWithSpacing();
@@ -342,6 +358,11 @@ namespace sourcemenu {
         }
 
         if (running) { style::endDisabled(); }
+        // A disabled item is not "hovered" unless asked for explicitly, and this is
+        // exactly the case where the reason is worth showing.
+        if (running && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            ImGui::SetTooltip("Stop the radio to change the source");
+        }
 
         // Rescan for devices while the menu is on screen and the radio is stopped,
         // so plugging an SDR in with the application already open is enough for it
@@ -353,12 +374,15 @@ namespace sourcemenu {
 
         sigpath::sourceManager.showSelectedMenu();
 
-        if (ImGui::Checkbox("IQ Correction##_sdrpp_iq_corr", &iqCorrection)) {
+        sectionHeader("SIGNAL");
+
+        if (ImGui::Checkbox("IQ correction##_sdrpp_iq_corr", &iqCorrection)) {
             sigpath::iqFrontEnd.setDCBlocking(iqCorrection);
             core::configManager.acquire();
             core::configManager.conf["iqCorrection"] = iqCorrection;
             core::configManager.release(true);
         }
+        helpMarker("Removes the DC spike sitting in the middle of the spectrum on most\nSDRs. Leave it on unless you are looking at something exactly at\nthe centre frequency.");
 
         if (ImGui::Checkbox("Invert IQ##_sdrpp_inv_iq", &invertIQ)) {
             sigpath::iqFrontEnd.setInvertIQ(invertIQ);
@@ -366,9 +390,30 @@ namespace sourcemenu {
             core::configManager.conf["invertIQ"] = invertIQ;
             core::configManager.release(true);
         }
+        helpMarker("Mirrors the spectrum left to right. Turn it on if USB and LSB come out\nthe wrong way round, which some hardware and some recordings need.");
 
+        if (running) { style::beginDisabled(); }
+        ImGui::LeftLabel("Decimation");
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - (32.0f * style::uiScale));
+        if (ImGui::Combo("##source_decim", &decimId, decimations.txt)) {
+            sigpath::iqFrontEnd.setDecimation(decimations.value(decimId));
+            core::configManager.acquire();
+            core::configManager.conf["decimation"] = decimations.key(decimId);
+            core::configManager.release(true);
+        }
+        if (running) { style::endDisabled(); }
+        helpMarker("Divides the sample rate before anything else sees it: less spectrum on\nscreen, proportionally less CPU. Set while the radio is stopped.");
 
-        ImGui::LeftLabel("Offset mode");
+        sectionHeader("FREQUENCY OFFSET");
+
+        ImGui::TextDisabled("For a transverter or an up/downconverter");
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Added to every frequency you tune, so the display reads the frequency\n"
+                              "on the antenna rather than the one the SDR is really on. Leave it on\n"
+                              "None if the SDR is connected straight to the antenna.");
+        }
+
+        ImGui::LeftLabel("Mode");
         ImGui::SetNextItemWidth(itemWidth - ImGui::GetCursorPosX() - 2.0f * (lineHeight + 1.5f * spacing));
         if (ImGui::Combo("##_sdrpp_offset", &offsetId, offsets.txt)) {
             selectOffsetById(offsetId);
@@ -401,7 +446,10 @@ namespace sourcemenu {
         // Offset add diaglog
         if (showAddOffsetDialog) { showAddOffsetDialog = addOffsetDialog(); }
 
-        ImGui::LeftLabel("Offset");
+        // Only the Manual entry is an editable value. The others show the offset
+        // the chosen entry stands for, and used to be an identical looking box that
+        // simply refused to take a keypress.
+        ImGui::LeftLabel(offsetId == OFFSET_ID_MANUAL ? "Offset (Hz)" : "Offset (Hz), fixed");
         ImGui::FillWidth();
         if (offsetId == OFFSET_ID_MANUAL) {
             if (ImGui::InputDouble("##freq_offset", &manualOffset, 1.0, 100.0)) {
@@ -416,20 +464,20 @@ namespace sourcemenu {
             ImGui::InputDouble("##freq_offset", &effectiveOffset, 1.0, 100.0);
             style::endDisabled();
         }
-
-        if (running) { style::beginDisabled(); }
-        ImGui::LeftLabel("Decimation");
-        ImGui::FillWidth();
-        if (ImGui::Combo("##source_decim", &decimId, decimations.txt)) {
-            sigpath::iqFrontEnd.setDecimation(decimations.value(decimId));
-            core::configManager.acquire();
-            core::configManager.conf["decimation"] = decimations.key(decimId);
-            core::configManager.release(true);
+        if (offsetId != OFFSET_ID_MANUAL) {
+            ImGui::TextDisabled("Pick Manual above to type an offset, or + to save a named one");
         }
-        if (running) { style::endDisabled(); }
 
-        ImGui::Text("Operator Callsign");
-        ImGui::SameLine();
+        sectionHeader("OPERATOR");
+
+        ImGui::TextDisabled("Who is running this station");
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Nothing here changes how the radio behaves. It is what the decoders and\n"
+                              "reporting features put in the reports they send, and what the maps use\n"
+                              "to work out where you are.");
+        }
+
+        ImGui::LeftLabel("Callsign");
         ImGui::FillWidth();
         if (ImGui::InputText("##_my_callsign", operatorCallsignRaw, 12)) {
             if (strlen(operatorCallsignRaw) >= 3) {
@@ -453,12 +501,21 @@ namespace sourcemenu {
                 core::configManager.release(true);
             }
         }
-        ImGui::Text("DXCC: %s", callsignFound.dxccname.c_str());
+        // Empty before anything has been typed, rather than reading as a failure.
+        if (operatorCallsignRaw[0] == 0) {
+            ImGui::TextDisabled("DXCC: not set");
+        }
+        else if (callsignFound.dxccname.empty() || callsignFound.dxccname == "[invalid]") {
+            ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.3f, 1.0f), "DXCC: not recognised");
+        }
+        else {
+            ImGui::Text("DXCC: %s", callsignFound.dxccname.c_str());
+        }
 
-        ImGui::LeftLabel("My Grid");
-        auto gwSize = ImGui::CalcTextSize("WWWWW");
+        ImGui::LeftLabel("Grid square");
+        auto gwSize = ImGui::CalcTextSize("WWWWWWWW");
         ImGui::SetNextItemWidth(gwSize.x);
-        if (ImGui::InputText("##_my_grid", sigpath::iqFrontEnd.operatorLocation.data(), 8)) {
+        if (ImGui::InputTextWithHint("##_my_grid", "IO91wm", sigpath::iqFrontEnd.operatorLocation.data(), 8)) {
             sigpath::iqFrontEnd.operatorLocation.resize(strlen(sigpath::iqFrontEnd.operatorLocation.data()));
             core::configManager.acquire();
             core::configManager.conf["operatorLocation"] = sigpath::iqFrontEnd.operatorLocation;
@@ -468,16 +525,22 @@ namespace sourcemenu {
         }
         ImGui::SameLine();
         if (operatorLatLng.isValid()) {
-            ImGui::Text("%+02.2f %+02.2f", operatorLatLng.lat, operatorLatLng.lon);
+            ImGui::TextDisabled("%+02.2f %+02.2f", operatorLatLng.lat, operatorLatLng.lon);
+        }
+        else if (sigpath::iqFrontEnd.operatorLocation.empty()) {
+            ImGui::TextDisabled("not set");
         }
         else {
-            ImGui::Text("Invalid");
+            ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.3f, 1.0f), "not a grid square");
         }
 
-        if (ImGui::SliderInt("Time correction", &sigpath::iqFrontEnd.secondsAdjustment, -15, 15, "%d sec")) {
+        ImGui::LeftLabel("Clock correction");
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - (32.0f * style::uiScale));
+        if (ImGui::SliderInt("##_sdrpp_time_correction", &sigpath::iqFrontEnd.secondsAdjustment, -15, 15, "%d s")) {
             core::configManager.acquire();
             core::configManager.conf["secondsAdjustment"] = sigpath::iqFrontEnd.secondsAdjustment;
             core::configManager.release(true);
         }
+        helpMarker("Shifts the clock the time-slotted decoders work from. FT8 and the like\nneed the computer to be within a second or so of real time; leave this at\n0 unless decoding fails and you know the clock is out.");
     }
 }

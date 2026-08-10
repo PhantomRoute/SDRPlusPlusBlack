@@ -11,6 +11,7 @@
 #include <ctime>
 #include <gui/gui.h>
 #include <filesystem>
+#include <system_error>
 #include <signal_path/signal_path.h>
 #include <config.h>
 #include <gui/style.h>
@@ -37,6 +38,38 @@ SDRPP_MOD_INFO{
 };
 
 ConfigManager config;
+
+namespace {
+    std::string formatBytes(uint64_t bytes) {
+        const char* units[] = { "B", "KB", "MB", "GB", "TB" };
+        double value = (double)bytes;
+        int unit = 0;
+        while (value >= 1024.0 && unit < 4) {
+            value /= 1024.0;
+            unit++;
+        }
+        char buf[64];
+        snprintf(buf, sizeof buf, (unit > 0 && value < 10.0) ? "%.1f %s" : "%.0f %s", value, units[unit]);
+        return std::string(buf);
+    }
+
+    // HH:MM:SS, for a running clock.
+    std::string formatClock(uint64_t seconds) {
+        char buf[32];
+        snprintf(buf, sizeof buf, "%02d:%02d:%02d", (int)(seconds / 3600), (int)((seconds / 60) % 60), (int)(seconds % 60));
+        return std::string(buf);
+    }
+
+    // Rounded and in words, for "about this long".
+    std::string formatSpan(uint64_t seconds) {
+        char buf[64];
+        if (seconds < 90) { snprintf(buf, sizeof buf, "%d seconds", (int)seconds); }
+        else if (seconds < 5400) { snprintf(buf, sizeof buf, "%d minutes", (int)(seconds / 60)); }
+        else if (seconds < 172800) { snprintf(buf, sizeof buf, "%.1f hours", (double)seconds / 3600.0); }
+        else { snprintf(buf, sizeof buf, "%.1f days", (double)seconds / 86400.0); }
+        return std::string(buf);
+    }
+}
 
 class RecorderModule : public ModuleManager::Instance {
 public:
@@ -153,20 +186,86 @@ public:
         return enabled;
     }
 
+    // Why the Record button is greyed out, or an empty string when it is not.
+    // Everything that can stop a recording from starting is decided here, so the
+    // button and start() cannot disagree about it.
+    std::string recordBlockedReason() {
+        if (!folderSelect.pathIsValid()) { return "That folder does not exist. Pick one that does."; }
+        if (recMode == RECORDER_MODE_AUDIO) {
+            if (selectedStreamName.empty()) { return "No audio stream to record. Start a radio first."; }
+        }
+        if (currentSamplerate() == 0) { return "The sample rate is not known yet. Start the radio first."; }
+        return "";
+    }
+
+    // The rate the recording would run at, whether or not one is running. Used for
+    // the size estimate as well as by start().
+    uint64_t currentSamplerate() {
+        if (recording) { return samplerate; }
+        if (recMode == RECORDER_MODE_AUDIO) {
+            if (selectedStreamName.empty()) { return 0; }
+            return sigpath::sinkManager.getStreamSampleRate(selectedStreamName);
+        }
+        return sigpath::iqFrontEnd.getSampleRate();
+    }
+
+    int currentChannels() {
+        return (recMode == RECORDER_MODE_AUDIO && !stereo) ? 1 : 2;
+    }
+
+    // The name the next recording would get. Rebuilt when something it depends on
+    // changes, and at most twice a second otherwise, because building it runs nine
+    // regex replacements and the clock fields in it only tick once a second.
+    const std::string& fileNamePreview() {
+        std::string key = std::string(nameTemplate) + "|" + std::to_string(recMode) + "|" + selectedStreamName;
+        double now = ImGui::GetTime();
+        if (key != previewKey || (now - previewTime) > 0.5) {
+            previewKey = key;
+            previewTime = now;
+            std::string vfoName = (recMode == RECORDER_MODE_AUDIO) ? selectedStreamName : "";
+            previewName = genFileName(nameTemplate, recMode, vfoName) + ".wav";
+            previewPath = expandString(folderSelect.path + "/" + previewName);
+        }
+        return previewName;
+    }
+
+    // Rate limited: this is a filesystem call and the panel redraws every frame.
+    uint64_t freeSpace() {
+        double now = ImGui::GetTime();
+        if ((now - spaceTime) > 1.0) {
+            spaceTime = now;
+            std::error_code ec;
+            auto info = std::filesystem::space(std::filesystem::path(expandString(folderSelect.path)), ec);
+            cachedFreeSpace = ec ? 0 : (uint64_t)info.available;
+        }
+        return cachedFreeSpace;
+    }
+
+    int bytesPerFrame() {
+        int bits = 16;
+        switch (sampleTypes[sampleTypeId]) {
+        case wav::SAMP_TYPE_UINT8: bits = 8; break;
+        case wav::SAMP_TYPE_INT16: bits = 16; break;
+        case wav::SAMP_TYPE_INT32: bits = 32; break;
+        case wav::SAMP_TYPE_FLOAT32: bits = 32; break;
+        default: break;
+        }
+        return (bits / 8) * currentChannels();
+    }
+
     void start() {
         std::lock_guard<std::recursive_mutex> lck(recMtx);
         if (recording) { return; }
 
+        // Used to fail silently here, leaving the panel showing "Idle" as though
+        // the button had not been pressed at all.
+        lastError = recordBlockedReason();
+        if (!lastError.empty()) { return; }
+
         // Configure the wav writer
-        if (recMode == RECORDER_MODE_AUDIO) {
-            if (selectedStreamName.empty()) { return; }
-            samplerate = sigpath::sinkManager.getStreamSampleRate(selectedStreamName);
-        }
-        else {
-            samplerate = sigpath::iqFrontEnd.getSampleRate();
-        }
+        samplerate = currentSamplerate();
         writer.setFormat(containers[containerId]);
-        writer.setChannels((recMode == RECORDER_MODE_AUDIO && !stereo) ? 1 : 2);
+        writer.setChannels(currentChannels());
         writer.setSampleType(sampleTypes[sampleTypeId]);
         writer.setSamplerate(samplerate);
 
@@ -176,8 +275,11 @@ public:
         std::string expandedPath = expandString(folderSelect.path + "/" + genFileName(nameTemplate, recMode, vfoName) + extension);
         if (!writer.open(expandedPath)) {
             flog::error("Failed to open file for recording: {0}", expandedPath);
+            lastError = "Could not open " + expandedPath;
             return;
         }
+        currentPath = expandedPath;
+        recBytesPerFrame = bytesPerFrame();
 
         // Open audio stream or baseband
         if (recMode == RECORDER_MODE_AUDIO) {
@@ -251,6 +353,11 @@ private:
         }
         ImGui::Columns(1, CONCAT("EndRecorderModeColumns##_", _this->name), false);
         ImGui::EndGroup();
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Baseband records the raw IQ of the whole visible spectrum, which is\n"
+                              "large but can be replayed and retuned later. Audio records what you\n"
+                              "are listening to on one stream.");
+        }
 
         // Recording path
         if (_this->folderSelect.render("##_recorder_fold_" + _this->name)) {
@@ -260,14 +367,34 @@ private:
                 config.release(true);
             }
         }
+        if (!_this->folderSelect.pathIsValid()) {
+            ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.4f, 1.0f), "That folder does not exist");
+        }
 
         ImGui::LeftLabel("Name template");
-        ImGui::FillWidth();
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - (30.0f * style::uiScale));
         if (ImGui::InputText(CONCAT("##_recorder_name_template_", _this->name), _this->nameTemplate, 1023)) {
             config.acquire();
             config.conf[_this->name]["nameTemplate"] = _this->nameTemplate;
             config.release(true);
         }
+        ImGui::SameLine();
+        ImGui::TextDisabled("(?)");
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("$t   audio or baseband\n"
+                              "$f   frequency, in Hz\n"
+                              "$r   mode (NFM, USB, ...)\n"
+                              "$h $m $s   hour, minute, second\n"
+                              "$d $M $y   day, month, year\n"
+                              "Anything else is kept as typed. .wav is added for you.");
+        }
+
+        // What the template actually produces, so it does not have to be worked out
+        // in your head or discovered after the fact in the folder.
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextDisabled("%s", _this->fileNamePreview().c_str());
+        ImGui::PopTextWrapPos();
+        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("The next recording goes to\n%s", _this->previewPath.c_str()); }
 
         ImGui::LeftLabel("Container");
         ImGui::FillWidth();
@@ -283,6 +410,18 @@ private:
             config.acquire();
             config.conf[_this->name]["sampleType"] = _this->sampleTypes.key(_this->sampleTypeId);
             config.release(true);
+        }
+
+        // Baseband at a few Msps fills a disk far faster than anyone expects, and
+        // the format choices in front of this double or halve it.
+        uint64_t rate = _this->currentSamplerate();
+        if (rate > 0) {
+            double bytesPerMinute = (double)rate * (double)_this->bytesPerFrame() * 60.0;
+            ImGui::TextDisabled("%s per minute at %.0f kS/s", formatBytes((uint64_t)bytesPerMinute).c_str(), (double)rate / 1000.0);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("A WAV file cannot go past 4 GB. At this rate that is about %s.",
+                                  formatSpan((uint64_t)(4294967296.0 / std::max<double>(1.0, bytesPerMinute / 60.0))).c_str());
+            }
         }
 
         if (_this->recording) { style::endDisabled(); }
@@ -322,36 +461,91 @@ private:
             }
             if (_this->recording) { style::endDisabled(); }
 
-            if (ImGui::Checkbox(CONCAT("Ignore silence##_recorder_ignore_silence_", _this->name), &_this->ignoreSilence)) {
+            if (ImGui::Checkbox(CONCAT("Skip silence##_recorder_ignore_silence_", _this->name), &_this->ignoreSilence)) {
                 config.acquire();
                 config.conf[_this->name]["ignoreSilence"] = _this->ignoreSilence;
                 config.release(true);
             }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Write nothing while the audio is below about -100 dB, so a quiet\n"
+                                  "channel does not fill the file. The recording clock stops with it,\n"
+                                  "so the file has no gaps and no idea how long the silence was.");
+            }
         }
 
-        // Record button
-        bool canRecord = _this->folderSelect.pathIsValid();
-        if (_this->recMode == RECORDER_MODE_AUDIO) { canRecord &= !_this->selectedStreamName.empty(); }
+        ImGui::Separator();
+
+        // Record button. The guard used to be worked out here and then ignored, so
+        // pressing Record with a bad folder did nothing at all and the panel went
+        // on saying "Idle".
+        std::string blocked = _this->recordBlockedReason();
         if (!_this->recording) {
+            if (!blocked.empty()) { style::beginDisabled(); }
             if (ImGui::Button(CONCAT("Record##_recorder_rec_", _this->name), ImVec2(menuWidth, 0))) {
                 _this->start();
             }
-            ImGui::TextColored(ImGui::GetStyleColorVec4(ImGuiCol_Text), "Idle --:--:--");
+            if (!blocked.empty()) { style::endDisabled(); }
+
+            if (!blocked.empty()) {
+                ImGui::PushTextWrapPos(0.0f);
+                ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.3f, 1.0f), "%s", blocked.c_str());
+                ImGui::PopTextWrapPos();
+            }
+            else if (!_this->lastError.empty()) {
+                ImGui::PushTextWrapPos(0.0f);
+                ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.4f, 1.0f), "%s", _this->lastError.c_str());
+                ImGui::PopTextWrapPos();
+            }
+            else if (!_this->currentPath.empty()) {
+                ImGui::PushTextWrapPos(0.0f);
+                ImGui::TextDisabled("Saved  %s", _this->currentPath.c_str());
+                ImGui::PopTextWrapPos();
+            }
+            else {
+                ImGui::TextDisabled("Idle  --:--:--");
+            }
         }
         else {
             if (ImGui::Button(CONCAT("Stop##_recorder_rec_", _this->name), ImVec2(menuWidth, 0))) {
                 _this->stop();
             }
-            uint64_t seconds = _this->writer.getSamplesWritten() / _this->samplerate;
-            time_t diff = seconds;
-            tm* dtm = gmtime(&diff);
+
+            uint64_t written = _this->writer.getSamplesWritten();
+            uint64_t seconds = (_this->samplerate > 0) ? (written / _this->samplerate) : 0;
+            uint64_t bytes = written * (uint64_t)_this->recBytesPerFrame;
 
             if (_this->ignoreSilence && _this->ignoringSilence) {
-                ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), "Paused %02d:%02d:%02d", dtm->tm_hour, dtm->tm_min, dtm->tm_sec);
+                ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), "Paused  %s", formatClock(seconds).c_str());
             }
             else {
-                ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "Recording %02d:%02d:%02d", dtm->tm_hour, dtm->tm_min, dtm->tm_sec);
+                ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "Recording  %s", formatClock(seconds).c_str());
             }
+            ImGui::SameLine();
+            ImGui::TextDisabled("%s", formatBytes(bytes).c_str());
+
+            // A full RIFF container drops everything written after it without a
+            // word, so this is the only sign the recording has stopped growing.
+            if (_this->writer.isFull()) {
+                ImGui::PushTextWrapPos(0.0f);
+                ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "File is full at the 4 GB WAV limit and is no longer being written to. Stop and start a new one.");
+                ImGui::PopTextWrapPos();
+            }
+
+            uint64_t freeBytes = _this->freeSpace();
+            if (freeBytes > 0) {
+                double perSecond = (double)_this->samplerate * (double)_this->recBytesPerFrame;
+                if (perSecond > 0.0 && (double)freeBytes / perSecond < 300.0) {
+                    ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.4f, 1.0f), "%s left on the disk, about %s of recording",
+                                       formatBytes(freeBytes).c_str(), formatSpan((uint64_t)((double)freeBytes / perSecond)).c_str());
+                }
+                else {
+                    ImGui::TextDisabled("%s free", formatBytes(freeBytes).c_str());
+                }
+            }
+
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextDisabled("%s", _this->currentPath.c_str());
+            ImGui::PopTextWrapPos();
         }
     }
 
@@ -444,17 +638,6 @@ private:
         if (dbLvl.r > lvl.r) { lvl.r = dbLvl.r; }
     }
 
-    std::map<int, const char*> radioModeToString = {
-        { RADIO_IFACE_MODE_NFM, "NFM" },
-        { RADIO_IFACE_MODE_WFM, "WFM" },
-        { RADIO_IFACE_MODE_AM,  "AM"  },
-        { RADIO_IFACE_MODE_DSB, "DSB" },
-        { RADIO_IFACE_MODE_USB, "USB" },
-        { RADIO_IFACE_MODE_CW,  "CW"  },
-        { RADIO_IFACE_MODE_LSB, "LSB" },
-        { RADIO_IFACE_MODE_RAW, "RAW" }
-    };
-
     std::string genFileName(std::string templ, int recMode, std::string name) {
         // Get data
         time_t now = time(0);
@@ -477,7 +660,7 @@ private:
         char monStr[128];
         char yearStr[128];
 
-        const char* modeStr = (recMode == RECORDER_MODE_AUDIO) ? "Unknown" : "IQ";
+        std::string modeStr = (recMode == RECORDER_MODE_AUDIO) ? "Unknown" : "IQ";
         snprintf(freqStr, sizeof freqStr, "%.0lfHz", freq);
         snprintf(hourStr, sizeof hourStr, "%02d", ltm->tm_hour);
         snprintf(minStr, sizeof minStr, "%02d", ltm->tm_min);
@@ -485,24 +668,17 @@ private:
         snprintf(dayStr, sizeof dayStr, "%02d", ltm->tm_mday);
         snprintf(monStr, sizeof monStr, "%02d", ltm->tm_mon + 1);
         snprintf(yearStr, sizeof yearStr, "%02d", ltm->tm_year + 1900);
-        auto radio = (RadioModuleInterface *)core::moduleManager.getInterface(name,"RadioModuleInterface");
+        // The radio's own mode table covers modes added by other modules too. A
+        // second lookup used to run after this one through a fixed map of the eight
+        // built in modes, and std::map::operator[] on a mode that is not in it -
+        // DSD, from ch_extravhf_decoder, is 0x1301 - inserts a null const char*,
+        // which then went straight into regex_replace as the replacement string.
+        auto radio = (RadioModuleInterface *)core::moduleManager.getInterface(name, "RadioModuleInterface");
         if (radio) {
             int demodId = radio->getSelectedDemodId();
-            for(int q=0; q<radio->radioModes.size(); q++) {
-                if (radio->radioModes[q].second == demodId) { modeStr = radio->radioModes[q].first.c_str(); }
+            for (int q = 0; q < radio->radioModes.size(); q++) {
+                if (radio->radioModes[q].second == demodId) { modeStr = radio->radioModes[q].first; }
             }
-        }
-        sprintf(freqStr, "%.0lfHz", freq);
-        sprintf(hourStr, "%02d", ltm->tm_hour);
-        sprintf(minStr, "%02d", ltm->tm_min);
-        sprintf(secStr, "%02d", ltm->tm_sec);
-        sprintf(dayStr, "%02d", ltm->tm_mday);
-        sprintf(monStr, "%02d", ltm->tm_mon + 1);
-        sprintf(yearStr, "%02d", ltm->tm_year + 1900);
-        if (core::modComManager.getModuleName(name) == "radio") {
-            int mode = -1;
-            core::modComManager.callInterface(name, RADIO_IFACE_CMD_GET_MODE, NULL, &mode);
-            if (mode >= 0) { modeStr = radioModeToString[mode]; };
         }
 
         // Replace in template
@@ -613,6 +789,18 @@ private:
 
     bool recording = false;
     bool ignoringSilence = false;
+
+    std::string lastError;   // why the last attempt to record did not take
+    std::string currentPath; // file being written right now
+    int recBytesPerFrame = 4;
+
+    std::string previewKey;
+    std::string previewName;
+    std::string previewPath;
+    double previewTime = -1000.0;
+    uint64_t cachedFreeSpace = 0;
+    double spaceTime = -1000.0;
+
     wav::Writer writer;
     std::recursive_mutex recMtx;
     dsp::stream<dsp::complex_t>* basebandStream;
