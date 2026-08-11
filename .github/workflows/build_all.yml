@@ -5,19 +5,6 @@ on:
     pull_request:
         branches:
         - master
-    # A "Run workflow" button. Without one the only way to start a build is to push,
-    # which is no help when a run has to be restarted and cannot be: a run that ends
-    # in startup_failure - a rejected action, an unparseable workflow - is never
-    # retryable, because there was no valid workflow to retry. That is exactly the
-    # state an Actions allow-list rejection leaves behind, and it cost a round of
-    # empty commits to get out of.
-    workflow_dispatch:
-
-# Every job ends in "gh release upload rolling", which needs write access to
-# contents. Without this the default token is read only and the upload fails
-# with HTTP 403 "Resource not accessible by integration".
-permissions:
-    contents: write
 
 env:
     # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
@@ -27,6 +14,7 @@ env:
 jobs:
 
     build_windows:
+        if: ${{ !contains(github.ref_name, 'macos') }}
         runs-on: windows-2022
 
         steps:
@@ -170,6 +158,7 @@ jobs:
             "CACHE_VCPKG_CHANGED=" + (($now -ne $snap) -or ($snap -eq 0)) | Out-File -FilePath $env:GITHUB_ENV -Append
 
         - name: Setup Python 3.11 (UHD codegen)
+          id: setup-python
           if: env.CACHE_UHD != 'restored'
           uses: actions/setup-python@v5
           with:
@@ -268,17 +257,7 @@ jobs:
 
         - name: Update Nightly
           if: github.ref == 'refs/heads/master'
-          shell: pwsh
-          run: |
-            # Retry: the upload API 5xxs often enough to fail an otherwise good build.
-            # PowerShell here, not bash - this is the one job on a Windows runner.
-            for ($attempt = 1; $attempt -le 3; $attempt++) {
-              gh release upload rolling ${{runner.workspace}}/sdrpp_windows_x64.zip -R ${{github.repository}} --clobber
-              if ($LASTEXITCODE -eq 0) { exit 0 }
-              Write-Host "upload failed (attempt $attempt of 3), retrying in 15s"
-              Start-Sleep -Seconds 15
-            }
-            exit 1
+          run: gh release upload rolling ${{runner.workspace}}/sdrpp_windows_x64.zip -R ${{github.repository}} --clobber
     build_macos_intel:
       if: ${{ !contains(github.ref_name, 'windows') }}
       runs-on: macos-15-intel
@@ -290,7 +269,38 @@ jobs:
           run: cmake -E make_directory ${{runner.workspace}}/build
 
         - name: Install dependencies
-          run: HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1 brew install pkg-config libusb fftw glfw airspyhf portaudio hackrf libbladerf codec2 zstd autoconf automake libtool spdlog && pip3 install mako --break-system-packages
+          run: HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1 brew install pkg-config libusb fftw glfw airspy airspyhf portaudio hackrf libbladerf codec2 zstd autoconf automake libtool spdlog boost && pip3 install mako --break-system-packages
+
+        - name: Download dependency cache
+          shell: bash
+          env:
+            GH_TOKEN: ${{ github.token }}
+          run: |
+            ARCH=$(uname -m); [ "$ARCH" = "arm64" ] && ARCH=arm64 || ARCH=x64
+            mkdir -p ${{runner.workspace}}/cache
+            if gh release view build-cache --repo ${{github.repository}} >/dev/null 2>&1; then
+              gh release download build-cache --repo ${{github.repository}} \
+                --pattern "uhd-3.15.0.0-macos-${ARCH}.zip" \
+                --dir ${{runner.workspace}}/cache || echo "cache download failed, building from source"
+            else
+              echo "no build-cache release found, building from source"
+            fi
+            ls -la ${{runner.workspace}}/cache 2>/dev/null || true
+
+        - name: Restore UHD cache
+          shell: bash
+          run: |
+            ARCH=$(uname -m); [ "$ARCH" = "arm64" ] && ARCH=arm64 || ARCH=x64
+            ZIP="${{runner.workspace}}/cache/uhd-3.15.0.0-macos-${ARCH}.zip"
+            PREFIX="$(brew --prefix)"
+            if [ -f "$ZIP" ]; then
+              sudo unzip -o -q "$ZIP" -d "$PREFIX"
+              echo "CACHE_UHD=restored" >> $GITHUB_ENV
+              echo "UHD restored to $PREFIX/uhd"
+            else
+              echo "CACHE_UHD=missing" >> $GITHUB_ENV
+              echo "UHD cache missing - build-uhd-macos action will compile from source"
+            fi
 
         - name: Install volk
           run: git clone --recursive https://github.com/gnuradio/volk && cd volk && mkdir build && cd build && cmake -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 -DCMAKE_BUILD_TYPE=Release .. && make -j3 && sudo make install && cd ../../
@@ -335,9 +345,42 @@ jobs:
 #        - name: Some debugging
 #          run: echo "before" && find /opt/homebrew/Cellar/codec2/1.2.0/include -print && echo "#ifndef CODEC2_HAVE_VERSION\n#define CODEC2_HAVE_VERSION\n#define CODEC2_VERSION_MAJOR 1\n#define CODEC2_VERSION_MINOR 2\n#define CODEC2_VERSION \"1.2.0\"\n#endif\n" > /opt/homebrew/Cellar/codec2/1.2.0/include/codec2/version.h && echo "after"; find /opt/homebrew/Cellar/codec2/1.2.0/include -print
 #
+        - name: Setup Python 3.11 (UHD codegen)
+          id: setup-python
+          if: env.CACHE_UHD != 'restored'
+          uses: actions/setup-python@v5
+          with:
+            python-version: '3.11'
+
+        - name: Build UHD 3.15.0.0
+          if: env.CACHE_UHD != 'restored'
+          uses: ./.github/actions/build-uhd-macos
+          with:
+            python-executable: ${{ env.pythonLocation }}/bin/python3
+
+        - name: Upload dependency cache
+          if: always() && github.event_name == 'push' && env.CACHE_UHD == 'missing'
+          shell: bash
+          env:
+            GH_TOKEN: ${{ github.token }}
+          run: |
+            ARCH=$(uname -m); [ "$ARCH" = "arm64" ] && ARCH=arm64 || ARCH=x64
+            PREFIX="$(brew --prefix)"
+            if [ -d "$PREFIX/uhd" ]; then
+              cd "$PREFIX"
+              zip -rq "${{runner.workspace}}/cache/uhd-3.15.0.0-macos-${ARCH}.zip" uhd
+              if ! gh release view build-cache --repo ${{github.repository}} >/dev/null 2>&1; then
+                gh release create build-cache --repo ${{github.repository}} --title "macOS build cache" --notes "CI-built incremental dependency cache (UHD 3.15)." >/dev/null 2>&1 || true
+              fi
+              gh release upload build-cache --repo ${{github.repository}} --clobber "${{runner.workspace}}/cache/uhd-3.15.0.0-macos-${ARCH}.zip"
+              echo "UHD cache uploaded"
+            else
+              echo "no UHD install found, nothing to cache"
+            fi
+
         - name: Prepare CMake
           working-directory: ${{runner.workspace}}/build
-          run: cmake -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 $GITHUB_WORKSPACE -DOPT_BUILD_PLUTOSDR_SOURCE=ON -DOPT_BUILD_BLADERF_SOURCE=ON -DOPT_BUILD_SDRPLAY_SOURCE=ON -DOPT_BUILD_LIMESDR_SOURCE=ON -DOPT_BUILD_AUDIO_SINK=OFF -DOPT_BUILD_PORTAUDIO_SINK=ON -DOPT_BUILD_NEW_PORTAUDIO_SINK=ON -DOPT_BUILD_M17_DECODER=ON -DOPT_BUILD_PERSEUS_SOURCE=OFF -DOPT_BUILD_AUDIO_SOURCE=OFF -DUSE_BUNDLE_DEFAULTS=ON -DOPT_BUILD_RFNM_SOURCE=ON -DOPT_BUILD_FOBOSSDR_SOURCE=ON -DOPT_BUILD_DRAGONLABS_SOURCE=${{ steps.libdlcr.outcome == 'success' && 'ON' || 'OFF' }} -DOPT_BUILD_CH_EXTRAVHF_DECODER=ON -DOPT_BUILD_AIRSPY_SOURCE=OFF -DCMAKE_BUILD_TYPE=Release
+          run: cmake -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 $GITHUB_WORKSPACE -DOPT_BUILD_PLUTOSDR_SOURCE=ON -DOPT_BUILD_BLADERF_SOURCE=ON -DOPT_BUILD_SDRPLAY_SOURCE=ON -DOPT_BUILD_LIMESDR_SOURCE=ON -DOPT_BUILD_AUDIO_SINK=OFF -DOPT_BUILD_PORTAUDIO_SINK=ON -DOPT_BUILD_NEW_PORTAUDIO_SINK=ON -DOPT_BUILD_M17_DECODER=ON -DOPT_BUILD_PERSEUS_SOURCE=OFF -DOPT_BUILD_AUDIO_SOURCE=OFF -DUSE_BUNDLE_DEFAULTS=ON -DOPT_BUILD_RFNM_SOURCE=ON -DOPT_BUILD_FOBOSSDR_SOURCE=ON -DOPT_BUILD_DRAGONLABS_SOURCE=${{ steps.libdlcr.outcome == 'success' && 'ON' || 'OFF' }} -DOPT_BUILD_CH_EXTRAVHF_DECODER=ON -DOPT_BUILD_USRP_SOURCE=ON "-DCMAKE_PREFIX_PATH=$(brew --prefix)/uhd" -DCMAKE_BUILD_TYPE=Release
 
         - name: Build
           working-directory: ${{runner.workspace}}/build
@@ -355,14 +398,7 @@ jobs:
 
         - name: Update Nightly
           if: github.ref == 'refs/heads/master'
-          run: |
-            # Retry: the upload API 5xxs often enough to fail an otherwise good build.
-            for attempt in 1 2 3; do
-              gh release upload rolling ${{runner.workspace}}/sdrpp_macos_intel.zip -R ${{github.repository}} --clobber && exit 0
-              echo "upload failed (attempt $attempt of 3), retrying in 15s"
-              sleep 15
-            done
-            exit 1
+          run: gh release upload rolling ${{runner.workspace}}/sdrpp_macos_intel.zip -R ${{github.repository}} --clobber
 
 
 
@@ -377,7 +413,38 @@ jobs:
           run: cmake -E make_directory ${{runner.workspace}}/build
 
         - name: Install dependencies
-          run: brew install pkg-config libusb fftw glfw airspyhf portaudio hackrf libbladerf codec2 zstd autoconf automake libtool spdlog && pip3 install mako --break-system-packages
+          run: brew install pkg-config libusb fftw glfw airspy airspyhf portaudio hackrf libbladerf codec2 zstd autoconf automake libtool spdlog boost && pip3 install mako --break-system-packages
+
+        - name: Download dependency cache
+          shell: bash
+          env:
+            GH_TOKEN: ${{ github.token }}
+          run: |
+            ARCH=$(uname -m); [ "$ARCH" = "arm64" ] && ARCH=arm64 || ARCH=x64
+            mkdir -p ${{runner.workspace}}/cache
+            if gh release view build-cache --repo ${{github.repository}} >/dev/null 2>&1; then
+              gh release download build-cache --repo ${{github.repository}} \
+                --pattern "uhd-3.15.0.0-macos-${ARCH}.zip" \
+                --dir ${{runner.workspace}}/cache || echo "cache download failed, building from source"
+            else
+              echo "no build-cache release found, building from source"
+            fi
+            ls -la ${{runner.workspace}}/cache 2>/dev/null || true
+
+        - name: Restore UHD cache
+          shell: bash
+          run: |
+            ARCH=$(uname -m); [ "$ARCH" = "arm64" ] && ARCH=arm64 || ARCH=x64
+            ZIP="${{runner.workspace}}/cache/uhd-3.15.0.0-macos-${ARCH}.zip"
+            PREFIX="$(brew --prefix)"
+            if [ -f "$ZIP" ]; then
+              sudo unzip -o -q "$ZIP" -d "$PREFIX"
+              echo "CACHE_UHD=restored" >> $GITHUB_ENV
+              echo "UHD restored to $PREFIX/uhd"
+            else
+              echo "CACHE_UHD=missing" >> $GITHUB_ENV
+              echo "UHD cache missing - build-uhd-macos action will compile from source"
+            fi
 
         - name: Install volk
           run: git clone --recursive https://github.com/gnuradio/volk && cd volk && mkdir build && cd build && cmake -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 -DCMAKE_BUILD_TYPE=Release .. && make -j3 && sudo make install && cd ../../
@@ -422,9 +489,42 @@ jobs:
           if: steps.libdlcr.outcome != 'success'
           run: echo "::warning::libdlcr could not be installed, so the Dragn Labs source module is not in this build."
 
+        - name: Setup Python 3.11 (UHD codegen)
+          id: setup-python
+          if: env.CACHE_UHD != 'restored'
+          uses: actions/setup-python@v5
+          with:
+            python-version: '3.11'
+
+        - name: Build UHD 3.15.0.0
+          if: env.CACHE_UHD != 'restored'
+          uses: ./.github/actions/build-uhd-macos
+          with:
+            python-executable: ${{ env.pythonLocation }}/bin/python3
+
+        - name: Upload dependency cache
+          if: always() && github.event_name == 'push' && env.CACHE_UHD == 'missing'
+          shell: bash
+          env:
+            GH_TOKEN: ${{ github.token }}
+          run: |
+            ARCH=$(uname -m); [ "$ARCH" = "arm64" ] && ARCH=arm64 || ARCH=x64
+            PREFIX="$(brew --prefix)"
+            if [ -d "$PREFIX/uhd" ]; then
+              cd "$PREFIX"
+              zip -rq "${{runner.workspace}}/cache/uhd-3.15.0.0-macos-${ARCH}.zip" uhd
+              if ! gh release view build-cache --repo ${{github.repository}} >/dev/null 2>&1; then
+                gh release create build-cache --repo ${{github.repository}} --title "macOS build cache" --notes "CI-built incremental dependency cache (UHD 3.15)." >/dev/null 2>&1 || true
+              fi
+              gh release upload build-cache --repo ${{github.repository}} --clobber "${{runner.workspace}}/cache/uhd-3.15.0.0-macos-${ARCH}.zip"
+              echo "UHD cache uploaded"
+            else
+              echo "no UHD install found, nothing to cache"
+            fi
+
         - name: Prepare CMake
           working-directory: ${{runner.workspace}}/build
-          run: cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 $GITHUB_WORKSPACE -DOPT_BUILD_PLUTOSDR_SOURCE=ON -DOPT_BUILD_BLADERF_SOURCE=ON -DOPT_BUILD_SDRPLAY_SOURCE=ON -DOPT_BUILD_LIMESDR_SOURCE=ON -DOPT_BUILD_AUDIO_SINK=OFF -DOPT_BUILD_PORTAUDIO_SINK=ON -DOPT_BUILD_NEW_PORTAUDIO_SINK=ON -DOPT_BUILD_M17_DECODER=OFF -DOPT_BUILD_PERSEUS_SOURCE=OFF -DOPT_BUILD_AUDIO_SOURCE=OFF -DOPT_BUILD_RFNM_SOURCE=ON -DOPT_BUILD_FOBOSSDR_SOURCE=ON -DOPT_BUILD_HYDRASDR_SOURCE=ON -DOPT_BUILD_DRAGONLABS_SOURCE=${{ steps.libdlcr.outcome == 'success' && 'ON' || 'OFF' }} -DUSE_BUNDLE_DEFAULTS=ON -DOPT_BUILD_AIRSPY_SOURCE=OFF -DCMAKE_BUILD_TYPE=Release -DOPT_BUILD_CH_EXTRAVHF_DECODER=ON
+          run: cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 $GITHUB_WORKSPACE -DOPT_BUILD_PLUTOSDR_SOURCE=ON -DOPT_BUILD_BLADERF_SOURCE=ON -DOPT_BUILD_SDRPLAY_SOURCE=ON -DOPT_BUILD_LIMESDR_SOURCE=ON -DOPT_BUILD_AUDIO_SINK=OFF -DOPT_BUILD_PORTAUDIO_SINK=ON -DOPT_BUILD_NEW_PORTAUDIO_SINK=ON -DOPT_BUILD_M17_DECODER=OFF -DOPT_BUILD_PERSEUS_SOURCE=OFF -DOPT_BUILD_AUDIO_SOURCE=OFF -DOPT_BUILD_RFNM_SOURCE=ON -DOPT_BUILD_FOBOSSDR_SOURCE=ON -DOPT_BUILD_HYDRASDR_SOURCE=ON -DOPT_BUILD_DRAGONLABS_SOURCE=${{ steps.libdlcr.outcome == 'success' && 'ON' || 'OFF' }} -DUSE_BUNDLE_DEFAULTS=ON -DCMAKE_BUILD_TYPE=Release -DOPT_BUILD_CH_EXTRAVHF_DECODER=ON -DOPT_BUILD_USRP_SOURCE=ON "-DCMAKE_PREFIX_PATH=$(brew --prefix)/uhd"
 
         - name: Build
           working-directory: ${{runner.workspace}}/build
@@ -442,19 +542,12 @@ jobs:
 
         - name: Update Nightly
           if: github.ref == 'refs/heads/master'
-          run: |
-            # Retry: the upload API 5xxs often enough to fail an otherwise good build.
-            for attempt in 1 2 3; do
-              gh release upload rolling ${{runner.workspace}}/sdrpp_macos_arm.zip -R ${{github.repository}} --clobber && exit 0
-              echo "upload failed (attempt $attempt of 3), retrying in 15s"
-              sleep 15
-            done
-            exit 1
+          run: gh release upload rolling ${{runner.workspace}}/sdrpp_macos_arm.zip -R ${{github.repository}} --clobber
 
 
 
     build_debian_bullseye_amd64:
-        if: ${{ !contains(github.ref_name, 'windows') }}
+        if: ${{ !contains(github.ref_name, 'windows') && !contains(github.ref_name, 'macos') }}
         runs-on: ubuntu-latest
 
         steps:
@@ -478,18 +571,11 @@ jobs:
 
         - name: Update Nightly
           if: github.ref == 'refs/heads/master'
-          run: |
-            # Retry: the upload API 5xxs often enough to fail an otherwise good build.
-            for attempt in 1 2 3; do
-              gh release upload rolling ${{runner.workspace}}/sdrpp_debian_bullseye_amd64.deb -R ${{github.repository}} --clobber && exit 0
-              echo "upload failed (attempt $attempt of 3), retrying in 15s"
-              sleep 15
-            done
-            exit 1
+          run: gh release upload rolling ${{runner.workspace}}/sdrpp_debian_bullseye_amd64.deb -R ${{github.repository}} --clobber
 
 
     build_debian_bookworm:
-        if: ${{ !contains(github.ref_name, 'windows') }}
+        if: ${{ !contains(github.ref_name, 'windows') && !contains(github.ref_name, 'macos') }}
         runs-on: ubuntu-latest
 
         steps:
@@ -512,17 +598,10 @@ jobs:
 
         - name: Update Nightly
           if: github.ref == 'refs/heads/master'
-          run: |
-            # Retry: the upload API 5xxs often enough to fail an otherwise good build.
-            for attempt in 1 2 3; do
-              gh release upload rolling ${{runner.workspace}}/sdrpp_debian_bookworm_amd64.deb -R ${{github.repository}} --clobber && exit 0
-              echo "upload failed (attempt $attempt of 3), retrying in 15s"
-              sleep 15
-            done
-            exit 1
+          run: gh release upload rolling ${{runner.workspace}}/sdrpp_debian_bookworm_amd64.deb -R ${{github.repository}} --clobber
 
     build_ubuntu_jammy_amd64:
-      if: ${{ !contains(github.ref_name, 'windows') }}
+      if: ${{ !contains(github.ref_name, 'windows') && !contains(github.ref_name, 'macos') }}
       runs-on: ubuntu-latest
 
       steps:
@@ -546,17 +625,10 @@ jobs:
 
         - name: Update Nightly
           if: github.ref == 'refs/heads/master'
-          run: |
-            # Retry: the upload API 5xxs often enough to fail an otherwise good build.
-            for attempt in 1 2 3; do
-              gh release upload rolling ${{runner.workspace}}/sdrpp_ubuntu_jammy_amd64.deb -R ${{github.repository}} --clobber && exit 0
-              echo "upload failed (attempt $attempt of 3), retrying in 15s"
-              sleep 15
-            done
-            exit 1
+          run: gh release upload rolling ${{runner.workspace}}/sdrpp_ubuntu_jammy_amd64.deb -R ${{github.repository}} --clobber
 
     build_ubuntu_jammy_aarch64:
-      if: ${{ !contains(github.ref_name, 'windows') }}
+      if: ${{ !contains(github.ref_name, 'windows') && !contains(github.ref_name, 'macos') }}
       runs-on: ubuntu-22.04-arm
 
       steps:
@@ -580,17 +652,10 @@ jobs:
 
         - name: Update Nightly
           if: github.ref == 'refs/heads/master'
-          run: |
-            # Retry: the upload API 5xxs often enough to fail an otherwise good build.
-            for attempt in 1 2 3; do
-              gh release upload rolling ${{runner.workspace}}/sdrpp_ubuntu_jammy_aarch64.deb -R ${{github.repository}} --clobber && exit 0
-              echo "upload failed (attempt $attempt of 3), retrying in 15s"
-              sleep 15
-            done
-            exit 1
+          run: gh release upload rolling ${{runner.workspace}}/sdrpp_ubuntu_jammy_aarch64.deb -R ${{github.repository}} --clobber
 
     build_debian_trixie_amd64:
-        if: ${{ !contains(github.ref_name, 'windows') }}
+        if: ${{ !contains(github.ref_name, 'windows') && !contains(github.ref_name, 'macos') }}
         runs-on: ubuntu-latest
 
         steps:
@@ -614,17 +679,10 @@ jobs:
 
         - name: Update Nightly
           if: github.ref == 'refs/heads/master'
-          run: |
-            # Retry: the upload API 5xxs often enough to fail an otherwise good build.
-            for attempt in 1 2 3; do
-              gh release upload rolling ${{runner.workspace}}/sdrpp_debian_trixie_amd64.deb -R ${{github.repository}} --clobber && exit 0
-              echo "upload failed (attempt $attempt of 3), retrying in 15s"
-              sleep 15
-            done
-            exit 1
+          run: gh release upload rolling ${{runner.workspace}}/sdrpp_debian_trixie_amd64.deb -R ${{github.repository}} --clobber
 
     build_debian_trixie_aarch64:
-        if: ${{ !contains(github.ref_name, 'windows') }}
+        if: ${{ !contains(github.ref_name, 'windows') && !contains(github.ref_name, 'macos') }}
         runs-on: ubuntu-24.04-arm
 
         steps:
@@ -648,17 +706,10 @@ jobs:
 
         - name: Update Nightly
           if: github.ref == 'refs/heads/master'
-          run: |
-            # Retry: the upload API 5xxs often enough to fail an otherwise good build.
-            for attempt in 1 2 3; do
-              gh release upload rolling ${{runner.workspace}}/sdrpp_debian_trixie_aarch64.deb -R ${{github.repository}} --clobber && exit 0
-              echo "upload failed (attempt $attempt of 3), retrying in 15s"
-              sleep 15
-            done
-            exit 1
+          run: gh release upload rolling ${{runner.workspace}}/sdrpp_debian_trixie_aarch64.deb -R ${{github.repository}} --clobber
 
     build_debian_sid_amd64:
-        if: ${{ !contains(github.ref_name, 'windows') }}
+        if: ${{ !contains(github.ref_name, 'windows') && !contains(github.ref_name, 'macos') }}
         runs-on: ubuntu-latest
 
         steps:
@@ -682,17 +733,10 @@ jobs:
 
         - name: Update Nightly
           if: github.ref == 'refs/heads/master'
-          run: |
-            # Retry: the upload API 5xxs often enough to fail an otherwise good build.
-            for attempt in 1 2 3; do
-              gh release upload rolling ${{runner.workspace}}/sdrpp_debian_sid_amd64.deb -R ${{github.repository}} --clobber && exit 0
-              echo "upload failed (attempt $attempt of 3), retrying in 15s"
-              sleep 15
-            done
-            exit 1
+          run: gh release upload rolling ${{runner.workspace}}/sdrpp_debian_sid_amd64.deb -R ${{github.repository}} --clobber
 
     build_debian_sid_aarch64:
-        if: ${{ !contains(github.ref_name, 'windows') }}
+        if: ${{ !contains(github.ref_name, 'windows') && !contains(github.ref_name, 'macos') }}
         runs-on: ubuntu-24.04-arm
 
         steps:
@@ -716,17 +760,10 @@ jobs:
 
         - name: Update Nightly
           if: github.ref == 'refs/heads/master'
-          run: |
-            # Retry: the upload API 5xxs often enough to fail an otherwise good build.
-            for attempt in 1 2 3; do
-              gh release upload rolling ${{runner.workspace}}/sdrpp_debian_sid_aarch64.deb -R ${{github.repository}} --clobber && exit 0
-              echo "upload failed (attempt $attempt of 3), retrying in 15s"
-              sleep 15
-            done
-            exit 1
+          run: gh release upload rolling ${{runner.workspace}}/sdrpp_debian_sid_aarch64.deb -R ${{github.repository}} --clobber
 
     build_ubuntu_focal_amd64:
-        if: ${{ !contains(github.ref_name, 'windows') }}
+        if: ${{ !contains(github.ref_name, 'windows') && !contains(github.ref_name, 'macos') }}
         runs-on: ubuntu-latest
 
         steps:
@@ -750,17 +787,10 @@ jobs:
 
         - name: Update Nightly
           if: github.ref == 'refs/heads/master'
-          run: |
-            # Retry: the upload API 5xxs often enough to fail an otherwise good build.
-            for attempt in 1 2 3; do
-              gh release upload rolling ${{runner.workspace}}/sdrpp_ubuntu_focal_amd64.deb -R ${{github.repository}} --clobber && exit 0
-              echo "upload failed (attempt $attempt of 3), retrying in 15s"
-              sleep 15
-            done
-            exit 1
+          run: gh release upload rolling ${{runner.workspace}}/sdrpp_ubuntu_focal_amd64.deb -R ${{github.repository}} --clobber
 
     build_ubuntu_focal_aarch64:
-        if: ${{ !contains(github.ref_name, 'windows') }}
+        if: ${{ !contains(github.ref_name, 'windows') && !contains(github.ref_name, 'macos') }}
         runs-on: ubuntu-24.04-arm
 
         steps:
@@ -784,17 +814,10 @@ jobs:
 
         - name: Update Nightly
           if: github.ref == 'refs/heads/master'
-          run: |
-            # Retry: the upload API 5xxs often enough to fail an otherwise good build.
-            for attempt in 1 2 3; do
-              gh release upload rolling ${{runner.workspace}}/sdrpp_ubuntu_focal_aarch64.deb -R ${{github.repository}} --clobber && exit 0
-              echo "upload failed (attempt $attempt of 3), retrying in 15s"
-              sleep 15
-            done
-            exit 1
+          run: gh release upload rolling ${{runner.workspace}}/sdrpp_ubuntu_focal_aarch64.deb -R ${{github.repository}} --clobber
 
     build_ubuntu_noble:
-        if: ${{ !contains(github.ref_name, 'windows') }}
+        if: ${{ !contains(github.ref_name, 'windows') && !contains(github.ref_name, 'macos') }}
         runs-on: ubuntu-latest
 
         steps:
@@ -817,17 +840,10 @@ jobs:
               path: ${{runner.workspace}}/sdrpp_ubuntu_noble_amd64.deb
         - name: Update Nightly
           if: github.ref == 'refs/heads/master'
-          run: |
-            # Retry: the upload API 5xxs often enough to fail an otherwise good build.
-            for attempt in 1 2 3; do
-              gh release upload rolling ${{runner.workspace}}/sdrpp_ubuntu_noble_amd64.deb -R ${{github.repository}} --clobber && exit 0
-              echo "upload failed (attempt $attempt of 3), retrying in 15s"
-              sleep 15
-            done
-            exit 1
+          run: gh release upload rolling ${{runner.workspace}}/sdrpp_ubuntu_noble_amd64.deb -R ${{github.repository}} --clobber
 
     build_ubuntu_noble_aarch64:
-        if: ${{ !contains(github.ref_name, 'windows') }}
+        if: ${{ !contains(github.ref_name, 'windows') && !contains(github.ref_name, 'macos') }}
         runs-on: ubuntu-24.04-arm
 
         steps:
@@ -851,17 +867,10 @@ jobs:
 
         - name: Update Nightly
           if: github.ref == 'refs/heads/master'
-          run: |
-            # Retry: the upload API 5xxs often enough to fail an otherwise good build.
-            for attempt in 1 2 3; do
-              gh release upload rolling ${{runner.workspace}}/sdrpp_ubuntu_noble_aarch64.deb -R ${{github.repository}} --clobber && exit 0
-              echo "upload failed (attempt $attempt of 3), retrying in 15s"
-              sleep 15
-            done
-            exit 1
+          run: gh release upload rolling ${{runner.workspace}}/sdrpp_ubuntu_noble_aarch64.deb -R ${{github.repository}} --clobber
 
     build_android:
-        if: ${{ !contains(github.ref_name, 'windows') }}
+        if: ${{ !contains(github.ref_name, 'windows') && !contains(github.ref_name, 'macos') }}
         runs-on: ubuntu-latest
 
         steps:
@@ -871,30 +880,12 @@ jobs:
           working-directory: ${{runner.workspace}}
           run: git clone https://github.com/sannysanoff/android-sdr-kit
 
-        - name: Point the container build at the Azure apt mirror
-          working-directory: ${{runner.workspace}}/android-sdr-kit
-          run: |
-            # archive.ubuntu.com keeps refusing connections from GitHub's Azure
-            # runners and failing this image build in apt. android-sdr-kit is a
-            # separate repository, so patch it here rather than carrying a fork.
-            # Appended after every FROM so a multi stage build is covered, and
-            # tolerant of a base image with no sources.list.
-            sed -i '/^FROM /a RUN sed -i "s|http://archive.ubuntu.com|http://azure.archive.ubuntu.com|g; s|http://security.ubuntu.com|http://azure.archive.ubuntu.com|g" /etc/apt/sources.list || true' Dockerfile
-            sed -i '/^FROM /a RUN echo "Acquire::Retries \\"5\\";" > /etc/apt/apt.conf.d/80-ci-retries && echo "Acquire::http::Timeout \\"30\\";" >> /etc/apt/apt.conf.d/80-ci-retries || true' Dockerfile
-            cat Dockerfile
-
         - name: Build container
           working-directory: ${{runner.workspace}}/android-sdr-kit
-          run: |
-            # One retry, because the mirror change cannot help the parts of this
-            # image that fetch from somewhere else.
-            docker build --progress=plain -t android-sdr-kit . && exit 0
-            echo "Container build failed, retrying once in 60s"
-            sleep 60
-            docker build --progress=plain -t android-sdr-kit .
+          run: docker build --progress=plain -t android-sdr-kit .
 
         - name: Build
-          run: docker run --name build -v $GITHUB_WORKSPACE:/root/SDRPlusPlus android-sdr-kit /bin/bash -l -c "printf 'Acquire::Retries \"5\";\n' > /etc/apt/apt.conf.d/80-ci-retries && apt-get update && apt-get install -y unzip && cd /root/SDRPlusPlus/android && gradle -PsdrKitRoot=/sdr-kit --info assembleDebug"
+          run: docker run --name build -v $GITHUB_WORKSPACE:/root/SDRPlusPlus android-sdr-kit /bin/bash -l -c "apt-get update && apt-get install -y unzip && cd /root/SDRPlusPlus/android && gradle -PsdrKitRoot=/sdr-kit --info assembleDebug"
 
         - name: Recover APK
           working-directory: ${{runner.workspace}}
@@ -908,14 +899,7 @@ jobs:
 
         - name: Update Nightly
           if: github.ref == 'refs/heads/master'
-          run: |
-            # Retry: the upload API 5xxs often enough to fail an otherwise good build.
-            for attempt in 1 2 3; do
-              gh release upload rolling ${{runner.workspace}}/sdrpp.apk -R ${{github.repository}} --clobber && exit 0
-              echo "upload failed (attempt $attempt of 3), retrying in 15s"
-              sleep 15
-            done
-            exit 1
+          run:  gh release upload rolling ${{runner.workspace}}/sdrpp.apk -R ${{github.repository}} --clobber
 
 
     check_spelling:
