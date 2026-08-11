@@ -218,6 +218,17 @@ private:
     double sketchHi = 0.0;        // and at the right
     double lastSketch = 0.0;
 
+    // ---- What the readings are of. Everything above accumulates over seconds to
+    // minutes, and none of it means anything once the VFO has been moved to a
+    // different signal.
+    std::string measuredVfo;
+    double measuredFreq = 0.0;
+
+    // When a measurement last succeeded. The panel deliberately keeps showing the
+    // last set rather than blanking between transmissions, so without this there is
+    // nothing to say whether what is on screen is a second old or ten minutes.
+    double lastValidTime = 0.0;
+
     void resetAll() {
         hold.clear();
         holdWidth = 0;
@@ -228,6 +239,7 @@ private:
         history.clear();
         sketch.clear();
         shownValid = false;
+        lastValidTime = 0.0;
         samplesOn = 0;
         samplesTotal = 0;
         wasOn = false;
@@ -321,6 +333,32 @@ private:
         double span = gui::waterfall.getViewBandwidth();
         double centre = gui::waterfall.getViewOffset() + gui::waterfall.getCenterFrequency();
 
+        // Tuning away throws all of it out. The burst lengths, the gaps, the rhythm
+        // and the duty cycle are minutes of history about one signal, and none of
+        // them were being cleared when the VFO moved: tuning off a busy repeater
+        // onto a dead channel left the panel reporting the repeater's traffic, on a
+        // frequency where nothing had transmitted at all. Half the channel width is
+        // the threshold, so nudging around inside the signal - or the Tune to it
+        // button below - does not count as a move.
+        {
+            double vfoFreq = 0.0, vfoBw = 0.0;
+            ImU32 vfoColor = 0;
+            if (vfoInfo(vfoFreq, vfoBw, vfoColor)) {
+                double moved = fabs(vfoFreq - measuredFreq);
+                if (gui::waterfall.selectedVFO != measuredVfo ||
+                    moved > std::max<double>(vfoBw * 0.5, span / (double)dataWidth)) {
+                    gui::waterfall.releaseLatestFFT();
+                    resetAll();
+                    measuredVfo = gui::waterfall.selectedVFO;
+                    measuredFreq = vfoFreq;
+                    return;
+                }
+                // Deliberately not updated here. It is the frequency this history
+                // was started at, so that tuning across a band in small steps adds
+                // up to a move rather than never quite reaching the threshold.
+            }
+        }
+
         // A pan, a zoom or a window resize means the held bins no longer stand for
         // the frequencies they were collected at.
         if (dataWidth != holdWidth || span != holdSpan || centre != holdCentre) {
@@ -329,6 +367,10 @@ private:
             holdSpan = span;
             holdCentre = centre;
             centreHistory.clear();
+            // The settling window too: those measurements were taken on a different
+            // bin grid, and averaging them with the new ones gave a width that was
+            // neither one thing nor the other for two seconds after every zoom.
+            history.clear();
         }
 
         float decay = (holdSeconds > 0.05f) ? (90.0f / holdSeconds) * ImGui::GetIO().DeltaTime : 1000.0f;
@@ -348,6 +390,7 @@ private:
         measure(hold.data(), dataWidth, span, centre);
 
         if (meas.valid) {
+            lastValidTime = now;
             history.push_back(std::make_pair(now, meas));
             centreHistory.push_back(std::make_pair(now, meas.centre));
             while (!centreHistory.empty() && (now - centreHistory.front().first) > 8.0) {
@@ -424,7 +467,13 @@ private:
     // the settled width rather than this frame's, so the window does not breathe in
     // and out while the trace inside it moves.
     void captureSketch(const float* data, int dataWidth, double hzPerBin, double viewStart) {
-        if (!shownValid || shown.occupied <= 0.0) { return; }
+        // Nothing measurable means nothing to draw. Returning without clearing left
+        // the last good trace on screen, so a signal that had stopped went on being
+        // pictured under a set of numbers that said it was gone.
+        if (!shownValid || shown.occupied <= 0.0) {
+            sketch.clear();
+            return;
+        }
 
         double half = std::max<double>(shown.occupied * 1.5, hzPerBin * 12.0);
         double lo = shown.centre - half;
@@ -477,6 +526,23 @@ private:
         hi = std::clamp<int>(centreBin + halfBins, 0, dataWidth - 1);
     }
 
+    // The level a quarter of the bins are below, which is as good a noise floor as
+    // the spectrum alone can give. Bins from skipFrom to skipTo inclusive are left
+    // out; pass an empty range (0, -1) to use all of them. Returns NaN when too few
+    // bins are left to mean anything.
+    float quietQuarter(const float* data, int dataWidth, int skipFrom, int skipTo) {
+        scratch.clear();
+        scratch.reserve(dataWidth);
+        for (int i = 0; i < dataWidth; i++) {
+            if (i >= skipFrom && i <= skipTo) { continue; }
+            scratch.push_back(data[i]);
+        }
+        if (scratch.size() < 16) { return NAN; }
+        std::vector<float>::iterator kth = scratch.begin() + (scratch.size() / 4);
+        std::nth_element(scratch.begin(), kth, scratch.end());
+        return *kth;
+    }
+
     // The strongest bin near the VFO against the noise floor, from the live frame.
     float liveSignalToNoise(const float* data, int dataWidth, double span, double viewCentre) {
         if (data == NULL || dataWidth < 32 || span <= 0.0) { return 0.0f; }
@@ -490,10 +556,11 @@ private:
         for (int i = lo; i <= hi; i++) {
             if (data[i] > peak) { peak = data[i]; }
         }
-        scratch.assign(data, data + dataWidth);
-        std::vector<float>::iterator kth = scratch.begin() + (scratch.size() / 4);
-        std::nth_element(scratch.begin(), kth, scratch.end());
-        float noise = *kth;
+        // The search window is left out of the floor for the same reason measure()
+        // leaves the signal out of its own: this is what decides whether the signal
+        // is on, and a floor that rises along with it never lets it read as on.
+        float noise = quietQuarter(data, dataWidth, lo, hi);
+        if (!std::isfinite(noise)) { noise = quietQuarter(data, dataWidth, 0, -1); }
         if (!std::isfinite(peak) || !std::isfinite(noise)) { return 0.0f; }
         return peak - noise;
     }
@@ -511,10 +578,7 @@ private:
 
         // Noise floor from the quiet quarter of the whole view. Taking it from the
         // search window would measure the signal against itself.
-        scratch.assign(data, data + dataWidth);
-        std::vector<float>::iterator kth = scratch.begin() + (scratch.size() / 4);
-        std::nth_element(scratch.begin(), kth, scratch.end());
-        float noise = *kth;
+        float noise = quietQuarter(data, dataWidth, 0, -1);
         if (!std::isfinite(noise)) { return; }
 
         int peakBin = lo;
@@ -527,6 +591,25 @@ private:
         }
         if (!std::isfinite(peak)) { return; }
 
+        // Stopping at the noise floor as well as at the threshold keeps a weak
+        // signal from measuring as the width of the whole search window.
+        int leftEdge = 0, rightEdge = 0;
+        edgesAt(data, dataWidth, peakBin, std::max<float>(peak - 26.0f, noise + 3.0f), leftEdge, rightEdge);
+
+        // Now that the signal's own bins are known, take the floor again without
+        // them. "The quiet quarter of the view" is only the noise while the signal
+        // is a small part of what is on screen - and this panel spends its life
+        // being told to zoom in, at which point the signal is most of the screen and
+        // the floor it is being measured against is largely itself. That reads as a
+        // signal 10 or 20 dB weaker than it is, and drags the -26 dB edges in with
+        // it. Only ever accepted if it lowers the floor, since leaving bins out
+        // cannot honestly raise it.
+        float clean = quietQuarter(data, dataWidth, leftEdge, rightEdge);
+        if (std::isfinite(clean) && clean < noise) {
+            noise = clean;
+            edgesAt(data, dataWidth, peakBin, std::max<float>(peak - 26.0f, noise + 3.0f), leftEdge, rightEdge);
+        }
+
         meas.valid = true;
         meas.hzPerBin = hzPerBin;
         meas.peakDbfs = peak;
@@ -534,11 +617,7 @@ private:
         meas.snr = peak - noise;
         meas.centre = viewStart + ((double)peakBin * hzPerBin);
 
-        // Stopping at the noise floor as well as at the threshold keeps a weak
-        // signal from measuring as the width of the whole search window.
         float floorStop = noise + 3.0f;
-        int leftEdge = 0, rightEdge = 0;
-        edgesAt(data, dataWidth, peakBin, std::max<float>(peak - 26.0f, floorStop), leftEdge, rightEdge);
         meas.occupied = (double)(rightEdge - leftEdge) * hzPerBin;
         meas.binsAcross = rightEdge - leftEdge;
         meas.occLeft = viewStart + ((double)leftEdge * hzPerBin);
@@ -642,11 +721,31 @@ private:
         return "coming and going";
     }
 
+    // How long since anything could be measured. The panel keeps the last reading on
+    // screen between transmissions rather than blinking, so this is what stops that
+    // kindness turning into a lie.
+    double stale() const {
+        if (lastValidTime <= 0.0) { return 0.0; }
+        return ImGui::GetTime() - lastValidTime;
+    }
+
     // The one sentence a beginner needs before any of the numbers mean anything.
     std::string headline() const {
+        char buf[128];
+        double old = stale();
+        if (old > 2.0) {
+            snprintf(buf, sizeof buf, "Nothing to measure here now. Everything below is %s old.",
+                     fmtTime(old).c_str());
+            return std::string(buf);
+        }
+        // A signal that never got 3 dB clear of the noise has no width to report, and
+        // "0 Hz wide" reads like a measurement rather than the absence of one.
+        if (shown.occupied <= 0.0) {
+            snprintf(buf, sizeof buf, "Nothing standing clear of the noise - only %.0f dB above it.", shown.snr);
+            return std::string(buf);
+        }
         std::string s = fmtWidth(shown.occupied) + " wide";
         if (samplesTotal >= 20) { s += ", "; s += stateText(); }
-        char buf[64];
         snprintf(buf, sizeof buf, ", %.0f dB over the noise", shown.snr);
         s += buf;
         return s;
