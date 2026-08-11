@@ -737,6 +737,11 @@ private:
 
         float lineHeight = ImGui::GetTextLineHeightWithSpacing();
 
+        // The scanner sits in the middle of this panel, between choosing a list and
+        // working on the bookmarks in it, so without these two headings the row of
+        // buttons under the scanner looks like it belongs to the scanner.
+        ImGui::SectionHeader("LIST");
+
         float btnSize = ImGui::CalcTextSize("Rename").x + 8;
         ImGui::SetNextItemWidth(menuWidth - 24 - (2 * lineHeight) - btnSize);
         if (ImGui::Combo(("##freq_manager_list_sel" + _this->name).c_str(), &_this->selectedListId, _this->listNamesTxt.c_str())) {
@@ -797,6 +802,8 @@ private:
                 _this->selectedListName = "";
             }
         }
+
+        ImGui::SectionHeader("BOOKMARKS");
 
         if (_this->selectedListName == "") { style::beginDisabled(); }
         //Draw buttons on top of the list

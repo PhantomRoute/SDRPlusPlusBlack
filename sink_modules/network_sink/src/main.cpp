@@ -128,13 +128,25 @@ public:
         bool listening = (listener && listener->isListening()) || (conn && conn->isOpen());
 
         if (listening) { style::beginDisabled(); }
+
+        // A text box and a number box side by side, neither of them labelled. The
+        // width is measured rather than left to the default, so the port box is wide
+        // enough for five digits and no wider whatever the font is.
+        float portWidth = ImGui::CalcTextSize("000000").x + (ImGui::GetStyle().FramePadding.x * 2.0f);
+        ImGui::LeftLabel("Host");
+        ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX() - portWidth - ImGui::GetStyle().ItemSpacing.x);
         if (ImGui::InputText(CONCAT("##_network_sink_host_", _streamName), hostname, 1023)) {
             config.acquire();
             config.conf[_streamName]["hostname"] = hostname;
             config.release(true);
         }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            ImGui::SetTooltip("Address and port for the audio. What they mean depends on the protocol\n"
+                              "below: with UDP the audio is sent to them, with TCP the sink listens on\n"
+                              "them and waits for something to connect.");
+        }
         ImGui::SameLine();
-        ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());
+        ImGui::SetNextItemWidth(portWidth);
         if (ImGui::InputInt(CONCAT("##_network_sink_port_", _streamName), &port, 0, 0)) {
             config.acquire();
             config.conf[_streamName]["port"] = port;

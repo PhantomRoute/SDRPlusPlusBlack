@@ -497,6 +497,12 @@ private:
         if (!_this->enabled) { style::beginDisabled(); }
 
         float menuWidth = ImGui::GetContentRegionAvail().x;
+
+        // Three things in here, in the order they are reached for: what and where
+        // you are listening, what is kept out of the audio, and what is done to the
+        // audio that gets through. Only the middle one had a heading.
+        ImGui::SectionHeader("TUNING");
+
         ImGui::BeginGroup();
 
         // Sort modes by id for consistent display order
@@ -575,21 +581,10 @@ private:
             ImGui::SetTooltip("Tuning snaps to a multiple of this many Hz, so the VFO lands on channel\nspacing rather than between channels. It is also the step the arrow keys\nand the mouse wheel tune by.");
         }
 
-        // Deemphasis mode
-        if (_this->deempAllowed) {
-            ImGui::LeftLabel("De-emphasis");
-            ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());
-            if (ImGui::Combo(("##_radio_wfm_deemp_" + _this->name).c_str(), &_this->deempId, _this->deempModes.txt)) {
-                _this->setDeemphasisMode(_this->deempModes[_this->deempId]);
-            }
-        }
-
         // Everything from here down is about keeping unwanted audio out: the blanker,
         // the squelch, the tone squelch and the IF noise reduction. Without a break
         // they run on from the tuning settings above as one undifferentiated list.
-        ImGui::Spacing();
-        ImGui::TextDisabled("SQUELCH AND NOISE");
-        ImGui::Separator();
+        ImGui::SectionHeader("SQUELCH AND NOISE");
 
         // Noise blanker
         if (_this->nbAllowed) {
@@ -721,6 +716,27 @@ private:
                 }
                 if (!_this->FMIFNREnabled && _this->enabled) { style::endDisabled(); }
             }
+        }
+
+        // De-emphasis and everything the demodulator itself offers - AGC, the audio
+        // filters, the stereo decoder - all shape the audio that got through. The
+        // de-emphasis combo used to sit up with the tuning controls, separated from
+        // the rest of them by the whole squelch section.
+        // RAW is excluded by name because its menu is empty and it is not producing
+        // audio in the first place, and a heading over nothing is worse than none.
+        bool hasAudioSection = _this->deempAllowed ||
+                               (_this->selectedDemod && _this->selectedDemodID != RADIO_DEMOD_RAW);
+        if (hasAudioSection) { ImGui::SectionHeader("AUDIO"); }
+
+        if (_this->deempAllowed) {
+            ImGui::LeftLabel("De-emphasis");
+            ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());
+            if (ImGui::Combo(("##_radio_wfm_deemp_" + _this->name).c_str(), &_this->deempId, _this->deempModes.txt)) {
+                _this->setDeemphasisMode(_this->deempModes[_this->deempId]);
+            }
+            ImGui::HelpMarker("Undoes the treble boost broadcast FM is transmitted with. 50 us in most\n"
+                              "of the world, 75 us in the Americas and South Korea. Wrong or off, the\n"
+                              "audio sounds thin and hissy.");
         }
 
         // Demodulator specific menu

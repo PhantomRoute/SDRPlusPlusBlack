@@ -324,22 +324,10 @@ namespace sourcemenu {
         return open;
     }
 
-    // A (?) that explains a control without spending a line on it.
-    void helpMarker(const char* text) {
-        ImGui::SameLine();
-        ImGui::TextDisabled("(?)");
-        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("%s", text); }
-    }
-
-    // This menu holds three unrelated things: which radio to listen with, how its
-    // frequencies are corrected, and who is operating it. Without something to
-    // separate them the callsign box reads like a setting of the SDR.
-    void sectionHeader(const char* title) {
-        ImGui::Spacing();
-        ImGui::TextDisabled("%s", title);
-        ImGui::Separator();
-    }
-
+    // This menu holds four unrelated things: which radio to listen with, what is
+    // done to its samples, how its frequencies are corrected, and who is operating
+    // it. Without something to separate them the callsign box reads like a setting
+    // of the SDR.
     void draw(void* ctx) {
         float itemWidth = ImGui::GetContentRegionAvail().x;
         float lineHeight = ImGui::GetTextLineHeightWithSpacing();
@@ -382,7 +370,7 @@ namespace sourcemenu {
 
         sigpath::sourceManager.showSelectedMenu();
 
-        sectionHeader("SIGNAL");
+        ImGui::SectionHeader("SIGNAL");
 
         if (ImGui::Checkbox("IQ correction##_sdrpp_iq_corr", &iqCorrection)) {
             sigpath::iqFrontEnd.setDCBlocking(iqCorrection);
@@ -390,7 +378,7 @@ namespace sourcemenu {
             core::configManager.conf["iqCorrection"] = iqCorrection;
             core::configManager.release(true);
         }
-        helpMarker("Removes the DC spike sitting in the middle of the spectrum on most\nSDRs. Leave it on unless you are looking at something exactly at\nthe centre frequency.");
+        ImGui::HelpMarker("Removes the DC spike sitting in the middle of the spectrum on most\nSDRs. Leave it on unless you are looking at something exactly at\nthe centre frequency.");
 
         if (ImGui::Checkbox("Invert IQ##_sdrpp_inv_iq", &invertIQ)) {
             sigpath::iqFrontEnd.setInvertIQ(invertIQ);
@@ -398,7 +386,7 @@ namespace sourcemenu {
             core::configManager.conf["invertIQ"] = invertIQ;
             core::configManager.release(true);
         }
-        helpMarker("Mirrors the spectrum left to right. Turn it on if USB and LSB come out\nthe wrong way round, which some hardware and some recordings need.");
+        ImGui::HelpMarker("Mirrors the spectrum left to right. Turn it on if USB and LSB come out\nthe wrong way round, which some hardware and some recordings need.");
 
         if (running) { style::beginDisabled(); }
         ImGui::LeftLabel("Decimation");
@@ -410,9 +398,9 @@ namespace sourcemenu {
             core::configManager.release(true);
         }
         if (running) { style::endDisabled(); }
-        helpMarker("Divides the sample rate before anything else sees it: less spectrum on\nscreen, proportionally less CPU. Set while the radio is stopped.");
+        ImGui::HelpMarker("Divides the sample rate before anything else sees it: less spectrum on\nscreen, proportionally less CPU. Set while the radio is stopped.");
 
-        sectionHeader("FREQUENCY OFFSET");
+        ImGui::SectionHeader("FREQUENCY OFFSET");
 
         ImGui::LeftLabel("Mode");
         ImGui::SetNextItemWidth(itemWidth - ImGui::GetCursorPosX() - 2.0f * (lineHeight + 1.5f * spacing));
@@ -472,7 +460,7 @@ namespace sourcemenu {
             ImGui::SetTooltip("Pick Manual above to type an offset, or + to save a named one");
         }
 
-        sectionHeader("OPERATOR");
+        ImGui::SectionHeader("OPERATOR");
 
         ImGui::LeftLabel("Callsign");
         ImGui::FillWidth();
@@ -534,13 +522,18 @@ namespace sourcemenu {
             ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.3f, 1.0f), "not a grid square");
         }
 
-        ImGui::LeftLabel("Clock correction");
+        // This was the last row of OPERATOR, under the callsign and the grid square,
+        // where it read as another thing about the person at the radio. It is not:
+        // it is what the time-slotted decoders count seconds from.
+        ImGui::SectionHeader("CLOCK");
+
+        ImGui::LeftLabel("Correction");
         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - (32.0f * style::uiScale));
         if (ImGui::SliderInt("##_sdrpp_time_correction", &sigpath::iqFrontEnd.secondsAdjustment, -15, 15, "%d s")) {
             core::configManager.acquire();
             core::configManager.conf["secondsAdjustment"] = sigpath::iqFrontEnd.secondsAdjustment;
             core::configManager.release(true);
         }
-        helpMarker("Shifts the clock the time-slotted decoders work from. FT8 and the like\nneed the computer to be within a second or so of real time; leave this at\n0 unless decoding fails and you know the clock is out.");
+        ImGui::HelpMarker("Shifts the clock the time-slotted decoders work from. FT8 and the like\nneed the computer to be within a second or so of real time; leave this at\n0 unless decoding fails and you know the clock is out.");
     }
 }

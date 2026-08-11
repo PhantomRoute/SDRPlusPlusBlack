@@ -43,11 +43,6 @@ namespace {
         config.release(true);
     }
 
-    void helpMarker(const char* text) {
-        ImGui::SameLine();
-        ImGui::TextDisabled("(?)");
-        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("%s", text); }
-    }
 }
 
 const char* Scanner::stateName(State state) {
@@ -698,22 +693,11 @@ void Scanner::drawSettings() {
     // Leave room on each row for the (?) marker after the field.
     float markerRoom = 32.0f * style::uiScale;
 
-    ImGui::LeftLabel("Wait (ms)");
-    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - markerRoom);
-    if (ImGui::InputFloat("##scanner_dwell", &dwellMs, 50.0f, 250.0f, "%.0f")) {
-        dwellMs = std::clamp<float>(dwellMs, 20.0f, 10000.0f);
-        saveSetting("scanIntervalMs", dwellMs);
-    }
-    helpMarker("How long to give a quiet channel a chance to come alive before moving on.");
-
-    ImGui::LeftLabel(carrierHoldMode ? "Hang (s)" : "Listen (s)");
-    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - markerRoom);
-    if (ImGui::InputFloat("##scanner_listen", &listenTimeSec, 1.0f, 5.0f, "%.1f")) {
-        listenTimeSec = std::clamp<float>(listenTimeSec, 0.5f, 600.0f);
-        saveSetting("listenTimeSec", listenTimeSec);
-    }
-    helpMarker(carrierHoldMode ? "How long to wait after the signal drops before moving on."
-                               : "How long to stay on a busy channel before moving on.");
+    // These are two separate questions - what makes the scan stop, and how long it
+    // waits at each step - and they were interleaved. Settle in particular sat at
+    // the bottom under the two behaviour switches, three rows away from the other
+    // two times it belongs with.
+    ImGui::SectionHeader("WHAT COUNTS AS BUSY");
 
     ImGui::LeftLabel("Noise floor (dB)");
     ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - markerRoom);
@@ -721,7 +705,7 @@ void Scanner::drawSettings() {
         noiseFloor = std::clamp<float>(noiseFloor, METER_MIN_DB, METER_MAX_DB);
         saveSetting("noiseFloor", noiseFloor);
     }
-    helpMarker("Where the noise sits on this band. A channel counts as busy at floor + margin,\nwhich is the line drawn on the meter.");
+    ImGui::HelpMarker("Where the noise sits on this band. A channel counts as busy at floor + margin,\nwhich is the line drawn on the meter.");
 
     ImGui::LeftLabel("Margin (dB)");
     ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - markerRoom);
@@ -729,7 +713,7 @@ void Scanner::drawSettings() {
         signalMarginDb = std::clamp<float>(signalMarginDb, 0.0f, METER_MAX_DB);
         saveSetting("signalMarginDb", signalMarginDb);
     }
-    helpMarker("How far over the noise floor a channel has to be. Raise it if the scan stops\non nothing, lower it if it walks past weak signals.");
+    ImGui::HelpMarker("How far over the noise floor a channel has to be. Raise it if the scan stops\non nothing, lower it if it walks past weak signals.");
 
     if (ImGui::Button("Set floor from what I hear now##scanner_use_current", ImVec2(ImGui::GetContentRegionAvail().x, 0))) {
         if (!signalHistory.empty()) {
@@ -739,16 +723,15 @@ void Scanner::drawSettings() {
     }
     if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Take the last half second of the current channel as the noise floor.\nTune to an empty channel first."); }
 
-    if (ImGui::Checkbox("Stay while the signal lasts##scanner_carrier_hold", &carrierHoldMode)) {
-        saveSetting("carrierHoldMode", carrierHoldMode);
-    }
-    helpMarker("Stay parked for as long as the channel is busy instead of leaving after a fixed\ntime. The listen time then becomes the hang time after the signal drops.");
+    ImGui::SectionHeader("TIMING");
 
-    if (ImGui::Checkbox("Mute while searching##scanner_squelch", &squelchEnabled)) {
-        saveSetting("squelchEnabled", squelchEnabled);
-        if (!squelchEnabled) { setMuted(false); }
+    ImGui::LeftLabel("Wait (ms)");
+    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - markerRoom);
+    if (ImGui::InputFloat("##scanner_dwell", &dwellMs, 50.0f, 250.0f, "%.0f")) {
+        dwellMs = std::clamp<float>(dwellMs, 20.0f, 10000.0f);
+        saveSetting("scanIntervalMs", dwellMs);
     }
-    helpMarker("Mute the audio while the scan is hopping, so you only hear the channels it stops on.");
+    ImGui::HelpMarker("How long to give a quiet channel a chance to come alive before moving on.");
 
     ImGui::LeftLabel("Settle (ms)");
     ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - markerRoom);
@@ -756,7 +739,29 @@ void Scanner::drawSettings() {
         settleMs = std::clamp<float>(settleMs, 0.0f, 2000.0f);
         saveSetting("settleMs", settleMs);
     }
-    helpMarker("Ignore the signal for this long after each hop, while the spectrum catches up.\nRaise it if the scan keeps stopping on channels that turn out to be empty.");
+    ImGui::HelpMarker("Ignore the signal for this long after each hop, while the spectrum catches up.\nRaise it if the scan keeps stopping on channels that turn out to be empty.");
+
+    ImGui::LeftLabel(carrierHoldMode ? "Hang (s)" : "Listen (s)");
+    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - markerRoom);
+    if (ImGui::InputFloat("##scanner_listen", &listenTimeSec, 1.0f, 5.0f, "%.1f")) {
+        listenTimeSec = std::clamp<float>(listenTimeSec, 0.5f, 600.0f);
+        saveSetting("listenTimeSec", listenTimeSec);
+    }
+    ImGui::HelpMarker(carrierHoldMode ? "How long to wait after the signal drops before moving on."
+                                      : "How long to stay on a busy channel before moving on.");
+
+    if (ImGui::Checkbox("Stay while the signal lasts##scanner_carrier_hold", &carrierHoldMode)) {
+        saveSetting("carrierHoldMode", carrierHoldMode);
+    }
+    ImGui::HelpMarker("Stay parked for as long as the channel is busy instead of leaving after a fixed\ntime. The listen time then becomes the hang time after the signal drops.");
+
+    ImGui::SectionHeader("WHILE SCANNING");
+
+    if (ImGui::Checkbox("Mute while searching##scanner_squelch", &squelchEnabled)) {
+        saveSetting("squelchEnabled", squelchEnabled);
+        if (!squelchEnabled) { setMuted(false); }
+    }
+    ImGui::HelpMarker("Mute the audio while the scan is hopping, so you only hear the channels it stops on.");
 
     if (!skipped.empty()) {
         ImGui::Separator();

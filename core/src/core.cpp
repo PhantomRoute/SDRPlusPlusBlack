@@ -597,9 +597,13 @@ int sdrpp_main(int argc, char* argv[]) {
         // Appearance
         { "Display", true },
         { "Theme", false },
-        // Optional processing and decoders
+        // Optional processing and decoders. A panel that is not in this list still
+        // appears, but at the bottom and expanded, below the two that are meant to
+        // be last - which is where the shipped decoders were landing.
         { "Noise Reduction logmmse", false },
         { "FT8/FT4 Decoder", false },
+        { "VHF Digital Modes", false },
+        { "TETRA Demodulator", false },
         { "WebSDR View", false },
         // Set once
         { "Rigctl Server", false },

@@ -214,16 +214,22 @@ public:
     void menuHandler() {
         float menuWidth = ImGui::GetContentRegionAvail().x;
 
-        ImGui::SetNextItemWidth(menuWidth);
+        // Two unlabelled combos, one of sound card names and one of numbers, with
+        // nothing to say which was which or what the numbers were.
+        ImGui::LeftLabel("Device");
+        ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());
         if (ImGui::Combo(("##_brown_audio_sink_dev_" + _streamName).c_str(), &devId, txtDevList.c_str())) {
             selectById(devId);
             config.acquire();
             config.conf[_streamName]["device"] = devList[devId].name;
             config.release(true);
         }
+        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Which sound card this stream is played out of"); }
 
         if (SinkManager::getSecondaryStreamIndex(_streamName).second == 0) {
             // only primary one has frequency selection
+            ImGui::LeftLabel("Rate");
+            ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());
             if (ImGui::Combo(("##_brown_audio_sink_sr_" + _streamName).c_str(), &srId, sampleRatesTxt.c_str())) {
                 sampleRate = sampleRates[srId];
                 _stream->setSampleRate(sampleRate);

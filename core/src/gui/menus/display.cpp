@@ -260,43 +260,31 @@ namespace displaymenu {
         ImGui::Text("Color map Author: %s", colorMapAuthor.c_str());
     }
 
-    // A (?) that explains a control without spending a line on it.
-    void helpMarker(const char* text) {
-        ImGui::SameLine();
-        ImGui::TextDisabled("(?)");
-        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("%s", text); }
-    }
-
     // This menu is one long list of switches with nothing to say which of them
-    // belong together. These break it into the three things it actually covers:
-    // the window layout, what the spectrum looks like, and what it costs to run.
-    void sectionHeader(const char* title) {
-        ImGui::Spacing();
-        ImGui::TextDisabled("%s", title);
-        ImGui::Separator();
-    }
-
+    // belong together. The headers break it into the four things it actually covers:
+    // the window layout, what the spectrum looks like, what it costs to run, and
+    // what the keyboard and mouse do.
     void draw(void* ctx) {
-        sectionHeader("LAYOUT");
+        ImGui::SectionHeader("LAYOUT");
 
         if (ImGui::Checkbox("Waterfall##_sdrpp", &showWaterfall)) {
             setWaterfallShown(showWaterfall);
         }
-        helpMarker("Show the scrolling history under the spectrum. The Home key toggles this too.");
+        ImGui::HelpMarker("Show the scrolling history under the spectrum. The Home key toggles this too.");
         ImGui::SameLine();
         if (ImGui::Checkbox("FFT##_sdrpp", &showFFT)) {
             core::configManager.acquire();
             core::configManager.conf["showFFT"] = showFFT;
             core::configManager.release(true);
         }
-        helpMarker("Show the live spectrum trace above the waterfall.");
+        ImGui::HelpMarker("Show the live spectrum trace above the waterfall.");
 
         if (ImGui::Checkbox("Big controls (small screen, thick fingers)##_sdrpp", &phoneLayout)) {
             core::configManager.acquire();
             core::configManager.conf["smallScreen"] = phoneLayout;
             core::configManager.release(true);
         }
-        helpMarker("Taller menu rows, fatter scrollbars and a shorter frequency readout,\nfor touch screens and small displays.");
+        ImGui::HelpMarker("Taller menu rows, fatter scrollbars and a shorter frequency readout,\nfor touch screens and small displays.");
 
         ImGui::LeftLabel("Layout");
         if (ImGui::RadioButton("Default ##_sdrpp", transcieverLayout == TRAL_NONE)) {
@@ -312,14 +300,14 @@ namespace displaymenu {
             core::configManager.conf["transcieverLayout"] = transcieverLayout;
             core::configManager.release(true);
         }
-        helpMarker("SSB trx replaces the desktop layout with the transceiver one: big TX and\nsound buttons, and the last minutes of the QSO kept for playback.");
+        ImGui::HelpMarker("SSB trx replaces the desktop layout with the transceiver one: big TX and\nsound buttons, and the last minutes of the QSO kept for playback.");
 
         if (ImGui::Checkbox("Lock menu order##_sdrpp", &gui::menu.locked)) {
             core::configManager.acquire();
             core::configManager.conf["lockMenuOrder"] = gui::menu.locked;
             core::configManager.release(true);
         }
-        helpMarker("Stops the sections of this menu being dragged into a different order.");
+        ImGui::HelpMarker("Stops the sections of this menu being dragged into a different order.");
 
 #ifdef __ANDROID__
         if (ImGui::Checkbox("Show battery##_sdrpp", &showBattery)) {
@@ -347,7 +335,7 @@ namespace displaymenu {
             restartRequired = true;
         }
 
-        sectionHeader("SPECTRUM");
+        ImGui::SectionHeader("SPECTRUM");
 
         // Each of these three is a switch plus the speed it runs at. Filling the rest
         // of the line with the number box left it too narrow for three digits once
@@ -362,7 +350,7 @@ namespace displaymenu {
             core::configManager.conf["fftHold"] = fftHold;
             core::configManager.release(true);
         }
-        helpMarker("A second trace at the highest level each frequency has reached.\nThe number is how fast it falls back down.");
+        ImGui::HelpMarker("A second trace at the highest level each frequency has reached.\nThe number is how fast it falls back down.");
         ImGui::SameLine();
         ImGui::SetNextItemWidth(speedWidth);
         if (ImGui::InputInt("##sdrpp_fft_hold_speed", &fftHoldSpeed)) {
@@ -381,7 +369,7 @@ namespace displaymenu {
             core::configManager.conf["fftSmoothing"] = fftSmoothing;
             core::configManager.release(true);
         }
-        helpMarker("Averages the spectrum over time, so noise stops flickering and weak\ncarriers stand out. The number is how fast it follows a change.");
+        ImGui::HelpMarker("Averages the spectrum over time, so noise stops flickering and weak\ncarriers stand out. The number is how fast it follows a change.");
         ImGui::SameLine();
         ImGui::SetNextItemWidth(speedWidth);
         if (ImGui::InputInt("##sdrpp_fft_smoothing_speed", &fftSmoothingSpeed)) {
@@ -398,7 +386,7 @@ namespace displaymenu {
             core::configManager.conf["snrSmoothing"] = snrSmoothing;
             core::configManager.release(true);
         }
-        helpMarker("Steadies the SNR meter beside the frequency readout, and everything\nthat reads it.");
+        ImGui::HelpMarker("Steadies the SNR meter beside the frequency readout, and everything\nthat reads it.");
         ImGui::SameLine();
         ImGui::SetNextItemWidth(speedWidth);
         if (ImGui::InputInt("##sdrpp_snr_smoothing_speed", &snrSmoothingSpeed)) {
@@ -409,15 +397,7 @@ namespace displaymenu {
             core::configManager.release(true);
         }
 
-        if (ImGui::Checkbox("Redraw waterfall history on zoom##_sdrpp", &fullWaterfallUpdate)) {
-            gui::waterfall.setFullWaterfallUpdate(fullWaterfallUpdate);
-            core::configManager.acquire();
-            core::configManager.conf["fullWaterfallUpdate"] = fullWaterfallUpdate;
-            core::configManager.release(true);
-        }
-        helpMarker("On, zooming or panning redraws the whole waterfall to match. Off is cheaper\non a slow machine, but the history stays at the old zoom until it scrolls away.");
-
-        sectionHeader("PROCESSING");
+        ImGui::SectionHeader("PROCESSING");
 
         ImGui::LeftLabel("Framerate");
         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - (32.0f * style::uiScale));
@@ -429,7 +409,7 @@ namespace displaymenu {
             core::configManager.conf["fftRate"] = fftRate;
             core::configManager.release(true);
         }
-        helpMarker("Spectrum updates per second. Lower costs less CPU and scrolls the\nwaterfall more slowly.");
+        ImGui::HelpMarker("Spectrum updates per second. Lower costs less CPU and scrolls the\nwaterfall more slowly.");
 
         ImGui::LeftLabel("FFT size");
         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - (32.0f * style::uiScale));
@@ -441,7 +421,7 @@ namespace displaymenu {
             core::configManager.conf["fftAccel"] = fftSizeId >= std::size(FFTSizes);
             core::configManager.release(true);
         }
-        helpMarker("Bins the spectrum is split into. Bigger resolves closer signals apart\nand costs more CPU.");
+        ImGui::HelpMarker("Bins the spectrum is split into. Bigger resolves closer signals apart\nand costs more CPU.");
 
         {
             static auto lastFFTReportTime = currentTimeMillis();
@@ -468,9 +448,20 @@ namespace displaymenu {
             core::configManager.conf["fftWindow"] = selectedWindow;
             core::configManager.release(true);
         }
-        helpMarker("Shapes each block before the FFT. Blackman and Nuttall stop a strong\nsignal smearing across its neighbours; Rectangular is sharpest but leaks.");
+        ImGui::HelpMarker("Shapes each block before the FFT. Blackman and Nuttall stop a strong\nsignal smearing across its neighbours; Rectangular is sharpest but leaks.");
 
-        sectionHeader("KEYBOARD AND MOUSE");
+        // This sat under SPECTRUM with the traces, but it is not about what the
+        // spectrum looks like - it is one of the two or three switches that decide
+        // what the display costs on a slow machine, which is what this section is.
+        if (ImGui::Checkbox("Redraw waterfall history on zoom##_sdrpp", &fullWaterfallUpdate)) {
+            gui::waterfall.setFullWaterfallUpdate(fullWaterfallUpdate);
+            core::configManager.acquire();
+            core::configManager.conf["fullWaterfallUpdate"] = fullWaterfallUpdate;
+            core::configManager.release(true);
+        }
+        ImGui::HelpMarker("On, zooming or panning redraws the whole waterfall to match. Off is cheaper\non a slow machine, but the history stays at the old zoom until it scrolls away.");
+
+        ImGui::SectionHeader("KEYBOARD AND MOUSE");
 
         // All of this already worked and none of it was written down anywhere, so
         // the only way to find out about it was to read the source.

@@ -3,11 +3,13 @@
 #include <gui/gui.h>
 #include <gui/style.h>
 #include <gui/widgets/bandplan.h>
+#include <gui/tuner.h>
 #include <signal_path/signal_path.h>
 #include <config.h>
 #include <core.h>
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <deque>
 #include <string>
@@ -26,6 +28,10 @@ SDRPP_MOD_INFO{
 // deliberately does not guess at what the signal is: a width and a shape are not
 // enough to name a mode, and a list of maybes is worse than no answer at all.
 // Everything here is either a measurement or a plain description of one.
+//
+// It does say what a measurement can be compared with - a channel spacing, a common
+// channel width - because that is what turns a number into something a person can
+// think with. Those comparisons are always framed as comparisons, never as answers.
 
 ConfigManager config;
 
@@ -53,16 +59,51 @@ namespace {
         return std::string(buf);
     }
 
-    void helpMarker(const char* text) {
-        ImGui::SameLine();
-        ImGui::TextDisabled("(?)");
-        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("%s", text); }
+    // Channel spacings that transmitters are actually placed on. A signal that lands
+    // on one of these did not get there by accident, and knowing which grid it sits
+    // on says more about what kind of service it is than its width does. Largest
+    // first, so the coarsest grid that fits is the one reported.
+    const double RASTER_STEPS[] = { 200000.0, 100000.0, 25000.0, 12500.0, 10000.0,
+                                    9000.0, 6250.0, 5000.0, 1000.0 };
+
+    // Which grid the frequency falls on, or 0 for none of them. Needs the bin width,
+    // because landing within half a bin of a grid line proves nothing when the bins
+    // are wider than the spacing.
+    double rasterStep(double freq, double hzPerBin) {
+        for (double step : RASTER_STEPS) {
+            if (hzPerBin > (step / 4.0)) { continue; }
+            double off = fmod(fabs(freq), step);
+            double err = std::min<double>(off, step - off);
+            if (err <= std::max<double>(hzPerBin, step * 0.01)) { return step; }
+        }
+        return 0.0;
     }
 
-    void sectionHeader(const char* title) {
-        ImGui::Spacing();
-        ImGui::TextDisabled("%s", title);
-        ImGui::Separator();
+    // Something to hold the measured width up against. These are channel plans, not
+    // signals: several unrelated things share each one, which is exactly why this is
+    // offered as a comparison and never as an answer.
+    struct Yardstick {
+        double hz;
+        const char* what;
+    };
+    const Yardstick YARDSTICKS[] = {
+        { 500.0, "a CW / narrow data channel" },
+        { 2800.0, "an SSB voice channel" },
+        { 6250.0, "a 6.25 kHz narrow channel" },
+        { 9000.0, "an AM broadcast channel (9 kHz)" },
+        { 10000.0, "an AM broadcast channel (10 kHz)" },
+        { 12500.0, "a 12.5 kHz FM channel" },
+        { 25000.0, "a 25 kHz FM channel" },
+        { 200000.0, "an FM broadcast channel" },
+        { 1250000.0, "a DAB block" },
+        { 5000000.0, "a TV / wideband data channel" },
+    };
+
+    const char* yardstick(double hz) {
+        for (const auto& y : YARDSTICKS) {
+            if (hz > (y.hz * 0.8) && hz < (y.hz * 1.2)) { return y.what; }
+        }
+        return NULL;
     }
 }
 
@@ -103,13 +144,17 @@ private:
         double centre = 0.0;      // where the peak is, which is not always the VFO
         double occupied = 0.0;    // width 26 dB below the peak
         double halfPower = 0.0;   // width 3 dB below the peak
+        // The edges as absolute frequencies, not just the widths. A signal is rarely
+        // symmetric about its peak, and the sketch has to draw them where they are.
+        double occLeft = 0.0, occRight = 0.0;
+        double hpLeft = 0.0, hpRight = 0.0;
         double hzPerBin = 0.0;
         int binsAcross = 0;
         float peakDbfs = 0.0f;
         float noiseDbfs = 0.0f;
         float snr = 0.0f;
         int peaks = 0;            // separate maxima across the occupied width
-        double peakSpacing = 0.0; // gap between them, when there are exactly two
+        double peakSpacing = 0.0; // average gap between them, when there are two or more
         float crestDb = 0.0f;     // peak above the average across the occupied width
         double balance = 0.0;     // -1 all below the peak, 0 even, +1 all above
     };
@@ -153,6 +198,11 @@ private:
     double lastEdge = 0.0;
     std::deque<double> burstLengths;
     std::deque<double> gapLengths;
+    // When the signal came up, kept so the gap between one transmission and the next
+    // can be measured directly rather than added up from a burst and a gap. Whether
+    // those gaps are all the same length is most of what separates a machine keeping
+    // to a schedule from someone talking.
+    std::deque<double> onsetTimes;
     int samplesOn = 0;
     int samplesTotal = 0;
     double dutyWindowStart = 0.0;
@@ -160,13 +210,23 @@ private:
     // ---- Drift, from where the peak has moved over the last few seconds.
     std::deque<std::pair<double, double>> centreHistory;
 
+    // ---- A picture of the signal, which says in one glance what a column of
+    // numbers takes a while to say: the shape, where the edges were measured, how far
+    // above the noise it stands and whether the VFO is sitting across it.
+    std::vector<float> sketch;    // one dB value per column, left to right
+    double sketchLo = 0.0;        // frequency at the left edge of the sketch
+    double sketchHi = 0.0;        // and at the right
+    double lastSketch = 0.0;
+
     void resetAll() {
         hold.clear();
         holdWidth = 0;
         burstLengths.clear();
         gapLengths.clear();
+        onsetTimes.clear();
         centreHistory.clear();
         history.clear();
+        sketch.clear();
         shownValid = false;
         samplesOn = 0;
         samplesTotal = 0;
@@ -200,6 +260,10 @@ private:
         shown.centre = medianOf([](const Measurement& m) { return m.centre; });
         shown.occupied = medianOf([](const Measurement& m) { return m.occupied; });
         shown.halfPower = medianOf([](const Measurement& m) { return m.halfPower; });
+        shown.occLeft = medianOf([](const Measurement& m) { return m.occLeft; });
+        shown.occRight = medianOf([](const Measurement& m) { return m.occRight; });
+        shown.hpLeft = medianOf([](const Measurement& m) { return m.hpLeft; });
+        shown.hpRight = medianOf([](const Measurement& m) { return m.hpRight; });
         shown.peakDbfs = (float)medianOf([](const Measurement& m) { return (double)m.peakDbfs; });
         shown.noiseDbfs = (float)medianOf([](const Measurement& m) { return (double)m.noiseDbfs; });
         shown.snr = (float)medianOf([](const Measurement& m) { return (double)m.snr; });
@@ -208,10 +272,11 @@ private:
         shown.peaks = (int)llround(medianOf([](const Measurement& m) { return (double)m.peaks; }));
         shown.binsAcross = (int)llround(medianOf([](const Measurement& m) { return (double)m.binsAcross; }));
 
-        // Only the frames that actually saw two peaks have a spacing to report.
+        // Only the frames that actually saw more than one peak have a spacing to
+        // report.
         medianScratch.clear();
         for (const auto& entry : history) {
-            if (entry.second.peaks == 2 && entry.second.peakSpacing > 0.0) {
+            if (entry.second.peaks >= 2 && entry.second.peakSpacing > 0.0) {
                 medianScratch.push_back(entry.second.peakSpacing);
             }
         }
@@ -290,6 +355,13 @@ private:
             }
         }
         settle(now);
+
+        // Ten times a second. Fast enough to look live, slow enough that the trace
+        // can be read rather than watched.
+        if ((now - lastSketch) > 0.1) {
+            lastSketch = now;
+            captureSketch(hold.data(), dataWidth, span / (double)dataWidth, centre - (span / 2.0));
+        }
     }
 
     void updateTiming(double now, bool on) {
@@ -312,11 +384,79 @@ private:
                     std::deque<double>& into = wasOn ? burstLengths : gapLengths;
                     into.push_back(held);
                     while (into.size() > 20) { into.pop_front(); }
+                    if (on) {
+                        onsetTimes.push_back(now);
+                        while (onsetTimes.size() > 20) { onsetTimes.pop_front(); }
+                    }
                 }
             }
             lastEdge = now;
             wasOn = on;
         }
+    }
+
+    // The gap from one transmission starting to the next, and how much that gap
+    // varies. Returns false until there are enough of them to say anything.
+    bool rhythm(double& period, double& spread) const {
+        if (onsetTimes.size() < 4) { return false; }
+        double sum = 0.0;
+        int count = 0;
+        for (size_t i = 1; i < onsetTimes.size(); i++) {
+            sum += onsetTimes[i] - onsetTimes[i - 1];
+            count++;
+        }
+        period = sum / (double)count;
+        if (period <= 0.0) { return false; }
+
+        double var = 0.0;
+        for (size_t i = 1; i < onsetTimes.size(); i++) {
+            double d = (onsetTimes[i] - onsetTimes[i - 1]) - period;
+            var += d * d;
+        }
+        // As a fraction of the period, so "regular" means the same thing for
+        // something every two seconds and something every two minutes.
+        spread = sqrt(var / (double)count) / period;
+        return true;
+    }
+
+    // Copies the held spectrum around the signal into the sketch, over a window three
+    // times the occupied width so there is some context either side of it. Taken from
+    // the settled width rather than this frame's, so the window does not breathe in
+    // and out while the trace inside it moves.
+    void captureSketch(const float* data, int dataWidth, double hzPerBin, double viewStart) {
+        if (!shownValid || shown.occupied <= 0.0) { return; }
+
+        double half = std::max<double>(shown.occupied * 1.5, hzPerBin * 12.0);
+        double lo = shown.centre - half;
+        double hi = shown.centre + half;
+        int loBin = (int)floor((lo - viewStart) / hzPerBin);
+        int hiBin = (int)ceil((hi - viewStart) / hzPerBin);
+        loBin = std::clamp<int>(loBin, 0, dataWidth - 1);
+        hiBin = std::clamp<int>(hiBin, 0, dataWidth - 1);
+        if ((hiBin - loBin) < 4) { return; }
+
+        // At most this many columns, taking the loudest bin in each. A max rather
+        // than an average, so a narrow carrier inside a wide window does not get
+        // averaged down into nothing.
+        const int MAX_COLUMNS = 160;
+        int span = hiBin - loBin + 1;
+        int columns = std::min<int>(span, MAX_COLUMNS);
+        sketch.assign(columns, -INFINITY);
+        for (int i = 0; i < span; i++) {
+            int col = (int)((int64_t)i * columns / span);
+            if (col >= columns) { col = columns - 1; }
+            float v = data[loBin + i];
+            if (v > sketch[col]) { sketch[col] = v; }
+        }
+        // Every column should have caught at least one bin, since there are never
+        // more columns than bins. Belt and braces: one -INFINITY reaching the drawing
+        // code turns into a NaN coordinate and takes the whole trace with it.
+        for (int i = 1; i < columns; i++) {
+            if (!std::isfinite(sketch[i])) { sketch[i] = sketch[i - 1]; }
+        }
+        if (!std::isfinite(sketch[0])) { sketch[0] = shown.noiseDbfs; }
+        sketchLo = viewStart + ((double)loBin * hzPerBin);
+        sketchHi = viewStart + ((double)hiBin * hzPerBin);
     }
 
     // Where to look for the signal: around the VFO if there is one, and wide enough
@@ -401,10 +541,14 @@ private:
         edgesAt(data, dataWidth, peakBin, std::max<float>(peak - 26.0f, floorStop), leftEdge, rightEdge);
         meas.occupied = (double)(rightEdge - leftEdge) * hzPerBin;
         meas.binsAcross = rightEdge - leftEdge;
+        meas.occLeft = viewStart + ((double)leftEdge * hzPerBin);
+        meas.occRight = viewStart + ((double)rightEdge * hzPerBin);
 
         int l3 = 0, r3 = 0;
         edgesAt(data, dataWidth, peakBin, std::max<float>(peak - 3.0f, floorStop), l3, r3);
         meas.halfPower = (double)(r3 - l3) * hzPerBin;
+        meas.hpLeft = viewStart + ((double)l3 * hzPerBin);
+        meas.hpRight = viewStart + ((double)r3 * hzPerBin);
 
         // Everything below describes the shape between the -26 dB edges.
         double sum = 0.0;
@@ -429,8 +573,11 @@ private:
         }
         if (count > 0) { meas.crestDb = peak - (float)(sum / (double)count); }
         if ((lowSide + highSide) > 0.0) { meas.balance = (highSide - lowSide) / (highSide + lowSide); }
-        if (meas.peaks == 2 && firstPeakBin >= 0 && lastPeakBin > firstPeakBin) {
-            meas.peakSpacing = (double)(lastPeakBin - firstPeakBin) * hzPerBin;
+        // The average gap, not the total span, so a row of evenly spaced tones reads
+        // as one number however many of them there are. Two peaks is the same
+        // calculation with a divisor of one.
+        if (meas.peaks >= 2 && firstPeakBin >= 0 && lastPeakBin > firstPeakBin) {
+            meas.peakSpacing = (double)(lastPeakBin - firstPeakBin) * hzPerBin / (double)(meas.peaks - 1);
         }
     }
 
@@ -440,14 +587,6 @@ private:
         while (left > 0 && data[left] >= level) { left--; }
         right = peakBin;
         while (right < dataWidth - 1 && data[right] >= level) { right++; }
-    }
-
-    const bandplan::Band_t* bandAt(double freq) {
-        if (gui::waterfall.bandplan == NULL) { return NULL; }
-        for (const auto& band : gui::waterfall.bandplan->bands) {
-            if (freq >= band.start && freq <= band.end) { return &band; }
-        }
-        return NULL;
     }
 
     static double average(const std::deque<double>& v) {
@@ -468,6 +607,182 @@ private:
         return moved / dt;
     }
 
+    // The selected VFO's centre and width, so the panel can say where the signal sits
+    // relative to what is actually being listened to. False when no radio is running.
+    bool vfoInfo(double& freq, double& bw, ImU32& color) const {
+        const std::string& vfoName = gui::waterfall.selectedVFO;
+        if (vfoName.empty()) { return false; }
+        auto it = gui::waterfall.vfos.find(vfoName);
+        if (it == gui::waterfall.vfos.end() || it->second == NULL) { return false; }
+        freq = gui::waterfall.getCenterFrequency() + it->second->centerOffset;
+        bw = it->second->bandwidth;
+        color = it->second->color;
+        return true;
+    }
+
+    // How the transmissions are spaced, in words. Kept apart from the drawing so the
+    // clipboard summary says exactly what the panel says.
+    std::string rhythmText() const {
+        double period = 0.0, spread = 0.0;
+        if (!rhythm(period, spread)) { return "-"; }
+        char buf[96];
+        // A tenth either way is about as steady as a hand-measured burst edge gets,
+        // so anything inside that is called regular rather than given a number.
+        if (spread < 0.1) { snprintf(buf, sizeof buf, "regular, every %s", fmtTime(period).c_str()); }
+        else if (spread < 0.35) { snprintf(buf, sizeof buf, "roughly every %s", fmtTime(period).c_str()); }
+        else { snprintf(buf, sizeof buf, "irregular, %s on average", fmtTime(period).c_str()); }
+        return std::string(buf);
+    }
+
+    const char* stateText() const {
+        if (samplesTotal < 20) { return "listening..."; }
+        double duty = (double)samplesOn / (double)samplesTotal;
+        if (duty > 0.97) { return "on all the time"; }
+        if (duty < 0.02) { return "nothing above the noise"; }
+        return "coming and going";
+    }
+
+    // The one sentence a beginner needs before any of the numbers mean anything.
+    std::string headline() const {
+        std::string s = fmtWidth(shown.occupied) + " wide";
+        if (samplesTotal >= 20) { s += ", "; s += stateText(); }
+        char buf[64];
+        snprintf(buf, sizeof buf, ", %.0f dB over the noise", shown.snr);
+        s += buf;
+        return s;
+    }
+
+    // Everything on screen as plain text, for pasting into a post asking what it is.
+    std::string summaryText() const {
+        char buf[256];
+        std::string s = "Signal at " + fmtFreq(shown.centre) + "\n";
+        s += "  " + headline() + "\n";
+        s += "  Occupied (-26 dB)  " + fmtWidth(shown.occupied) + "\n";
+        s += "  Half power (-3 dB) " + fmtWidth(shown.halfPower) + "\n";
+        snprintf(buf, sizeof buf, "  Peak %.0f dBFS, noise %.0f dBFS, SNR %.0f dB\n",
+                 shown.peakDbfs, shown.noiseDbfs, shown.snr);
+        s += buf;
+        snprintf(buf, sizeof buf, "  Crest %.0f dB, %d peak(s)", shown.crestDb, shown.peaks);
+        s += buf;
+        if (shown.peaks >= 2 && shown.peakSpacing > 0.0) { s += ", " + fmtWidth(shown.peakSpacing) + " apart"; }
+        s += "\n";
+        s += "  Rhythm: " + rhythmText() + "\n";
+        if (samplesTotal >= 20) {
+            snprintf(buf, sizeof buf, "  On %.0f%% of the time\n",
+                     ((double)samplesOn / (double)samplesTotal) * 100.0);
+            s += buf;
+        }
+        double step = rasterStep(shown.centre, shown.hzPerBin);
+        if (step > 0.0) { s += "  Lands on " + fmtWidth(step) + " channel steps\n"; }
+        const bandplan::Band_t* band = bandAt(shown.centre);
+        if (band != NULL) { s += "  Band plan: " + band->name + " (" + band->type + ")\n"; }
+        snprintf(buf, sizeof buf, "  Measured over %d bins of %s\n", shown.binsAcross,
+                 fmtWidth(shown.hzPerBin).c_str());
+        s += buf;
+        return s;
+    }
+
+    const bandplan::Band_t* bandAt(double freq) const {
+        if (gui::waterfall.bandplan == NULL) { return NULL; }
+        for (const auto& band : gui::waterfall.bandplan->bands) {
+            if (freq >= band.start && freq <= band.end) { return &band; }
+        }
+        return NULL;
+    }
+
+    // A small picture of the held spectrum around the signal, with the two widths
+    // marked where they were measured and the VFO drawn over the top. Reading "6.2
+    // kHz at -3 dB, 14.9 kHz at -26 dB" off two rows of text takes a moment; seeing
+    // a narrow spike with wide skirts takes none.
+    void drawSketch() {
+        float height = ImGui::GetTextLineHeight() * 4.0f;
+        float width = ImGui::GetContentRegionAvail().x;
+        if (width < 32.0f) { return; }
+        ImVec2 boxMin = ImGui::GetCursorScreenPos();
+        ImVec2 boxMax = ImVec2(boxMin.x + width, boxMin.y + height);
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+
+        // The box is drawn even with nothing to put in it, so the rest of the panel
+        // does not slide up and down as the signal comes and goes.
+        bool haveTrace = (sketch.size() >= 2) && (sketchHi > sketchLo);
+        if (!haveTrace) {
+            dl->AddRectFilled(boxMin, boxMax, ImGui::GetColorU32(ImGuiCol_FrameBg));
+            dl->AddRect(boxMin, boxMax, ImGui::GetColorU32(ImGuiCol_Border));
+            ImGui::Dummy(ImVec2(width, height));
+            return;
+        }
+
+        // Scaled between the noise floor and the peak, not between fixed limits, so
+        // a weak signal fills the box just as a strong one does.
+        float top = shown.peakDbfs + 3.0f;
+        float bottom = shown.noiseDbfs - 5.0f;
+        if ((top - bottom) < 10.0f) { top = bottom + 10.0f; }
+
+        auto yOf = [&](float db) {
+            float t = (db - bottom) / (top - bottom);
+            t = std::clamp<float>(t, 0.0f, 1.0f);
+            return boxMax.y - (t * height);
+        };
+        auto xOf = [&](double hz) {
+            double t = (hz - sketchLo) / (sketchHi - sketchLo);
+            t = std::clamp<double>(t, 0.0, 1.0);
+            return (float)(boxMin.x + (t * width));
+        };
+
+        dl->AddRectFilled(boxMin, boxMax, ImGui::GetColorU32(ImGuiCol_FrameBg));
+        dl->PushClipRect(boxMin, boxMax, true);
+
+        // The VFO first, underneath everything, so it reads as a background band
+        // rather than another feature of the signal.
+        double vfoFreq = 0.0, vfoBw = 0.0;
+        ImU32 vfoColor = 0;
+        if (vfoInfo(vfoFreq, vfoBw, vfoColor) && vfoBw > 0.0) {
+            dl->AddRectFilled(ImVec2(xOf(vfoFreq - (vfoBw / 2.0)), boxMin.y),
+                              ImVec2(xOf(vfoFreq + (vfoBw / 2.0)), boxMax.y), vfoColor);
+        }
+
+        // Where the widths were taken from, as the levels they were taken at.
+        ImU32 edgeColor = ImGui::GetColorU32(ImGuiCol_TextDisabled);
+        if (shown.occRight > shown.occLeft) {
+            float y = yOf(shown.peakDbfs - 26.0f);
+            dl->AddLine(ImVec2(xOf(shown.occLeft), y), ImVec2(xOf(shown.occRight), y), edgeColor, style::uiScale);
+            dl->AddLine(ImVec2(xOf(shown.occLeft), y - (3.0f * style::uiScale)),
+                        ImVec2(xOf(shown.occLeft), y + (3.0f * style::uiScale)), edgeColor, style::uiScale);
+            dl->AddLine(ImVec2(xOf(shown.occRight), y - (3.0f * style::uiScale)),
+                        ImVec2(xOf(shown.occRight), y + (3.0f * style::uiScale)), edgeColor, style::uiScale);
+        }
+        if (shown.hpRight > shown.hpLeft) {
+            float y = yOf(shown.peakDbfs - 3.0f);
+            dl->AddLine(ImVec2(xOf(shown.hpLeft), y), ImVec2(xOf(shown.hpRight), y), edgeColor, style::uiScale);
+        }
+
+        // The noise floor, so how far the signal stands above it is visible and not
+        // just a number in the STRENGTH section.
+        float noiseY = yOf(shown.noiseDbfs);
+        dl->AddLine(ImVec2(boxMin.x, noiseY), ImVec2(boxMax.x, noiseY), edgeColor, style::uiScale);
+
+        // The trace itself, last and brightest.
+        ImU32 traceColor = ImGui::GetColorU32(ImGuiCol_PlotLines);
+        int columns = (int)sketch.size();
+        float step = width / (float)(columns - 1);
+        for (int i = 0; i + 1 < columns; i++) {
+            dl->AddLine(ImVec2(boxMin.x + (step * i), yOf(sketch[i])),
+                        ImVec2(boxMin.x + (step * (i + 1)), yOf(sketch[i + 1])),
+                        traceColor, 1.5f * style::uiScale);
+        }
+
+        dl->PopClipRect();
+        dl->AddRect(boxMin, boxMax, ImGui::GetColorU32(ImGuiCol_Border));
+
+        ImGui::Dummy(ImVec2(width, height));
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("The peak hold around the signal, %s across.\n"
+                              "The long line is the noise floor, the two short ones are the -3 dB and\n"
+                              "-26 dB widths where they were measured, and the shaded band is the VFO.",
+                              fmtWidth(sketchHi - sketchLo).c_str());
+        }
+    }
+
     static void menuHandler(void* ctx) {
         SignalIDModule* _this = (SignalIDModule*)ctx;
         _this->draw();
@@ -481,10 +796,19 @@ private:
         }
 
         ImGui::Checkbox(("Freeze##_sigid_freeze_" + name).c_str(), &frozen);
-        helpMarker("Stops measuring, so the numbers stay put while you read them.");
+        ImGui::HelpMarker("Stops measuring, so the numbers stay put while you read them.");
         ImGui::SameLine();
         if (ImGui::Button(("Reset##_sigid_reset_" + name).c_str())) { resetAll(); }
         if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Throw away the peak hold and the timing history"); }
+        ImGui::SameLine();
+        if (!shownValid) { style::beginDisabled(); }
+        if (ImGui::Button(("Copy##_sigid_copy_" + name).c_str()) && shownValid) {
+            ImGui::SetClipboardText(summaryText().c_str());
+        }
+        if (!shownValid) { style::endDisabled(); }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            ImGui::SetTooltip("Copy everything below as text, for pasting somewhere you can ask about it");
+        }
 
         ImGui::LeftLabel("Hold");
         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - (32.0f * style::uiScale));
@@ -493,11 +817,11 @@ private:
             config.conf["holdSeconds"] = holdSeconds;
             config.release(true);
         }
-        helpMarker("How long the loudest thing each frequency has shown stays in the\n"
-                   "measurement. Raise it to catch a signal that transmits in short\n"
-                   "bursts; set it to zero to measure only what is there right now.\n"
-                   "This is about the spectrum, not the readout: the numbers below are\n"
-                   "always averaged over two seconds and refreshed four times a second.");
+        ImGui::HelpMarker("How long the loudest thing each frequency has shown stays in the\n"
+                          "measurement. Raise it to catch a signal that transmits in short\n"
+                          "bursts; set it to zero to measure only what is there right now.\n"
+                          "This is about the spectrum, not the readout: the numbers below are\n"
+                          "always averaged over two seconds and refreshed four times a second.");
 
         if (!shownValid) {
             ImGui::Spacing();
@@ -505,25 +829,100 @@ private:
             return;
         }
 
+        // The picture and the one sentence version go above everything, because for
+        // most of the questions people bring to this panel they are the whole answer
+        // and the sections below are only there to check it.
+        ImGui::Spacing();
+        drawSketch();
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextUnformatted(headline().c_str());
+        ImGui::PopTextWrapPos();
+
         // Every row below is drawn whether or not it has something to say, and says
         // so with a dash when it does not. Rows that came and went as their value
         // crossed a threshold moved everything under them up and down the panel,
         // which made the whole thing unreadable however steady the signal was.
 
         // ---- Frequency
-        sectionHeader("FREQUENCY");
+        ImGui::SectionHeader("FREQUENCY");
         ImGui::Text("Centre    %s", fmtFreq(shown.centre).c_str());
         if (ImGui::IsItemHovered()) { ImGui::SetTooltip("The peak of the signal, which is not necessarily where the VFO sits"); }
+
+        // Where it is compared with what is being listened to. Being half a channel
+        // off is the commonest reason a signal that is plainly there sounds wrong,
+        // and nothing in the panel used to say so.
+        double vfoFreq = 0.0, vfoBw = 0.0;
+        ImU32 vfoColor = 0;
+        bool haveVfo = vfoInfo(vfoFreq, vfoBw, vfoColor);
+        if (!haveVfo) {
+            ImGui::Text("Offset    -");
+        }
+        else {
+            double off = shown.centre - vfoFreq;
+            if (fabs(off) < std::max<double>(shown.hzPerBin, 1.0)) { ImGui::Text("Offset    centred on the VFO"); }
+            else { ImGui::Text("Offset    %s%s from the VFO", (off > 0.0) ? "+" : "-", fmtWidth(fabs(off)).c_str()); }
+        }
+        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("How far the peak sits from the middle of the channel you are listening to"); }
 
         double drifting = drift();
         if (fabs(drifting) >= 1.0) { ImGui::Text("Drift     %+.0f Hz/s", drifting); }
         else { ImGui::Text("Drift     steady"); }
         if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Movement of the peak over the last few seconds. Anything under one\nbin of the current resolution counts as steady."); }
 
+        double step = rasterStep(shown.centre, shown.hzPerBin);
+        if (step > 0.0) { ImGui::Text("Channels  on the %s grid", fmtWidth(step).c_str()); }
+        else { ImGui::Text("Channels  not on a common grid"); }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Whether the centre lands on one of the spacings transmitters are usually\n"
+                              "assigned on - 25, 12.5, 9, 5 kHz and so on. The widest one it fits is the\n"
+                              "one shown, so any finer spacing that divides into it fits as well.\n"
+                              "Sitting on a grid means it was put there; sitting between them is normal\n"
+                              "for anything without a carrier, and for anything the resolution at the\n"
+                              "bottom of this panel is too coarse to place.");
+        }
+
+        // Acting on the measurement, rather than reading it off and doing it by hand.
+        if (!haveVfo) { style::beginDisabled(); }
+        float half = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) / 2.0f;
+        if (ImGui::Button(("Tune to it##_sigid_tune_" + name).c_str(), ImVec2(half, 0)) && haveVfo) {
+            tuner::tune(tuner::TUNER_MODE_NORMAL, gui::waterfall.selectedVFO, shown.centre);
+        }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            ImGui::SetTooltip("Put the VFO on the measured centre");
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(("Match width##_sigid_width_" + name).c_str(), ImVec2(ImGui::GetContentRegionAvail().x, 0)) &&
+            haveVfo && shown.occupied > 0.0) {
+            auto it = gui::waterfall.vfos.find(gui::waterfall.selectedVFO);
+            if (it != gui::waterfall.vfos.end() && it->second != NULL && !it->second->bandwidthLocked) {
+                double bw = std::clamp<double>(shown.occupied, it->second->minBandwidth, it->second->maxBandwidth);
+                // Set it and announce it the same way dragging the VFO edge does, so
+                // the radio hears about it and stores it against the current mode.
+                it->second->setBandwidth(bw);
+                it->second->onUserChangedBandwidth.emit(bw);
+            }
+        }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            ImGui::SetTooltip("Set the channel width to the measured -26 dB width. Modes with a fixed\nwidth ignore this.");
+        }
+        if (!haveVfo) { style::endDisabled(); }
+
         // ---- Width and shape
-        sectionHeader("WIDTH AND SHAPE");
+        ImGui::SectionHeader("WIDTH AND SHAPE");
         ImGui::Text("-26 dB    %s", fmtWidth(shown.occupied).c_str());
+        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("How much room the signal takes up: the width measured 26 dB down from the\npeak, where it has fallen to about a four hundredth of its power. This is\nthe number to compare with a channel plan."); }
         ImGui::Text("-3 dB     %s", fmtWidth(shown.halfPower).c_str());
+        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("The width of the strong part alone, at half the peak power"); }
+
+        // Not "near": windows.h defines that as an empty macro.
+        const char* comparable = yardstick(shown.occupied);
+        if (comparable != NULL) { ImGui::Text("Compare   as wide as %s", comparable); }
+        else { ImGui::Text("Compare   -"); }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Something to hold the width up against, not an identification. Plenty of\n"
+                              "unrelated things share a channel width, and a signal can sit in a channel\n"
+                              "far wider than itself.");
+        }
 
         const char* profileNames[] = { "flat topped", "rounded", "sharply peaked" };
         if (shown.halfPower > 0.0) {
@@ -541,13 +940,17 @@ private:
         if (shown.peaks <= 0) {
             ImGui::Text("Peaks     -");
         }
-        else if (shown.peaks == 2 && shown.peakSpacing > 0.0) {
-            ImGui::Text("Peaks     2, %s apart", fmtWidth(shown.peakSpacing).c_str());
+        else if (shown.peaks >= 2 && shown.peakSpacing > 0.0) {
+            ImGui::Text("Peaks     %d, %s apart", shown.peaks, fmtWidth(shown.peakSpacing).c_str());
         }
         else {
             ImGui::Text("Peaks     %d", shown.peaks);
         }
-        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Separate maxima within 20 dB of the strongest, across the occupied width"); }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Separate maxima within 20 dB of the strongest, across the occupied width,\n"
+                              "and the average gap between them. Two evenly spaced humps look like keying\n"
+                              "between two frequencies; a row of them looks like a multi-carrier signal.");
+        }
 
         ImGui::Text("Crest     %.0f dB", shown.crestDb);
         if (ImGui::IsItemHovered()) {
@@ -561,38 +964,58 @@ private:
         if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Which side of the peak the energy sits on"); }
 
         // ---- Strength
-        sectionHeader("STRENGTH");
+        ImGui::SectionHeader("STRENGTH");
         ImGui::Text("Peak      %.0f dBFS", shown.peakDbfs);
+        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Relative to the full scale of the receiver, so it depends on the gain\nsettings. Only the difference from the noise below means anything on its own."); }
         ImGui::Text("Noise     %.0f dBFS", shown.noiseDbfs);
+        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("The quiet quarter of everything on screen, taken as the noise floor"); }
         ImGui::Text("SNR       %.0f dB", shown.snr);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("How far the signal stands above the noise. Under about 6 dB nothing here\n"
+                              "is worth much; over 20 dB the measurements are as good as the resolution\n"
+                              "at the bottom of this panel allows.");
+        }
 
         // ---- Timing
-        sectionHeader("TIMING");
+        ImGui::SectionHeader("TIMING");
         double duty = (samplesTotal > 0) ? ((double)samplesOn / (double)samplesTotal) : 0.0;
-        if (samplesTotal < 20) { ImGui::Text("State     listening..."); }
-        else if (duty > 0.97) { ImGui::Text("State     on all the time"); }
-        else if (duty < 0.02) { ImGui::Text("State     nothing above the noise"); }
-        else { ImGui::Text("State     coming and going"); }
+        ImGui::Text("State     %s", stateText());
 
         if (samplesTotal >= 20) { ImGui::Text("On        %.0f%% of the time", duty * 100.0); }
         else { ImGui::Text("On        -"); }
+        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Over the last twenty seconds or so"); }
 
-        if (!burstLengths.empty()) { ImGui::Text("Bursts    %s", fmtTime(average(burstLengths)).c_str()); }
-        else { ImGui::Text("Bursts    -"); }
+        if (!burstLengths.empty()) {
+            ImGui::Text("Bursts    %s", fmtTime(average(burstLengths)).c_str());
+            if (ImGui::IsItemHovered()) {
+                double shortest = *std::min_element(burstLengths.begin(), burstLengths.end());
+                double longest = *std::max_element(burstLengths.begin(), burstLengths.end());
+                ImGui::SetTooltip("How long it stays up, averaged over the last twenty transmissions.\n"
+                                  "Shortest %s, longest %s.\n"
+                                  "Bursts all the same length are a machine; ones that vary are someone talking.",
+                                  fmtTime(shortest).c_str(), fmtTime(longest).c_str());
+            }
+        }
+        else {
+            ImGui::Text("Bursts    -");
+        }
 
         if (!gapLengths.empty()) { ImGui::Text("Gaps      %s", fmtTime(average(gapLengths)).c_str()); }
         else { ImGui::Text("Gaps      -"); }
+        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("How long it waits between transmissions, averaged the same way"); }
 
-        if (!burstLengths.empty() && !gapLengths.empty()) {
-            ImGui::Text("Period    %s", fmtTime(average(burstLengths) + average(gapLengths)).c_str());
+        // Whether it keeps to a schedule, which the average period alone cannot say:
+        // one burst every two seconds and a scatter of bursts averaging two seconds
+        // apart gave the same number, and they are not the same signal.
+        ImGui::Text("Rhythm    %s", rhythmText().c_str());
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("The time from one transmission starting to the next, and how much it varies.\n"
+                              "Regular means every gap was within a tenth of the average - a beacon, a\n"
+                              "telemetry link, something on a timer rather than a person.");
         }
-        else {
-            ImGui::Text("Period    -");
-        }
-        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Averaged over the last twenty transmissions"); }
 
         // ---- Where
-        sectionHeader("WHERE");
+        ImGui::SectionHeader("WHERE");
         const bandplan::Band_t* band = bandAt(shown.centre);
         ImGui::PushTextWrapPos(0.0f);
         if (band != NULL) {
@@ -613,7 +1036,7 @@ private:
         // ---- How much the measurement is worth. One line either way: a warning
         // that wrapped onto three lines moved everything above it every time the
         // zoom changed.
-        sectionHeader("RESOLUTION");
+        ImGui::SectionHeader("RESOLUTION");
         if (coarse) {
             ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.3f, 1.0f), "%d bins, %s each - too coarse",
                                shown.binsAcross, fmtWidth(shown.hzPerBin).c_str());

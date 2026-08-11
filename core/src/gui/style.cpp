@@ -108,4 +108,21 @@ namespace ImGui {
     void FillWidth() {
         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
     }
+
+    void SectionHeader(const char* title) {
+        ImGui::Spacing();
+        ImGui::TextDisabled("%s", title);
+        ImGui::Separator();
+    }
+
+    void HelpMarker(const char* text) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("(?)");
+        // AllowWhenDisabled: a control that is greyed out is exactly the one whose
+        // explanation is worth reading, and the marker itself is never the disabled
+        // thing - it only sits next to it.
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            ImGui::SetTooltip("%s", text);
+        }
+    }
 }

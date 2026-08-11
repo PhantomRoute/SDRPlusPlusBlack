@@ -334,6 +334,11 @@ private:
         RecorderModule* _this = (RecorderModule*)ctx;
         float menuWidth = ImGui::GetContentRegionAvail().x;
 
+        // The panel was one run of controls from the mode switch to the record
+        // button, so the container and sample type - which decide the file - read as
+        // if they belonged to the audio meters below them.
+        ImGui::SectionHeader("WHAT TO RECORD");
+
         // Recording mode
         if (_this->recording) { style::beginDisabled(); }
         ImGui::BeginGroup();
@@ -353,11 +358,29 @@ private:
         }
         ImGui::Columns(1, CONCAT("EndRecorderModeColumns##_", _this->name), false);
         ImGui::EndGroup();
-        if (ImGui::IsItemHovered()) {
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
             ImGui::SetTooltip("Baseband records the raw IQ of the whole visible spectrum, which is\n"
                               "large but can be replayed and retuned later. Audio records what you\n"
                               "are listening to on one stream.");
         }
+
+        // Which stream is the other half of "what to record", so it belongs here
+        // rather than three sections down under the meters.
+        if (_this->recMode == RECORDER_MODE_AUDIO) {
+            ImGui::LeftLabel("Stream");
+            ImGui::FillWidth();
+            if (ImGui::Combo(CONCAT("##_recorder_stream_", _this->name), &_this->streamId, _this->audioStreams.txt)) {
+                _this->selectStream(_this->audioStreams.value(_this->streamId));
+                config.acquire();
+                config.conf[_this->name]["audioStream"] = _this->audioStreams.key(_this->streamId);
+                config.release(true);
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                ImGui::SetTooltip("Which audio output to record. Each radio and each secondary output is\nits own stream.");
+            }
+        }
+
+        ImGui::SectionHeader("FILE");
 
         // Recording path
         if (_this->folderSelect.render("##_recorder_fold_" + _this->name)) {
@@ -430,20 +453,38 @@ private:
             }
         }
 
-        if (_this->recording) { style::endDisabled(); }
-
-        // Show additional audio options
+        // Stereo doubles the size of the file and Skip silence decides what goes into
+        // it, so both belong with the format above rather than under the meters.
         if (_this->recMode == RECORDER_MODE_AUDIO) {
-            if (_this->recording) { style::beginDisabled(); }
-            ImGui::LeftLabel("Stream");
-            ImGui::FillWidth();
-            if (ImGui::Combo(CONCAT("##_recorder_stream_", _this->name), &_this->streamId, _this->audioStreams.txt)) {
-                _this->selectStream(_this->audioStreams.value(_this->streamId));
+            if (ImGui::Checkbox(CONCAT("Stereo##_recorder_stereo_", _this->name), &_this->stereo)) {
                 config.acquire();
-                config.conf[_this->name]["audioStream"] = _this->audioStreams.key(_this->streamId);
+                config.conf[_this->name]["stereo"] = _this->stereo;
                 config.release(true);
             }
-            if (_this->recording) { style::endDisabled(); }
+            ImGui::HelpMarker("Two channels instead of one. Twice the file for no more information\nunless the source really is stereo, as broadcast FM is.");
+        }
+
+        if (_this->recording) { style::endDisabled(); }
+
+        // Outside the block above on purpose: unlike everything else about the file,
+        // this one is decided per buffer as it is written, so it can be turned on and
+        // off part way through a recording.
+        if (_this->recMode == RECORDER_MODE_AUDIO) {
+            if (ImGui::Checkbox(CONCAT("Skip silence##_recorder_ignore_silence_", _this->name), &_this->ignoreSilence)) {
+                config.acquire();
+                config.conf[_this->name]["ignoreSilence"] = _this->ignoreSilence;
+                config.release(true);
+            }
+            ImGui::HelpMarker("Write nothing while the audio is below about -100 dB, so a quiet\n"
+                              "channel does not fill the file. The recording clock stops with it,\n"
+                              "so the file has no gaps and no idea how long the silence was.");
+        }
+
+        // The meters and the gain that feeds them are the one part of this panel that
+        // can be touched while it is recording, which is easier to see when they are
+        // not interleaved with four settings that cannot.
+        if (_this->recMode == RECORDER_MODE_AUDIO) {
+            ImGui::SectionHeader("LEVEL");
 
             _this->updateAudioMeter(_this->audioLvl);
             ImGui::FillWidth();
@@ -458,24 +499,8 @@ private:
                 config.conf[_this->name]["audioVolume"] = _this->audioVolume;
                 config.release(true);
             }
-
-            if (_this->recording) { style::beginDisabled(); }
-            if (ImGui::Checkbox(CONCAT("Stereo##_recorder_stereo_", _this->name), &_this->stereo)) {
-                config.acquire();
-                config.conf[_this->name]["stereo"] = _this->stereo;
-                config.release(true);
-            }
-            if (_this->recording) { style::endDisabled(); }
-
-            if (ImGui::Checkbox(CONCAT("Skip silence##_recorder_ignore_silence_", _this->name), &_this->ignoreSilence)) {
-                config.acquire();
-                config.conf[_this->name]["ignoreSilence"] = _this->ignoreSilence;
-                config.release(true);
-            }
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Write nothing while the audio is below about -100 dB, so a quiet\n"
-                                  "channel does not fill the file. The recording clock stops with it,\n"
-                                  "so the file has no gaps and no idea how long the silence was.");
+                ImGui::SetTooltip("Gain applied to what is written to the file, not to what you hear.\nKeep the meters off the right hand end.");
             }
         }
 

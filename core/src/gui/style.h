@@ -22,4 +22,12 @@ namespace style {
 namespace ImGui {
     void LeftLabel(const char* text);
     void FillWidth();
+
+    // A heading that breaks a long panel into the few things it actually covers.
+    // Every menu that groups its controls drew its own copy of these two, which is
+    // how they ended up looking slightly different from each other.
+    void SectionHeader(const char* title);
+
+    // A (?) after the previous item that explains it without spending a line on it.
+    void HelpMarker(const char* text);
 }
