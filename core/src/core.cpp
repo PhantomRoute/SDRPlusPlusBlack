@@ -543,6 +543,14 @@ int sdrpp_main(int argc, char* argv[]) {
     defConfig["bandColors"]["broadcast"] = "#0000FFFF";
     defConfig["bandColors"]["marine"] = "#00FFFFFF";
     defConfig["bandColors"]["military"] = "#FFFF00FF";
+    // A type with no colour here falls back to one grey shared by all of them. Only
+    // the five above had one, while the plans that ship use these four for 250 bands
+    // between them - so utilities, satellites, cellular and navigation all drew as
+    // the same anonymous block.
+    defConfig["bandColors"]["utility"] = "#FF00FFFF";
+    defConfig["bandColors"]["navigation"] = "#FF8000FF";
+    defConfig["bandColors"]["satellite"] = "#8000FFFF";
+    defConfig["bandColors"]["cellular"] = "#FF0080FF";
     defConfig["bandPlan"] = "General";
     defConfig["bandPlanEnabled"] = true;
     defConfig["bandPlanPos"] = 1; // Top

@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <sstream>
 #include <iomanip>
+#include <exception>
 
 namespace bandplan {
     std::map<std::string, BandPlan_t> bandplans;
@@ -75,12 +76,28 @@ namespace bandplan {
     }
 
     void loadBandPlan(std::string path) {
-        std::ifstream file(wstr::str2wstr(path.c_str()));
-        json data;
-        file >> data;
-        file.close();
+        // Both the parse and the conversion below throw: nlohmann on malformed JSON,
+        // and from_json's at() on a missing key. Nothing caught either, so a single
+        // typo in a hand written plan took the whole application down before the
+        // window opened, with the exception text as the only clue. Name the file and
+        // carry on with the rest.
+        BandPlan_t plan;
+        try {
+            std::ifstream file(wstr::str2wstr(path.c_str()));
+            json data;
+            file >> data;
+            file.close();
+            plan = data.get<BandPlan_t>();
+        }
+        catch (const std::exception& e) {
+            flog::error("Could not load band plan {0}: {1}", path, e.what());
+            return;
+        }
 
-        BandPlan_t plan = data.get<BandPlan_t>();
+        if (plan.name.empty()) {
+            flog::error("Band plan {0} has no name, not loading.", path);
+            return;
+        }
         if (bandplans.find(plan.name) != bandplans.end()) {
             flog::error("Duplicate band plan name ({0}), not loading.", plan.name);
             return;
