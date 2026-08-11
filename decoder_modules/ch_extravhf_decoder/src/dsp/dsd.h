@@ -19,6 +19,8 @@
 
 #include <dsp/processor.h>
 #include <utils/flog.h>
+#include <string>
+#include <vector>
 extern "C" {
     #include <mbelib.h>
 }
@@ -506,12 +508,33 @@ namespace dsp {
         std::string status_last_dmr_slot0_burst = "";
         std::string status_last_dmr_slot1_burst = "";
         std::string status_last_nxdn_type = "";
+        // D-STAR carries the callsigns of the station, the station being called and
+        // the repeaters in its radio header, and a 20 character message alongside the
+        // voice. All of it was decoded and dropped: the header decoder wrote the
+        // callsigns into a local buffer whose only readers were commented out prints.
+        std::string status_last_dstar_my = "";
+        std::string status_last_dstar_ur = "";
+        std::string status_last_dstar_rpt1 = "";
+        std::string status_last_dstar_rpt2 = "";
+        std::string status_last_dstar_message = "";
         std::string status_errorbar = "";
         bool status_mbedecoding = false;
         int status_lvl = 0;
 
+        // Slow data arrives three bytes per voice frame and a message is spread over
+        // eight of them, so it has to be reassembled across frames.
+        void dstarSlowDataReset();
+        void dstarSlowDataBytes(const unsigned char* bytes, int count);
+
 
     private:
+
+        // Working state for the reassembly above: the bytes seen so far in this
+        // transmission, the message being built out of them, and which of its four
+        // blocks have arrived.
+        std::vector<unsigned char> dstarSlowBuf;
+        char dstarText[21] = { 0 };
+        int dstarTextBlocks = 0;
 
         int inSymsCtr = 0;
         int outSymsCtr = 0;

@@ -13,6 +13,7 @@
 #include <gui/style.h>
 #include "../dsp/dsd.h"
 #include "dsd_status_ui.h"
+#include <gui/gui.h>
 #include <dsp/clock_recovery/fd.h>
 #include <dsp/clock_recovery/mm.h>
 #include <cstdio>
@@ -39,6 +40,7 @@ namespace demod {
 
         ~OldDSD() {
             stop();
+            if (callLogBound) { gui::mainWindow.onWaterfallDrawn.unbindHandler(&callLogHandler); }
         }
 
         void init(std::string name, ConfigManager* config, dsp::stream<dsp::complex_t>* input, double bandwidth, double audioSR) {
@@ -72,6 +74,48 @@ namespace demod {
             dsdDec.init(&inputPacker.out);
             outputConv.init(&dsdDec.out);
             outputMts.init(&outputConv.out);
+
+            // Ticked from the frame event rather than from showMenu, so calls that
+            // happen while this panel is collapsed are still recorded.
+            callLogHandler.ctx = this;
+            callLogHandler.handler = [](ImGuiContext* gctx, void* ctx) {
+                ((OldDSD*)ctx)->tickCallLog();
+            };
+            gui::mainWindow.onWaterfallDrawn.bindHandler(&callLogHandler);
+            callLogBound = true;
+        }
+
+        // Who is transmitting right now, in the form the log records.
+        void tickCallLog() {
+            const std::string& proto = dsdDec.status_last_proto;
+            std::string label;
+            std::string who;
+            char buf[96];
+
+            if (proto.find("P25") != std::string::npos) {
+                label = "P25";
+                if (dsdDec.status_last_tg != 0 || dsdDec.status_last_src != 0) {
+                    snprintf(buf, sizeof(buf), "TG %d  SRC %d", dsdDec.status_last_tg, dsdDec.status_last_src);
+                    who = buf;
+                }
+            }
+            else if (proto.find("D-STAR") != std::string::npos) {
+                label = "D-STAR";
+                if (!dsdDec.status_last_dstar_my.empty()) {
+                    who = dsdDec.status_last_dstar_my;
+                    if (!dsdDec.status_last_dstar_ur.empty()) { who += " > " + dsdDec.status_last_dstar_ur; }
+                }
+            }
+            else if (proto.find("DMR") != std::string::npos) {
+                label = "DMR";
+                who = "call";
+            }
+            else if (proto.find("NXDN") != std::string::npos) {
+                label = "NXDN";
+                who = "call";
+            }
+
+            callLog.observe(dsdDec.status_sync, label, who, false);
         }
 
         void start() {
@@ -136,6 +180,25 @@ namespace demod {
                 ImGui::Text("Slot 1  %s", dsdDec.status_last_dmr_slot1_burst.c_str());
             } else if (proto.find("NXDN") != std::string::npos) {
                 ImGui::Text("Frame   %s", dsdDec.status_last_nxdn_type.c_str());
+            } else if (proto.find("D-STAR") != std::string::npos) {
+                // All of this comes from the radio header, which is only sent at the
+                // start of a transmission - tune in halfway through one and there is
+                // nothing to show until the next.
+                if (dsdDec.status_last_dstar_my.empty()) {
+                    ImGui::TextDisabled("Waiting for the header");
+                }
+                else {
+                    ImGui::Text("From    %s", dsdDec.status_last_dstar_my.c_str());
+                    ImGui::Text("To      %s", dsdDec.status_last_dstar_ur.c_str());
+                    if (!dsdDec.status_last_dstar_rpt1.empty() || !dsdDec.status_last_dstar_rpt2.empty()) {
+                        ImGui::Text("Via     %s %s", dsdDec.status_last_dstar_rpt1.c_str(), dsdDec.status_last_dstar_rpt2.c_str());
+                    }
+                }
+                if (!dsdDec.status_last_dstar_message.empty()) {
+                    ImGui::PushTextWrapPos(0.0f);
+                    ImGui::TextColored(ImVec4(0.6f, 0.85f, 1.0f, 1.0f), "\"%s\"", dsdDec.status_last_dstar_message.c_str());
+                    ImGui::PopTextWrapPos();
+                }
             }
 
             drawVoiceQuality();
@@ -171,6 +234,9 @@ namespace demod {
                     }
                 }
             }
+
+            ImGui::Spacing();
+            callLog.draw(name);
         }
 
         void drawVoiceQuality() {
@@ -309,6 +375,9 @@ namespace demod {
         ConfigManager* _config = NULL;
         float levelSmoothed = 0.0f;
         float voiceQualitySmoothed = 0.0f;
+        CallLog callLog;
+        EventHandler<ImGuiContext*> callLogHandler;
+        bool callLogBound = false;
 
     };
 }

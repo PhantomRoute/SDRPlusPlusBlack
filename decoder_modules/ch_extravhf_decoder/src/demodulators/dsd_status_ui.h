@@ -2,6 +2,8 @@
 #include <imgui.h>
 #include <gui/style.h>
 #include <string>
+#include <deque>
+#include <ctime>
 #include <cstdio>
 
 // Shared bits of the DSD status panels. Both demodulators report the same kind of
@@ -114,4 +116,100 @@ namespace demod {
         ImVec4 color = synced ? ImVec4(0.3f, 1.0f, 0.3f, 1.0f) : ImVec4(1.0f, 0.4f, 0.4f, 1.0f);
         ImGui::TextColored(color, "%s  %s", synced ? "SYNC" : "no sync", protoName.c_str());
     }
+
+    // Everything above shows the current instant and nothing else: the moment a
+    // transmission ends, who it was and when is gone. This keeps them.
+    struct CallLog {
+        struct Entry {
+            std::string clock; // wall clock the call started at
+            std::string proto;
+            std::string who;
+            bool encrypted = false;
+            double start = 0.0;
+            double end = 0.0;
+        };
+
+        std::deque<Entry> entries;
+        std::string openKey;
+        double lastSeen = 0.0;
+
+        static const int MAX_ENTRIES = 100;
+        // A transmission that loses sync for a moment is still the same
+        // transmission. Without this every fade would end up as two calls.
+        static constexpr double HOLD_SECONDS = 2.0;
+
+        // Called every frame with what the decoder is seeing right now, whether or
+        // not this panel is on screen.
+        void observe(bool active, const std::string& proto, const std::string& who, bool encrypted) {
+            double now = ImGui::GetTime();
+            if (active && !who.empty()) {
+                std::string key = proto + "|" + who;
+                if (key != openKey) {
+                    openKey = key;
+                    Entry e;
+                    e.clock = nowClock();
+                    e.proto = proto;
+                    e.who = who;
+                    e.encrypted = encrypted;
+                    e.start = now;
+                    e.end = now;
+                    entries.push_front(e);
+                    while ((int)entries.size() > MAX_ENTRIES) { entries.pop_back(); }
+                }
+                else if (!entries.empty()) {
+                    entries.front().end = now;
+                    // Encryption is not always known from the first frame of a call.
+                    entries.front().encrypted = entries.front().encrypted || encrypted;
+                }
+                lastSeen = now;
+            }
+            else if (!openKey.empty() && (now - lastSeen) > HOLD_SECONDS) {
+                openKey.clear();
+            }
+        }
+
+        void draw(const std::string& idSuffix) {
+            char header[64];
+            snprintf(header, sizeof(header), "Calls (%d)###dsd_calls_%s", (int)entries.size(), idSuffix.c_str());
+            if (!ImGui::CollapsingHeader(header)) { return; }
+
+            if (entries.empty()) {
+                ImGui::TextDisabled("Nothing heard yet");
+                return;
+            }
+
+            if (ImGui::SmallButton(("Clear##dsd_calls_clear_" + idSuffix).c_str())) {
+                entries.clear();
+                openKey.clear();
+            }
+
+            float rowHeight = ImGui::GetTextLineHeightWithSpacing();
+            ImGui::BeginChild(("##dsd_calls_list_" + idSuffix).c_str(), ImVec2(0, rowHeight * 6.0f), true);
+            for (const auto& e : entries) {
+                ImGui::TextDisabled("%s", e.clock.c_str());
+                ImGui::SameLine();
+                if (e.encrypted) {
+                    // The usual reason for a solid sync and no audio, so it is worth
+                    // being able to see at a glance which calls were which.
+                    ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.3f, 1.0f), "%s", e.who.c_str());
+                }
+                else {
+                    ImGui::TextUnformatted(e.who.c_str());
+                }
+                ImGui::SameLine();
+                ImGui::TextDisabled("%.0fs", (e.end - e.start) + 0.5);
+            }
+            ImGui::EndChild();
+        }
+
+    private:
+        static std::string nowClock() {
+            time_t t = time(NULL);
+            tm* lt = localtime(&t);
+            char buf[16];
+            if (!lt) { return std::string("--:--:--"); }
+            snprintf(buf, sizeof(buf), "%02d:%02d:%02d", lt->tm_hour, lt->tm_min, lt->tm_sec);
+            return std::string(buf);
+        }
+    };
 }

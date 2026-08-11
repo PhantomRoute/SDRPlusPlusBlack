@@ -309,7 +309,21 @@ namespace dsp {
     * GNU General Public License for more details.
     *
     */
-    void dstar_header_decode(int radioheaderbuffer[660]) {
+    // One field of the radio header as text. A header that failed FEC comes back as
+    // arbitrary bytes, and a callsign is printable ASCII by definition, so anything
+    // else means this is not one and nothing in the header should be believed.
+    static std::string dstar_header_field(const unsigned char* p, int len) {
+        std::string out;
+        for (int i = 0; i < len; i++) {
+            char c = (char)p[i];
+            if (c < 0x20 || c > 0x7E) { return std::string(); }
+            out += c;
+        }
+        while (!out.empty() && out.back() == ' ') { out.pop_back(); }
+        return out;
+    }
+
+    void dstar_header_decode(int radioheaderbuffer[660], DSD& dsd) {
         int radioheaderbuffer2[660];
         unsigned char radioheader[41];
         int octetcount, bitcount, loop;
@@ -337,21 +351,20 @@ namespace dsp {
                 bitcount = 0;
             }
         }
-        // print header
-//        printf("\nDSTAR HEADER: ");
-//        printf("RPT 2: %c%c%c%c%c%c%c%c ", radioheader[3], radioheader[4],
-//                radioheader[5], radioheader[6], radioheader[7], radioheader[8],
-//                radioheader[9], radioheader[10]);
-//        printf("RPT 1: %c%c%c%c%c%c%c%c ", radioheader[11], radioheader[12],
-//                radioheader[13], radioheader[14], radioheader[15], radioheader[16],
-//                radioheader[17], radioheader[18]);
-//        printf("YOUR: %c%c%c%c%c%c%c%c ", radioheader[19], radioheader[20],
-//                radioheader[21], radioheader[22], radioheader[23], radioheader[24],
-//                radioheader[25], radioheader[26]);
-//        printf("MY: %c%c%c%c%c%c%c%c/%c%c%c%c\n", radioheader[27],
-//                radioheader[28], radioheader[29], radioheader[30], radioheader[31],
-//                radioheader[32], radioheader[33], radioheader[34], radioheader[35],
-//                radioheader[36], radioheader[37], radioheader[38]);
+        // The header holds, in order: RPT 2 and RPT 1 (the repeaters the call is
+        // going through), YOUR (who is being called, or CQCQCQ) and MY (the station
+        // transmitting) with a four character suffix. These offsets are the ones the
+        // prints that used to live here were reading.
+        dsd.status_last_dstar_rpt2 = dstar_header_field(&radioheader[3], 8);
+        dsd.status_last_dstar_rpt1 = dstar_header_field(&radioheader[11], 8);
+        dsd.status_last_dstar_ur = dstar_header_field(&radioheader[19], 8);
+        std::string my = dstar_header_field(&radioheader[27], 8);
+        std::string suffix = dstar_header_field(&radioheader[35], 4);
+        dsd.status_last_dstar_my = suffix.empty() ? my : (my + "/" + suffix);
+
+        // A header starts a transmission, so whatever message the last one was
+        // carrying is over.
+        dsd.dstarSlowDataReset();
     }
 
     void DSD::processDSTAR() {
@@ -448,14 +461,68 @@ namespace dsp {
                 slowdata[1] ^= 0x4f;
                 slowdata[2] ^= 0x93;
                 //printf("unscrambled- %s",slowdata);
+                dstarSlowDataBytes(slowdata, 3);
             } else if (framecount == 0) {
                 //printf("never scrambled-%s\n",slowdata);
+                // The frame right after a sync is sent in the clear.
+                dstarSlowDataBytes(slowdata, 3);
             }
             framecount++;
         }
         end: if (errorbars == 1) {
             status_mbedecoding = false;
 //            printf("\n");
+        }
+    }
+
+    void DSD::dstarSlowDataReset() {
+        dstarSlowBuf.clear();
+        memset(dstarText, 0, sizeof(dstarText));
+        dstarTextBlocks = 0;
+        status_last_dstar_message.clear();
+    }
+
+    // The message is sent as four blocks of five characters, each preceded by a byte
+    // of 0x40 + the block number, and the stream is only three bytes wide per frame -
+    // so a block straddles frames and the start of one has to be found in the run of
+    // bytes rather than assumed.
+    void DSD::dstarSlowDataBytes(const unsigned char* bytes, int count) {
+        for (int i = 0; i < count; i++) { dstarSlowBuf.push_back(bytes[i]); }
+        // Nothing useful is more than a couple of blocks behind. Without a bound a
+        // transmission that never carries a message grows this for as long as it runs.
+        if (dstarSlowBuf.size() > 64) {
+            dstarSlowBuf.erase(dstarSlowBuf.begin(), dstarSlowBuf.end() - 64);
+        }
+
+        while (dstarSlowBuf.size() >= 6) {
+            unsigned char header = dstarSlowBuf[0];
+            int block = header & 0x0F;
+            if ((header & 0xF0) != 0x40 || block > 3) {
+                // Not the start of a text block. Drop one byte and look again, which
+                // is how the stream is resynchronised after filler or a lost frame.
+                dstarSlowBuf.erase(dstarSlowBuf.begin());
+                continue;
+            }
+            bool printable = true;
+            for (int i = 1; i <= 5; i++) {
+                char c = (char)dstarSlowBuf[i];
+                if (c < 0x20 || c > 0x7E) { printable = false; }
+            }
+            if (printable) {
+                for (int i = 0; i < 5; i++) { dstarText[(block * 5) + i] = (char)dstarSlowBuf[1 + i]; }
+                dstarTextBlocks |= (1 << block);
+                // Only shown once every block has arrived, so a half received message
+                // is never presented as the whole of one.
+                if (dstarTextBlocks == 0x0F) {
+                    std::string msg(dstarText, 20);
+                    while (!msg.empty() && msg.back() == ' ') { msg.pop_back(); }
+                    status_last_dstar_message = msg;
+                }
+                dstarSlowBuf.erase(dstarSlowBuf.begin(), dstarSlowBuf.begin() + 6);
+            }
+            else {
+                dstarSlowBuf.erase(dstarSlowBuf.begin());
+            }
         }
     }
 
@@ -466,7 +533,7 @@ namespace dsp {
             radioheaderbuffer[j] = getDibit();
         }
         // Note: These routines contain GPLed code. Remove if you object to that.
-        dstar_header_decode(radioheaderbuffer);
+        dstar_header_decode(radioheaderbuffer, *this);
         //We officially have sync now, so just pass on to the above routine:
         processDSTAR();
 

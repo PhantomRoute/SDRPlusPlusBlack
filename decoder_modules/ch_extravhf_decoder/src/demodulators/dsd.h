@@ -16,6 +16,7 @@
 #include "../dsp/slicer.h"
 #include "dsd_status_ui.h"
 #include "gui/style.h"
+#include <gui/gui.h>
 #include <dsp/clock_recovery/fd.h>
 #include <dsp/clock_recovery/mm.h>
 #include <chrono>
@@ -68,6 +69,7 @@ namespace demod {
         ~DSD() {
             stop();
             unregisterInstance();
+            if (callLogBound) { gui::mainWindow.onWaterfallDrawn.unbindHandler(&callLogHandler); }
             dsp::taps::free(rrcTaps);
         }
 
@@ -75,6 +77,16 @@ namespace demod {
             this->name = name;
             this->_config = config;
             registerInstance();
+
+            // The call log has to see every transmission, not the ones that happen
+            // to occur while its panel is expanded, so it is ticked from the frame
+            // event rather than from showMenu.
+            callLogHandler.ctx = this;
+            callLogHandler.handler = [](ImGuiContext* gctx, void* ctx) {
+                ((DSD*)ctx)->tickCallLog();
+            };
+            gui::mainWindow.onWaterfallDrawn.bindHandler(&callLogHandler);
+            callLogBound = true;
 
             // Load config
             _config->acquire();
@@ -204,6 +216,38 @@ namespace demod {
             outputMts.stop();
         }
 
+        // Who is transmitting right now, in the form the log records. Empty when
+        // there is nothing identifiable to record.
+        void tickCallLog() {
+            dsp::NewDSD::Frame_status fr_st = decoder.getFrameSyncStatus();
+            std::string proto;
+            std::string who;
+            bool encrypted = false;
+            char buf[96];
+
+            if (fr_st.sync && fr_st.lasttype == dsp::NewDSD::Frame_status::LAST_P25) {
+                dsp::NewDSD::P25_status p25 = decoder.getP25Status();
+                proto = "P25";
+                // 0x80 is "clear" in P25's algorithm table; anything else is a key.
+                encrypted = (p25.p25_status_algid != 0x80);
+                if (p25.p25_status_tg != 0 || p25.p25_status_src != 0) {
+                    snprintf(buf, sizeof(buf), "TG %d  SRC %d", p25.p25_status_tg, p25.p25_status_src);
+                    who = buf;
+                }
+            }
+            else if (fr_st.sync && fr_st.lasttype == dsp::NewDSD::Frame_status::LAST_DMR) {
+                dsp::NewDSD::DMR_status dmr = decoder.getDMRStatus();
+                proto = "DMR";
+                // No addresses yet: the burst payload that carries them is skipped by
+                // the decoder, so all a DMR entry can say is that there was a call on
+                // this colour code and when.
+                snprintf(buf, sizeof(buf), "CC %d", dmr.dmr_status_cc);
+                who = buf;
+            }
+
+            callLog.observe(fr_st.sync, proto, who, encrypted);
+        }
+
         void showMenu() {
             float menuWidth = ImGui::GetContentRegionAvail().x;
 
@@ -296,6 +340,9 @@ namespace demod {
 
             dsp::NewDSD::MBE_status mbe_st = decoder.getMBEStatus();
             drawVoiceQualityBar(mbe_st.mbe_status_errorbar, fr_st.sync && mbe_st.mbe_status_decoding, voiceQualitySmoothed, name);
+
+            ImGui::Spacing();
+            callLog.draw(name);
         }
 
         void setBandwidth(double bandwidth) {}
@@ -395,6 +442,9 @@ namespace demod {
         ConfigManager* _config = NULL;
         float voiceQualitySmoothed = 0.0f;
         float levelSmoothed = 0.0f;
+        CallLog callLog;
+        EventHandler<ImGuiContext*> callLogHandler;
+        bool callLogBound = false;
         // Written by the DSP thread in _constDiagSinkHandler, read by the menu.
         std::atomic<float> symbolPeak { 0.0f };
 
