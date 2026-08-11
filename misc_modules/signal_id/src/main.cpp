@@ -129,6 +129,24 @@ private:
     double lastPanelDraw = -1000.0;
     std::vector<float> scratch;
 
+    // ---- Settling.
+    //
+    // The measurement above is taken every frame and every one of its numbers moves
+    // a little each time, which is unreadable no matter how steady the signal is.
+    // What the panel shows is the median of the last couple of seconds, refreshed
+    // four times a second: fast enough to follow a signal, slow enough to read.
+    // Medians rather than averages because the peak count and the widths jump about
+    // rather than wandering, and one bad frame should not move the number at all.
+    static constexpr double SETTLE_WINDOW = 2.0;
+    static constexpr double SETTLE_PERIOD = 0.25;
+    std::deque<std::pair<double, Measurement>> history;
+    std::vector<double> medianScratch;
+    Measurement shown;
+    bool shownValid = false;
+    double lastSettle = 0.0;
+    int profileIdx = 1; // remembered so the label does not flap across a threshold
+    bool coarse = false;
+
     // ---- Timing. On or off is decided per frame, then turned into how long the
     // signal stays up and how long it waits between transmissions.
     bool wasOn = false;
@@ -148,11 +166,82 @@ private:
         burstLengths.clear();
         gapLengths.clear();
         centreHistory.clear();
+        history.clear();
+        shownValid = false;
         samplesOn = 0;
         samplesTotal = 0;
         wasOn = false;
         lastEdge = 0.0;
         dutyWindowStart = ImGui::GetTime();
+    }
+
+    // The median of one field over everything measured in the settling window.
+    template <class Get>
+    double medianOf(Get get) {
+        medianScratch.clear();
+        for (const auto& entry : history) { medianScratch.push_back(get(entry.second)); }
+        if (medianScratch.empty()) { return 0.0; }
+        size_t k = medianScratch.size() / 2;
+        std::nth_element(medianScratch.begin(), medianScratch.begin() + k, medianScratch.end());
+        return medianScratch[k];
+    }
+
+    void settle(double now) {
+        while (!history.empty() && (now - history.front().first) > SETTLE_WINDOW) {
+            history.pop_front();
+        }
+        if ((now - lastSettle) < SETTLE_PERIOD) { return; }
+        lastSettle = now;
+        // Nothing new to settle: keep showing the last set rather than blanking the
+        // panel, which would be another thing flashing on and off.
+        if (history.empty()) { return; }
+
+        shown = history.back().second;
+        shown.centre = medianOf([](const Measurement& m) { return m.centre; });
+        shown.occupied = medianOf([](const Measurement& m) { return m.occupied; });
+        shown.halfPower = medianOf([](const Measurement& m) { return m.halfPower; });
+        shown.peakDbfs = (float)medianOf([](const Measurement& m) { return (double)m.peakDbfs; });
+        shown.noiseDbfs = (float)medianOf([](const Measurement& m) { return (double)m.noiseDbfs; });
+        shown.snr = (float)medianOf([](const Measurement& m) { return (double)m.snr; });
+        shown.crestDb = (float)medianOf([](const Measurement& m) { return (double)m.crestDb; });
+        shown.balance = medianOf([](const Measurement& m) { return m.balance; });
+        shown.peaks = (int)llround(medianOf([](const Measurement& m) { return (double)m.peaks; }));
+        shown.binsAcross = (int)llround(medianOf([](const Measurement& m) { return (double)m.binsAcross; }));
+
+        // Only the frames that actually saw two peaks have a spacing to report.
+        medianScratch.clear();
+        for (const auto& entry : history) {
+            if (entry.second.peaks == 2 && entry.second.peakSpacing > 0.0) {
+                medianScratch.push_back(entry.second.peakSpacing);
+            }
+        }
+        if (medianScratch.size() >= history.size() / 2 && !medianScratch.empty()) {
+            size_t k = medianScratch.size() / 2;
+            std::nth_element(medianScratch.begin(), medianScratch.begin() + k, medianScratch.end());
+            shown.peakSpacing = medianScratch[k];
+        }
+        else {
+            shown.peakSpacing = 0.0;
+        }
+
+        // Profile category, with a margin either side of each boundary so a ratio
+        // sitting on one does not switch the word back and forth.
+        if (shown.halfPower > 0.0) {
+            double ratio = shown.occupied / shown.halfPower;
+            if (profileIdx != 0 && ratio < 1.45) { profileIdx = 0; }
+            else if (profileIdx == 0 && ratio > 1.75) { profileIdx = 1; }
+            if (profileIdx != 2 && ratio > 4.4) { profileIdx = 2; }
+            else if (profileIdx == 2 && ratio < 3.6) { profileIdx = 1; }
+        }
+
+        // Same treatment for the resolution warning. A signal sitting near the
+        // threshold dips below it for a frame or two all the time, and a warning
+        // that appears and vanishes teaches you to ignore it. It takes a real drop
+        // to raise it and a clear recovery to clear it.
+        if (!coarse && shown.binsAcross < 6) { coarse = true; }
+        else if (coarse && shown.binsAcross >= 10) { coarse = false; }
+
+        shownValid = true;
     }
 
     void tick() {
@@ -194,11 +283,13 @@ private:
         measure(hold.data(), dataWidth, span, centre);
 
         if (meas.valid) {
+            history.push_back(std::make_pair(now, meas));
             centreHistory.push_back(std::make_pair(now, meas.centre));
             while (!centreHistory.empty() && (now - centreHistory.front().first) > 8.0) {
                 centreHistory.pop_front();
             }
         }
+        settle(now);
     }
 
     void updateTiming(double now, bool on) {
@@ -373,7 +464,7 @@ private:
         if (dt < 2.0) { return 0.0; }
         double moved = centreHistory.back().second - centreHistory.front().second;
         // Movement of less than one bin is the measurement's own resolution.
-        if (fabs(moved) < meas.hzPerBin) { return 0.0; }
+        if (fabs(moved) < shown.hzPerBin) { return 0.0; }
         return moved / dt;
     }
 
@@ -404,130 +495,136 @@ private:
         }
         helpMarker("How long the loudest thing each frequency has shown stays in the\n"
                    "measurement. Raise it to catch a signal that transmits in short\n"
-                   "bursts; set it to zero to measure only what is there right now.");
+                   "bursts; set it to zero to measure only what is there right now.\n"
+                   "This is about the spectrum, not the readout: the numbers below are\n"
+                   "always averaged over two seconds and refreshed four times a second.");
 
-        if (!meas.valid) {
+        if (!shownValid) {
             ImGui::Spacing();
             ImGui::TextDisabled("Nothing measured yet");
             return;
         }
 
+        // Every row below is drawn whether or not it has something to say, and says
+        // so with a dash when it does not. Rows that came and went as their value
+        // crossed a threshold moved everything under them up and down the panel,
+        // which made the whole thing unreadable however steady the signal was.
+
         // ---- Frequency
         sectionHeader("FREQUENCY");
-        ImGui::Text("Centre    %s", fmtFreq(meas.centre).c_str());
+        ImGui::Text("Centre    %s", fmtFreq(shown.centre).c_str());
         if (ImGui::IsItemHovered()) { ImGui::SetTooltip("The peak of the signal, which is not necessarily where the VFO sits"); }
 
         double drifting = drift();
-        if (fabs(drifting) >= 1.0) {
-            ImGui::Text("Drift     %+.0f Hz/s", drifting);
-            if (ImGui::IsItemHovered()) { ImGui::SetTooltip("The peak has moved steadily over the last few seconds"); }
-        }
+        if (fabs(drifting) >= 1.0) { ImGui::Text("Drift     %+.0f Hz/s", drifting); }
+        else { ImGui::Text("Drift     steady"); }
+        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Movement of the peak over the last few seconds. Anything under one\nbin of the current resolution counts as steady."); }
 
         // ---- Width and shape
         sectionHeader("WIDTH AND SHAPE");
-        ImGui::Text("-26 dB    %s", fmtWidth(meas.occupied).c_str());
-        ImGui::Text("-3 dB     %s", fmtWidth(meas.halfPower).c_str());
+        ImGui::Text("-26 dB    %s", fmtWidth(shown.occupied).c_str());
+        ImGui::Text("-3 dB     %s", fmtWidth(shown.halfPower).c_str());
 
-        if (meas.occupied > 0.0 && meas.halfPower > 0.0) {
-            double factor = meas.occupied / meas.halfPower;
-            ImGui::Text("Profile   ");
-            ImGui::SameLine();
-            if (factor < 1.6) { ImGui::TextUnformatted("flat topped"); }
-            else if (factor < 4.0) { ImGui::TextUnformatted("rounded"); }
-            else { ImGui::TextUnformatted("sharply peaked"); }
-            ImGui::SameLine();
-            ImGui::TextDisabled("(%.1fx)", factor);
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("The -26 dB width divided by the -3 dB width. Near 1 means the energy is\n"
-                                  "spread evenly across the whole band; a large number means most of it is\n"
-                                  "concentrated in the middle.");
-            }
+        const char* profileNames[] = { "flat topped", "rounded", "sharply peaked" };
+        if (shown.halfPower > 0.0) {
+            ImGui::Text("Profile   %s  (%.1fx)", profileNames[profileIdx], shown.occupied / shown.halfPower);
+        }
+        else {
+            ImGui::Text("Profile   -");
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("The -26 dB width divided by the -3 dB width. Near 1 means the energy is\n"
+                              "spread evenly across the whole band; a large number means most of it is\n"
+                              "concentrated in the middle.");
         }
 
-        if (meas.peaks > 0) {
-            ImGui::Text("Peaks     %d", meas.peaks);
-            if (meas.peaks == 2 && meas.peakSpacing > 0.0) {
-                ImGui::SameLine();
-                ImGui::TextDisabled("%s apart", fmtWidth(meas.peakSpacing).c_str());
-            }
-            if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Separate maxima within 20 dB of the strongest, across the occupied width"); }
+        if (shown.peaks <= 0) {
+            ImGui::Text("Peaks     -");
         }
+        else if (shown.peaks == 2 && shown.peakSpacing > 0.0) {
+            ImGui::Text("Peaks     2, %s apart", fmtWidth(shown.peakSpacing).c_str());
+        }
+        else {
+            ImGui::Text("Peaks     %d", shown.peaks);
+        }
+        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Separate maxima within 20 dB of the strongest, across the occupied width"); }
 
-        ImGui::Text("Crest     %.0f dB", meas.crestDb);
+        ImGui::Text("Crest     %.0f dB", shown.crestDb);
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("How far the peak stands above the average across the occupied width.\n"
                               "A few dB means a flat block of energy; a lot means one dominant spike.");
         }
 
-        if (fabs(meas.balance) > 0.25) {
-            ImGui::Text("Balance   ");
-            ImGui::SameLine();
-            ImGui::TextUnformatted(meas.balance > 0.0 ? "mostly above the peak" : "mostly below the peak");
-            if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Which side of the peak the energy sits on"); }
-        }
+        if (shown.balance > 0.25) { ImGui::Text("Balance   mostly above the peak"); }
+        else if (shown.balance < -0.25) { ImGui::Text("Balance   mostly below the peak"); }
+        else { ImGui::Text("Balance   even"); }
+        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Which side of the peak the energy sits on"); }
 
         // ---- Strength
         sectionHeader("STRENGTH");
-        ImGui::Text("Peak      %.0f dBFS", meas.peakDbfs);
-        ImGui::Text("Noise     %.0f dBFS", meas.noiseDbfs);
-        ImGui::Text("SNR       %.0f dB", meas.snr);
+        ImGui::Text("Peak      %.0f dBFS", shown.peakDbfs);
+        ImGui::Text("Noise     %.0f dBFS", shown.noiseDbfs);
+        ImGui::Text("SNR       %.0f dB", shown.snr);
 
         // ---- Timing
         sectionHeader("TIMING");
         double duty = (samplesTotal > 0) ? ((double)samplesOn / (double)samplesTotal) : 0.0;
-        if (samplesTotal < 20) {
-            ImGui::TextDisabled("Listening...");
-        }
-        else if (duty > 0.97) {
-            ImGui::TextUnformatted("On all the time");
-        }
-        else if (duty < 0.02) {
-            ImGui::TextDisabled("Nothing above the noise");
+        if (samplesTotal < 20) { ImGui::Text("State     listening..."); }
+        else if (duty > 0.97) { ImGui::Text("State     on all the time"); }
+        else if (duty < 0.02) { ImGui::Text("State     nothing above the noise"); }
+        else { ImGui::Text("State     coming and going"); }
+
+        if (samplesTotal >= 20) { ImGui::Text("On        %.0f%% of the time", duty * 100.0); }
+        else { ImGui::Text("On        -"); }
+
+        if (!burstLengths.empty()) { ImGui::Text("Bursts    %s", fmtTime(average(burstLengths)).c_str()); }
+        else { ImGui::Text("Bursts    -"); }
+
+        if (!gapLengths.empty()) { ImGui::Text("Gaps      %s", fmtTime(average(gapLengths)).c_str()); }
+        else { ImGui::Text("Gaps      -"); }
+
+        if (!burstLengths.empty() && !gapLengths.empty()) {
+            ImGui::Text("Period    %s", fmtTime(average(burstLengths) + average(gapLengths)).c_str());
         }
         else {
-            ImGui::Text("On        %.0f%% of the time", duty * 100.0);
-            if (!burstLengths.empty()) {
-                ImGui::Text("Bursts    %s long", fmtTime(average(burstLengths)).c_str());
-            }
-            if (!gapLengths.empty()) {
-                ImGui::Text("Gaps      %s", fmtTime(average(gapLengths)).c_str());
-            }
-            if (!burstLengths.empty() && !gapLengths.empty()) {
-                double period = average(burstLengths) + average(gapLengths);
-                if (period > 0.0) {
-                    ImGui::TextDisabled("about one every %s", fmtTime(period).c_str());
-                }
-            }
+            ImGui::Text("Period    -");
         }
+        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Averaged over the last twenty transmissions"); }
 
         // ---- Where
         sectionHeader("WHERE");
-        const bandplan::Band_t* band = bandAt(meas.centre);
+        const bandplan::Band_t* band = bandAt(shown.centre);
+        ImGui::PushTextWrapPos(0.0f);
         if (band != NULL) {
-            ImGui::PushTextWrapPos(0.0f);
             ImGui::Text("%s", band->name.c_str());
-            ImGui::PopTextWrapPos();
             ImGui::TextDisabled("%s, %s band plan", band->type.c_str(),
                                 gui::waterfall.bandplan ? gui::waterfall.bandplan->name.c_str() : "current");
         }
         else if (gui::waterfall.bandplan == NULL) {
             ImGui::TextDisabled("No band plan selected");
+            ImGui::TextDisabled(" ");
         }
         else {
             ImGui::TextDisabled("Not in the current band plan");
+            ImGui::TextDisabled(" ");
         }
+        ImGui::PopTextWrapPos();
 
-        // ---- How much the measurement is worth
+        // ---- How much the measurement is worth. One line either way: a warning
+        // that wrapped onto three lines moved everything above it every time the
+        // zoom changed.
         sectionHeader("RESOLUTION");
-        if (meas.binsAcross < 8) {
-            ImGui::PushTextWrapPos(0.0f);
-            ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.3f, 1.0f),
-                               "Only %d bins across the signal at %s each. Zoom in, or raise the FFT size, before trusting the width or the shape.",
-                               meas.binsAcross, fmtWidth(meas.hzPerBin).c_str());
-            ImGui::PopTextWrapPos();
+        if (coarse) {
+            ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.3f, 1.0f), "%d bins, %s each - too coarse",
+                               shown.binsAcross, fmtWidth(shown.hzPerBin).c_str());
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Too few bins across the signal to measure its width or shape. Zoom in,\n"
+                                  "or raise the FFT size. Held on until there are comfortably enough again,\n"
+                                  "so a momentary dip does not flash a warning at you.");
+            }
         }
         else {
-            ImGui::TextDisabled("%d bins across, %s each", meas.binsAcross, fmtWidth(meas.hzPerBin).c_str());
+            ImGui::TextDisabled("%d bins, %s each", shown.binsAcross, fmtWidth(shown.hzPerBin).c_str());
         }
     }
 
