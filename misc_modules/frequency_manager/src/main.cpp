@@ -54,6 +54,14 @@ enum {
 
 const char* bookmarkDisplayModesTxt = "Off\0Top\0Bottom\0";
 
+// The label and the marker line share a colour, so a worked bookmark or one whose
+// radio is gone reads the same in both. All three come from the theme; they used to
+// be written into the drawing code as literals, which left no way to change them.
+static ImU32 bookmarkLabelColor(bool worked, bool vfoMissing) {
+    if (worked) { return ImGui::ColorConvertFloat4ToU32(gui::themeManager.bookmarkWorkedColor); }
+    if (vfoMissing) { return ImGui::ColorConvertFloat4ToU32(gui::themeManager.bookmarkMissingColor); }
+    return ImGui::ColorConvertFloat4ToU32(gui::themeManager.bookmarkColor);
+}
 
 ConfigManager &getFrequencyManagerConfig() {
     return config;
@@ -1091,22 +1099,25 @@ private:
                 if (clampedRectMin.y < args.min.y || clampedRectMax.y > args.max.y) {
                     continue; // dont draw at all.
                 }
-                args.window->DrawList->AddRectFilled(clampedRectMin, clampedRectMax, bm.worked ? IM_COL32(0, 255, 0, 255) : (vfoMissing ? IM_COL32(255, 80, 80, 255) : IM_COL32(255, 255, 0, 255)));
+                args.window->DrawList->AddRectFilled(clampedRectMin, clampedRectMax, bookmarkLabelColor(bm.worked, vfoMissing));
                 _this->rects.emplace_back(Drawn { newRect, index } );
             }
             if (rectMin.x >= args.min.x && rectMax.x <= args.max.x) {
                 if (vfoMissing) {
-                    // Red cross over the label: the radio this bookmark belongs to is gone
+                    // Cross over the label: the radio this bookmark belongs to is gone.
+                    // Drawn in the label's own text colour, so it stays legible against
+                    // whatever colour the theme gives the label underneath it.
+                    ImU32 crossColor = ImGui::ColorConvertFloat4ToU32(gui::themeManager.bookmarkTextColor);
                     ImVec2 crossCenter = ImVec2(centerXpos, rectMin.y + (nameSize.y / 2.0f));
                     float crossHalf = nameSize.y * 0.35f;
-                    args.window->DrawList->AddLine(ImVec2(crossCenter.x - crossHalf, crossCenter.y - crossHalf), ImVec2(crossCenter.x + crossHalf, crossCenter.y + crossHalf), IM_COL32(255, 0, 0, 255), 2.0f);
-                    args.window->DrawList->AddLine(ImVec2(crossCenter.x - crossHalf, crossCenter.y + crossHalf), ImVec2(crossCenter.x + crossHalf, crossCenter.y - crossHalf), IM_COL32(255, 0, 0, 255), 2.0f);
+                    args.window->DrawList->AddLine(ImVec2(crossCenter.x - crossHalf, crossCenter.y - crossHalf), ImVec2(crossCenter.x + crossHalf, crossCenter.y + crossHalf), crossColor, 2.0f);
+                    args.window->DrawList->AddLine(ImVec2(crossCenter.x - crossHalf, crossCenter.y + crossHalf), ImVec2(crossCenter.x + crossHalf, crossCenter.y - crossHalf), crossColor, 2.0f);
                 } else {
-                    args.window->DrawList->AddText(ImVec2(centerXpos - (nameSize.x / 2), rectMin.y), IM_COL32(0, 0, 0, 255), bm.bookmarkName.c_str());
+                    args.window->DrawList->AddText(ImVec2(centerXpos - (nameSize.x / 2), rectMin.y), ImGui::ColorConvertFloat4ToU32(gui::themeManager.bookmarkTextColor), bm.bookmarkName.c_str());
                 }
             }
             if (bm.bookmark.frequency >= args.lowFreq && bm.bookmark.frequency <= args.highFreq) {
-                args.window->DrawList->AddLine(ImVec2(centerXpos, args.min.y), ImVec2(centerXpos, args.max.y), bm.worked ? IM_COL32(0, 255, 0, 255) : IM_COL32(255, 255, 0, 255));
+                args.window->DrawList->AddLine(ImVec2(centerXpos, args.min.y), ImVec2(centerXpos, args.max.y), bookmarkLabelColor(bm.worked, vfoMissing));
             }
 
         }

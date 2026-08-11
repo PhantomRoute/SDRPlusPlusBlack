@@ -108,10 +108,17 @@ bool ThemeManager::setGradient(const json& val) {
 void ThemeManager::initSettings() {
     choices = {
         { "FFTTraceStyle", "Trace style",
+          "The line across the top of the spectrum.\n"
+          "Solid: one colour, the ImGui PlotLines colour.\n"
+          "Reflection: coloured by the waterfall's colour map, so a peak takes the\n"
+          "colour it has in the waterfall below.\n"
+          "Gradient: coloured by the theme's own gradient, edited below.",
           { "solid", "reflection", "gradient" },
           { "Solid", "Reflection", "Gradient" },
           &fftTraceStyle, fftTraceStyle },
         { "FFTFillStyle", "Fill style",
+          "The area underneath the trace. Same three colour sources, plus None to\n"
+          "leave it empty.",
           { "none", "solid", "reflection", "gradient" },
           { "None", "Solid", "Reflection", "Gradient" },
           &fftFillStyle, fftFillStyle },
@@ -119,8 +126,8 @@ void ThemeManager::initSettings() {
 
     sliders = {
         // Not down to zero: a trace nobody can see looks like the spectrum is broken.
-        { "FFTTraceIntensity", "Trace intensity", &fftTraceIntensity, 0.05f, 1.0f, fftTraceIntensity },
-        { "FFTFillIntensity", "Fill intensity", &fftFillIntensity, 0.0f, 1.0f, fftFillIntensity },
+        { "FFTTraceIntensity", "Trace intensity", "How opaque the trace line is", &fftTraceIntensity, 0.05f, 1.0f, fftTraceIntensity },
+        { "FFTFillIntensity", "Fill intensity", "How opaque the fill under the trace is", &fftFillIntensity, 0.0f, 1.0f, fftFillIntensity },
     };
 }
 
@@ -158,39 +165,47 @@ bool ThemeManager::decodeChoice(const ThemeChoice& choice, const std::string& va
 }
 
 void ThemeManager::initCustomColors() {
+    // The names are what the editor lists, so they say what is drawn rather than
+    // which variable holds it. The JSON key is still shown as the tooltip.
     customColorGroups = {
-        { "Spectrum & waterfall", {
+        { "Spectrum and waterfall", {
             { "WaterfallBackground", "Waterfall background", &waterfallBg, waterfallBg },
-            { "ClearColor", "Window clear color", &clearColor, clearColor },
-            { "FFTGridColor", "FFT grid lines", &fftGridColor, fftGridColor },
-            { "FFTBorderColor", "FFT/waterfall border", &fftBorderColor, fftBorderColor },
-            { "FFTHoldColor", "FFT hold trace", &fftHoldColor, fftHoldColor },
-            { "FFTCenterMarkerColor", "Center frequency marker", &fftCenterMarkerColor, fftCenterMarkerColor },
+            { "ClearColor", "Window background", &clearColor, clearColor },
+            { "FFTGridColor", "Spectrum grid lines", &fftGridColor, fftGridColor },
+            { "FFTBorderColor", "Border around the spectrum and waterfall", &fftBorderColor, fftBorderColor },
+            { "FFTHoldColor", "Peak hold trace", &fftHoldColor, fftHoldColor },
+            { "FFTCenterMarkerColor", "Centre frequency marker", &fftCenterMarkerColor, fftCenterMarkerColor },
         } },
-        { "VFO & squelch", {
-            { "VFOSelectedLineColor", "Selected VFO line", &vfoSelectedLineColor, vfoSelectedLineColor },
-            { "VFOLineColor", "Other VFO lines", &vfoLineColor, vfoLineColor },
-            { "SquelchColor", "Squelch level bar", &squelchColor, squelchColor },
-            { "ScannerSquelchColor", "Scanner squelch bar", &scannerSquelchColor, scannerSquelchColor },
-            { "NotchColor", "Notch filter", &notchColor, notchColor },
+        { "VFOs and squelch", {
+            { "VFOSelectedLineColor", "Centre line of the selected VFO", &vfoSelectedLineColor, vfoSelectedLineColor },
+            { "VFOLineColor", "Centre line of the other VFOs", &vfoLineColor, vfoLineColor },
+            { "SquelchColor", "Squelch level line", &squelchColor, squelchColor },
+            { "ScannerSquelchColor", "Scanner trigger level line", &scannerSquelchColor, scannerSquelchColor },
+            { "NotchColor", "Notch filter marker", &notchColor, notchColor },
+        } },
+        { "Bookmarks", {
+            { "BookmarkColor", "Bookmark label and marker line", &bookmarkColor, bookmarkColor },
+            { "BookmarkWorkedColor", "Bookmark already worked", &bookmarkWorkedColor, bookmarkWorkedColor },
+            { "BookmarkMissingColor", "Bookmark whose radio is not loaded", &bookmarkMissingColor, bookmarkMissingColor },
+            { "BookmarkTextColor", "Bookmark name, written on the label", &bookmarkTextColor, bookmarkTextColor },
         } },
         { "Band plan", {
-            { "BandPlanTextColor", "Band name text", &bandPlanTextColor, bandPlanTextColor },
-            { "BandPlanDefaultColor", "Untyped band edges", &bandPlanDefaultColor, bandPlanDefaultColor },
-            { "BandPlanDefaultFillColor", "Untyped band fill", &bandPlanDefaultFillColor, bandPlanDefaultFillColor },
+            { "BandPlanTextColor", "Band name", &bandPlanTextColor, bandPlanTextColor },
+            { "BandPlanDefaultColor", "Outline of a band with no colour of its own", &bandPlanDefaultColor, bandPlanDefaultColor },
+            { "BandPlanDefaultFillColor", "Fill of a band with no colour of its own", &bandPlanDefaultFillColor, bandPlanDefaultFillColor },
         } },
         { "Meters", {
             { "SNRMeterColor", "SNR meter bar", &snrMeterColor, snrMeterColor },
-            { "VolumeMeterBgLow", "Volume scale below 0dB", &volumeMeterBgLow, volumeMeterBgLow },
-            { "VolumeMeterBgHigh", "Volume scale above 0dB", &volumeMeterBgHigh, volumeMeterBgHigh },
-            { "VolumeMeterLow", "Volume bar below 0dB", &volumeMeterLow, volumeMeterLow },
-            { "VolumeMeterHigh", "Volume bar above 0dB", &volumeMeterHigh, volumeMeterHigh },
-            { "VolumeMeterPeakLow", "Volume peak below 0dB", &volumeMeterPeakLow, volumeMeterPeakLow },
-            { "VolumeMeterPeakHigh", "Volume peak above 0dB", &volumeMeterPeakHigh, volumeMeterPeakHigh },
+            { "VolumeMeterLow", "Audio meter bar, below 0 dB", &volumeMeterLow, volumeMeterLow },
+            { "VolumeMeterHigh", "Audio meter bar, clipping", &volumeMeterHigh, volumeMeterHigh },
+            { "VolumeMeterPeakLow", "Audio meter peak mark, below 0 dB", &volumeMeterPeakLow, volumeMeterPeakLow },
+            { "VolumeMeterPeakHigh", "Audio meter peak mark, clipping", &volumeMeterPeakHigh, volumeMeterPeakHigh },
+            { "VolumeMeterBgLow", "Audio meter track, below 0 dB", &volumeMeterBgLow, volumeMeterBgLow },
+            { "VolumeMeterBgHigh", "Audio meter track, clipping", &volumeMeterBgHigh, volumeMeterBgHigh },
         } },
-        { "Frequency selector", {
-            { "FreqSelectUpColor", "Digit increment highlight", &freqSelectUpColor, freqSelectUpColor },
-            { "FreqSelectDownColor", "Digit decrement highlight", &freqSelectDownColor, freqSelectDownColor },
+        { "Frequency readout", {
+            { "FreqSelectUpColor", "Upper half of a digit, which raises it", &freqSelectUpColor, freqSelectUpColor },
+            { "FreqSelectDownColor", "Lower half of a digit, which lowers it", &freqSelectDownColor, freqSelectDownColor },
         } },
     };
 

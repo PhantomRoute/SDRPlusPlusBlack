@@ -68,6 +68,7 @@ struct GradientStop {
 struct ThemeChoice {
     std::string key;                   // key used in the theme JSON
     std::string name;                  // label shown in the menu
+    std::string desc;                  // shown as a tooltip; the options need explaining
     std::vector<std::string> options;  // stored lowercase, matched case insensitively
     std::vector<std::string> labels;   // what the combo shows, one per option
     int* value;                        // live value the drawing code reads
@@ -78,6 +79,7 @@ struct ThemeChoice {
 struct ThemeSlider {
     std::string key;
     std::string name;
+    std::string desc;
     float* value;
     float min;
     float max;
@@ -157,6 +159,13 @@ public:
     ImVec4 bandPlanTextColor = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
     ImVec4 bandPlanDefaultColor = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
     ImVec4 bandPlanDefaultFillColor = ImVec4(1.0f, 1.0f, 1.0f, 100.0f / 255.0f);
+
+    // The bookmark labels and markers the frequency manager draws over the spectrum.
+    // These were hardcoded where they are drawn, so there was no way to change them.
+    ImVec4 bookmarkColor = ImVec4(1.0f, 1.0f, 0.0f, 1.0f);
+    ImVec4 bookmarkWorkedColor = ImVec4(0.0f, 1.0f, 0.0f, 1.0f);
+    ImVec4 bookmarkMissingColor = ImVec4(1.0f, 80.0f / 255.0f, 80.0f / 255.0f, 1.0f);
+    ImVec4 bookmarkTextColor = ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
 
     ImVec4 snrMeterColor = ImVec4(0.0f, 136.0f / 255.0f, 1.0f, 1.0f);
     ImVec4 volumeMeterBgLow = ImVec4(9.0f / 255.0f, 136.0f / 255.0f, 9.0f / 255.0f, 1.0f);
