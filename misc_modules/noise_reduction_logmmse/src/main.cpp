@@ -330,6 +330,13 @@ private:
     };
     std::deque<SnrSample> snrHistory;
     double lastSnrSampleTime = 0.0;
+    // Scratch for the per-column collapse below, kept between frames so drawing the
+    // chart doesn't allocate on every one.
+    std::vector<float> colSum;
+    std::vector<int> colCount;
+    std::vector<float> colValue;
+    std::vector<float> colSmooth;
+    std::vector<ImVec2> tracePoints;
 
     void showSNRChart() {
         if (gui::mainWindow.hasBottomWindow("snr_chart")) { return; }
@@ -440,17 +447,72 @@ private:
 
         draw->AddRect(plotMin, plotMax, borderColor);
 
-        if (snrHistory.size() >= 2) {
-            ImVec4 fillCol = traceCol;
-            fillCol.w = 0.25f;
-            ImU32 fill = ImGui::ColorConvertFloat4ToU32(fillCol);
-            ImU32 trace = ImGui::ColorConvertFloat4ToU32(traceCol);
-            for (size_t i = 1; i < snrHistory.size(); i++) {
-                ImVec2 a(xOf(snrHistory[i - 1].time), yOf(snrHistory[i - 1].snr));
-                ImVec2 b(xOf(snrHistory[i].time), yOf(snrHistory[i].snr));
-                // Under the trace first, so the line stays crisp on top of it.
-                draw->AddQuadFilled(a, b, ImVec2(b.x, plotMax.y), ImVec2(a.x, plotMax.y), fill);
-                draw->AddLine(a, b, trace, 1.5f);
+        // Collapse the samples into one value per pixel column before drawing any of
+        // them. A minute at 20 samples a second is 1200 points across a plot a few
+        // hundred pixels wide, so drawing a segment per sample put four sub-pixel
+        // wide, anti-aliased quads into every column: the partial coverage of each
+        // one is what streaked the fill with vertical lines. Averaging into columns
+        // is also the honest way to show more data than there are pixels for.
+        int cols = (int)(plotMax.x - plotMin.x);
+        if (snrHistory.size() >= 2 && cols >= 2) {
+            colSum.assign(cols, 0.0f);
+            colCount.assign(cols, 0);
+            for (const auto& s : snrHistory) {
+                double f = 1.0 - ((now - s.time) / SNR_CHART_SPAN);
+                int c = (int)((f * (double)(cols - 1)) + 0.5);
+                if (c < 0 || c >= cols) { continue; }
+                colSum[c] += s.snr;
+                colCount[c]++;
+            }
+
+            // Carry the last value across columns no sample landed in - a dropped
+            // frame, or the gap left while the radio was stopped - so the trace does
+            // not fall to the floor and back between two real readings.
+            colValue.assign(cols, 0.0f);
+            int firstCol = -1;
+            float carry = 0.0f;
+            for (int c = 0; c < cols; c++) {
+                if (colCount[c] > 0) {
+                    carry = colSum[c] / (float)colCount[c];
+                    if (firstCol < 0) { firstCol = c; }
+                }
+                colValue[c] = carry;
+            }
+
+            if (firstCol >= 0 && firstCol < cols - 1) {
+                // One pass of a 3 tap average over the columns. Enough to take the
+                // hard edge off without flattening anything worth seeing.
+                colSmooth.assign(colValue.begin(), colValue.end());
+                for (int c = firstCol + 1; c < cols - 1; c++) {
+                    colSmooth[c] = (colValue[c - 1] + colValue[c] + colValue[c + 1]) / 3.0f;
+                }
+
+                tracePoints.clear();
+                tracePoints.reserve(cols - firstCol);
+                for (int c = firstCol; c < cols; c++) {
+                    tracePoints.push_back(ImVec2(plotMin.x + (float)c, yOf(colSmooth[c])));
+                }
+
+                ImVec4 fillCol = traceCol;
+                fillCol.w = 0.25f;
+                ImU32 fill = ImGui::ColorConvertFloat4ToU32(fillCol);
+                ImU32 trace = ImGui::ColorConvertFloat4ToU32(traceCol);
+
+                // One quad per column, each a whole pixel wide. Anti-aliased filling
+                // feathers half a pixel in from every edge, which on shapes this
+                // narrow leaves each column edged with its own gradient and the
+                // whole fill striped; the columns meet exactly without it.
+                ImDrawListFlags fillFlags = draw->Flags;
+                draw->Flags &= ~ImDrawListFlags_AntiAliasedFill;
+                for (size_t i = 1; i < tracePoints.size(); i++) {
+                    const ImVec2& a = tracePoints[i - 1];
+                    const ImVec2& b = tracePoints[i];
+                    draw->AddQuadFilled(a, b, ImVec2(b.x, plotMax.y), ImVec2(a.x, plotMax.y), fill);
+                }
+                draw->Flags = fillFlags;
+                // And a single polyline over the top, which anti-aliases as one
+                // continuous stroke instead of a few hundred separate ones.
+                draw->AddPolyline(tracePoints.data(), (int)tracePoints.size(), trace, 0, 1.5f);
             }
         }
 

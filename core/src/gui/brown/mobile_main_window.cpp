@@ -1715,6 +1715,32 @@ void MobileMainWindow::draw() {
         removeBottomWindow("audio_waterfall");
     }
 
+    // The mic spectrum used to be drawn inside the QSO panel, which only exists in
+    // the transceiver layout and only while that view is open - so on the default
+    // layout "Show Mic FFT" did nothing whatsoever. It belongs in the strip along
+    // the bottom with the audio waterfall, where it works in either layout.
+    if (displaymenu::showMicHistogram && !hasBottomWindow("mic_fft")) {
+        addBottomWindow("mic_fft", [&]() {
+            std::lock_guard<std::mutex> lck(qsoPanel->currentFFTBufferMutex);
+            qsoPanel->drawHistogram();
+        });
+    }
+    if (!displaymenu::showMicHistogram && hasBottomWindow("mic_fft")) {
+        removeBottomWindow("mic_fft");
+    }
+
+    // Nothing feeds that spectrum unless the microphone pipeline is running, and the
+    // only things that started it were the transceiver's own QSO and Config views.
+    // One rule for who needs it, so the checkbox can keep it alive without fighting
+    // them for it.
+    bool micWanted = displaymenu::showMicHistogram || qsoMode == VIEW_QSO || qsoMode == VIEW_CONFIG;
+    if (micWanted && !qsoPanel->audioInToFFT) {
+        qsoPanel->startAudioPipeline();
+    }
+    else if (!micWanted && qsoPanel->audioInToFFT) {
+        qsoPanel->stopAudioPipeline();
+    }
+
     gui::waterfall.alwaysDrawLine = false;
     ImGuiIO& io = ImGui::GetIO();
     if (displaymenu::transcieverLayout == 0) {
@@ -2212,7 +2238,11 @@ void MobileMainWindow::draw() {
     if (pressedButton == &this->exitConfig) {
         this->qsoMode = this->prevMode;
         if (this->qsoMode == VIEW_DEFAULT) {
-            this->qsoPanel->stopAudioPipeline();
+            // Leave it running if the mic spectrum is still on screen, rather than
+            // stopping it here and having draw() start it again next frame.
+            if (!displaymenu::showMicHistogram) {
+                this->qsoPanel->stopAudioPipeline();
+            }
             this->encoder.enabled = true;
         }
     }
@@ -2230,7 +2260,9 @@ void MobileMainWindow::draw() {
     }
     if (pressedButton == &this->endQsoButton) {
         this->qsoMode = VIEW_DEFAULT;
-        qsoPanel->stopAudioPipeline();
+        if (!displaymenu::showMicHistogram) {
+            qsoPanel->stopAudioPipeline();
+        }
     }
     if (pressedButton == &this->submodeToggle) {
         std::vector<std::string> &submos = subModes[getCurrentMode()];
@@ -2587,10 +2619,15 @@ void MobileMainWindow::init() {
     mwedit = menuWidth;
     displayDrawHandler.handler = [](ImGuiContext *ctx, void *data) {
 
-        if (ImGui::Checkbox("Show Mic FFT##_sdrpp", &displaymenu::showMicHistogram)) {
+        if (ImGui::Checkbox("Show mic spectrum##_sdrpp", &displaymenu::showMicHistogram)) {
             core::configManager.acquire();
             core::configManager.conf["showMicHistogram"] = displaymenu::showMicHistogram;
             core::configManager.release(true);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("The spectrum of your microphone, in a panel along the bottom next to\n"
+                              "the audio waterfall. Opens the microphone and runs the transmit audio\n"
+                              "chain for as long as it is on.");
         }
 
         MobileMainWindow *_this = (MobileMainWindow *) data;
@@ -3374,35 +3411,44 @@ void draw_db_gauge(float gauge_width, float level, float peak, float min_level =
 }
 
 
+// Caller holds currentFFTBufferMutex.
 void QSOPanel::drawHistogram() {
-    if (!currentFFTBuffer || audioInToFFT->receivedSamplesCount.load() == 0) {
-        ImGui::TextColored(ImVec4(1.0f, 0, 0, 1.0f), "%s", "No microphone! Please");
-        ImGui::TextColored(ImVec4(1.0f, 0, 0, 1.0f), "%s", "allow mic access in");
-        ImGui::TextColored(ImVec4(1.0f, 0, 0, 1.0f), "%s", "the app permissions!");
-        ImGui::TextColored(ImVec4(1.0f, 0, 0, 1.0f), "%s", "(and then restart)");
-    } else {
-        if (submode == "LSB" || submode == "USB") {
-            auto mx0 = npmax(currentFFTBuffer);
-            auto data = npsqrt(currentFFTBuffer);
-            auto mx = npmax(data);
-            // only 1/4 of spectrum
-            ImVec2 space = ImGui::GetContentRegionAvail();
-            space.y = 60; // fft height
-            ImGui::PlotHistogram("##fft", data->data(), currentFFTBuffer->size() / 4, 0, NULL, 0,
-                                 mx,
-                                 space);
-            //            if (ImGui::SliderFloat("##_radio_mic_gain_", &this->micGain, 0, +22, "%.1f dB")) {
-            //                //
-            //            }
-            //            ImGui::SameLine();
-            //            float db = configPanel->rawInDecibels.getMax(10);
-            //            draw_db_gauge(ImGui::GetContentRegionAvail().x, db, 0, -60, +20, 0);
-            //            ImGui::Text("Mic:%.3f", configPanel->rawInDecibels.getAvg(1));
-        }
-        if (submode == "CWU" || submode == "CWL" || submode == "CW") {
-            ImGui::Text("CW Mode - use paddle");
-        }
+    // audioInToFFT only exists while the microphone pipeline is running, and
+    // currentFFTBuffer outlives it: the old order dereferenced the null pointer
+    // whenever there was a stale buffer and no pipeline.
+    if (!audioInToFFT) {
+        ImGui::TextDisabled("Microphone is not running");
+        return;
     }
+    if (!currentFFTBuffer || audioInToFFT->receivedSamplesCount.load() == 0) {
+        // The old wording diagnosed an Android permission, which is one reason out of
+        // several and the wrong one on a desktop.
+        ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.4f, 1.0f), "%s", "No audio from the microphone");
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextDisabled("Check the input device in Audio, and on Android that the app is allowed to use the microphone.");
+        ImGui::PopTextWrapPos();
+        return;
+    }
+
+    ImGui::TextDisabled("Microphone");
+    if (submode == "CWU" || submode == "CWL" || submode == "CW") {
+        ImGui::SameLine();
+        ImGui::TextDisabled("- CW, use the paddle");
+    }
+
+    auto data = npsqrt(currentFFTBuffer);
+    float mx = npmax(data);
+    // Silence is a perfectly ordinary state for a microphone, and it makes the top of
+    // the scale equal to the bottom: every bar then divides by zero on its way to a
+    // NaN rectangle.
+    if (!(mx > 0.0f)) { mx = 1.0f; }
+    // Only the bottom quarter of the spectrum: the rest is above anything a
+    // microphone puts out and would be a flat floor across three quarters of the plot.
+    // Takes whatever height the panel has rather than a fixed 60 pixels, which is what
+    // it was when this was squeezed into the side panel.
+    ImVec2 space = ImGui::GetContentRegionAvail();
+    if (space.y < 16.0f) { return; }
+    ImGui::PlotHistogram("##fft", data->data(), currentFFTBuffer->size() / 4, 0, NULL, 0, mx, space);
 }
 
 void MobileMainWindow::setBothGains(unsigned char gain) {
@@ -3498,9 +3544,8 @@ void MobileMainWindow::maybeAddBookmark(const std::string dx, double frequency, 
 void QSOPanel::draw(float _currentFreq, ImGui::WaterfallVFO *) {
     this->currentFreq = _currentFreq;
     currentFFTBufferMutex.lock();
-    if (displaymenu::showMicHistogram) {
-        this->drawHistogram();
-    }
+    // The mic spectrum is drawn in the bottom window strip now, so it is not
+    // repeated here.
     float mx = 10 * log10(this->maxSignal.load());
     if (mx > maxTxSignalPeak || maxTxSignalPeakTime < currentTimeMillis() - 500) {
         maxTxSignalPeak = mx;
