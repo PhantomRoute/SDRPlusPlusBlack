@@ -593,6 +593,7 @@ int sdrpp_main(int argc, char* argv[]) {
         // Operating
         { "Frequency Manager", false },
         { "Band Plan", false },
+        { "Signal ID", false },
         // Appearance
         { "Display", true },
         { "Theme", false },
@@ -688,6 +689,8 @@ int sdrpp_main(int argc, char* argv[]) {
     defConfig["moduleInstances"]["Rigctl Server"] = "rigctl_server";
     defConfig["moduleInstances"]["Noise Reduction logmmse"]["module"] = "noise_reduction_logmmse";
     defConfig["moduleInstances"]["Noise Reduction logmmse"]["enabled"] = true;
+    defConfig["moduleInstances"]["Signal ID"]["module"] = "signal_id";
+    defConfig["moduleInstances"]["Signal ID"]["enabled"] = true;
     defConfig["moduleInstances"]["FT8/FT4 Decoder"]["module"] = "ft8_decoder";
     defConfig["moduleInstances"]["FT8/FT4 Decoder"]["enabled"] = true;
     defConfig["moduleInstances"]["VHF Digital Modes"]["module"] = "ch_extravhf_decoder";
@@ -807,6 +810,7 @@ int sdrpp_main(int argc, char* argv[]) {
     core::configManager.conf["modules"][modCount++] = "recorder.so";
     core::configManager.conf["modules"][modCount++] = "rigctl_server.so";
     core::configManager.conf["modules"][modCount++] = "scanner.so";
+    core::configManager.conf["modules"][modCount++] = "signal_id.so";
     core::configManager.conf["modules"][modCount++] = "hl2_source.so";
     core::configManager.conf["modules"][modCount++] = "websdr_view.so";
     core::configManager.conf["modules"][modCount++] = "noise_reduction_logmmse.so";

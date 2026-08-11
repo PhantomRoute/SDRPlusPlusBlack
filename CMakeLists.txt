@@ -84,6 +84,7 @@ option(OPT_BUILD_RIGCTL_CLIENT "Rigctl client to make SDR++ act as a panadapter"
 option(OPT_BUILD_RIGCTL_SERVER "Rigctl backend for controlling SDR++ with software like gpredict" ON)
 option(OPT_BUILD_TCI_SERVER "TCI backend for controlling SDR++ with sunsdr and similar software" ON)
 option(OPT_BUILD_SCANNER "Frequency scanner" ON)
+option(OPT_BUILD_SIGNAL_ID "Signal identification helper" ON)
 option(OPT_BUILD_SCHEDULER "Build the scheduler" OFF)
 option(OPT_BUILD_NOISE_REDUCTION_LOGMMSE "Build LOGMMSE noise reduction" ON)
 
@@ -425,6 +426,10 @@ add_subdirectory("misc_modules/reports_monitor")
 if (OPT_BUILD_SCANNER)
 add_subdirectory("misc_modules/scanner")
 endif (OPT_BUILD_SCANNER)
+
+if (OPT_BUILD_SIGNAL_ID)
+add_subdirectory("misc_modules/signal_id")
+endif (OPT_BUILD_SIGNAL_ID)
 
 if (OPT_BUILD_SCHEDULER)
 add_subdirectory("misc_modules/scheduler")
