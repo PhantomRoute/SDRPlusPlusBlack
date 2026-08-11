@@ -367,9 +367,6 @@ private:
                 config.release(true);
             }
         }
-        if (!_this->folderSelect.pathIsValid()) {
-            ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.4f, 1.0f), "That folder does not exist");
-        }
 
         ImGui::LeftLabel("Name template");
         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - (30.0f * style::uiScale));
@@ -389,12 +386,21 @@ private:
                               "Anything else is kept as typed. .wav is added for you.");
         }
 
-        // What the template actually produces, so it does not have to be worked out
-        // in your head or discovered after the fact in the folder.
-        ImGui::PushTextWrapPos(0.0f);
-        ImGui::TextDisabled("%s", _this->fileNamePreview().c_str());
-        ImGui::PopTextWrapPos();
-        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("The next recording goes to\n%s", _this->previewPath.c_str()); }
+        // One line for the file, in the same place whether it is the one being
+        // written or the one the template would produce next. The full path is a
+        // tooltip rather than another line of text.
+        {
+            bool live = _this->recording && !_this->currentPath.empty();
+            std::string shown = live ? std::filesystem::path(_this->currentPath).filename().string()
+                                     : _this->fileNamePreview();
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextDisabled("%s", shown.c_str());
+            ImGui::PopTextWrapPos();
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s\n%s", live ? "Writing to" : "Next recording goes to",
+                                  live ? _this->currentPath.c_str() : _this->previewPath.c_str());
+            }
+        }
 
         ImGui::LeftLabel("Container");
         ImGui::FillWidth();
@@ -497,9 +503,8 @@ private:
                 ImGui::PopTextWrapPos();
             }
             else if (!_this->currentPath.empty()) {
-                ImGui::PushTextWrapPos(0.0f);
-                ImGui::TextDisabled("Saved  %s", _this->currentPath.c_str());
-                ImGui::PopTextWrapPos();
+                ImGui::TextDisabled("Saved  %s", std::filesystem::path(_this->currentPath).filename().string().c_str());
+                if (ImGui::IsItemHovered()) { ImGui::SetTooltip("%s", _this->currentPath.c_str()); }
             }
             else {
                 ImGui::TextDisabled("Idle  --:--:--");
@@ -514,6 +519,12 @@ private:
             uint64_t seconds = (_this->samplerate > 0) ? (written / _this->samplerate) : 0;
             uint64_t bytes = written * (uint64_t)_this->recBytesPerFrame;
 
+            // State, elapsed, size and headroom on one line. Only the things that
+            // need doing something about get a line of their own.
+            uint64_t freeBytes = _this->freeSpace();
+            double perSecond = (double)_this->samplerate * (double)_this->recBytesPerFrame;
+            bool lowOnSpace = (freeBytes > 0) && (perSecond > 0.0) && (((double)freeBytes / perSecond) < 300.0);
+
             if (_this->ignoreSilence && _this->ignoringSilence) {
                 ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), "Paused  %s", formatClock(seconds).c_str());
             }
@@ -522,30 +533,24 @@ private:
             }
             ImGui::SameLine();
             ImGui::TextDisabled("%s", formatBytes(bytes).c_str());
+            if (freeBytes > 0 && !lowOnSpace) {
+                ImGui::SameLine();
+                ImGui::TextDisabled("%s free", formatBytes(freeBytes).c_str());
+            }
 
             // A full RIFF container drops everything written after it without a
             // word, so this is the only sign the recording has stopped growing.
             if (_this->writer.isFull()) {
                 ImGui::PushTextWrapPos(0.0f);
-                ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "File is full at the 4 GB WAV limit and is no longer being written to. Stop and start a new one.");
+                ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "File hit the 4 GB WAV limit and has stopped growing. Stop and start a new one.");
                 ImGui::PopTextWrapPos();
             }
-
-            uint64_t freeBytes = _this->freeSpace();
-            if (freeBytes > 0) {
-                double perSecond = (double)_this->samplerate * (double)_this->recBytesPerFrame;
-                if (perSecond > 0.0 && (double)freeBytes / perSecond < 300.0) {
-                    ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.4f, 1.0f), "%s left on the disk, about %s of recording",
-                                       formatBytes(freeBytes).c_str(), formatSpan((uint64_t)((double)freeBytes / perSecond)).c_str());
-                }
-                else {
-                    ImGui::TextDisabled("%s free", formatBytes(freeBytes).c_str());
-                }
+            if (lowOnSpace) {
+                ImGui::PushTextWrapPos(0.0f);
+                ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.4f, 1.0f), "%s free, about %s left",
+                                   formatBytes(freeBytes).c_str(), formatSpan((uint64_t)((double)freeBytes / perSecond)).c_str());
+                ImGui::PopTextWrapPos();
             }
-
-            ImGui::PushTextWrapPos(0.0f);
-            ImGui::TextDisabled("%s", _this->currentPath.c_str());
-            ImGui::PopTextWrapPos();
         }
     }
 

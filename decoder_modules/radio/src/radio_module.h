@@ -584,6 +584,13 @@ private:
             }
         }
 
+        // Everything from here down is about keeping unwanted audio out: the blanker,
+        // the squelch, the tone squelch and the IF noise reduction. Without a break
+        // they run on from the tuning settings above as one undifferentiated list.
+        ImGui::Spacing();
+        ImGui::TextDisabled("SQUELCH AND NOISE");
+        ImGui::Separator();
+
         // Noise blanker
         if (_this->nbAllowed) {
             if (ImGui::Checkbox(("Noise blanker (W.I.P.)##_radio_nb_ena_" + _this->name).c_str(), &_this->nbEnabled)) {

@@ -5,11 +5,14 @@
 #include <imgui.h>
 #include <module.h>
 #include <gui/gui.h>
+#include <gui/style.h>
 #include <config.h>
 #include <core.h>
 #include <imgui/imgui_internal.h>
 #include <vector>
-#include <gui/widgets/snr_meter.h>
+#include <deque>
+#include <cmath>
+#include <algorithm>
 #include "signal_path/signal_path.h"
 #include <radio_interface.h>
 #include "if_nr.h"
@@ -19,6 +22,10 @@
 using namespace ImGui;
 
 ConfigManager config;
+
+// How much of the SNR history the chart keeps and draws, and how often it samples.
+static const double SNR_CHART_SPAN = 60.0;
+static const double SNR_SAMPLE_PERIOD = 0.05;
 
 
 SDRPP_MOD_INFO{
@@ -63,6 +70,13 @@ public:
         httpdebug::procfs::unregister(path + "/snr_chart");
         httpdebug::procfs::unregister(path + "/cpu_usage");
         gui::menu.removeEntry(name);
+        // Both of these keep a pointer to this instance: the event's handler list and
+        // the bottom window's draw lambda. Neither was being dropped, so deleting the
+        // module while it was enabled left the main window calling into freed memory.
+        if (enabled) {
+            gui::mainWindow.onWaterfallDrawn.unbindHandler(&waterfallDrawnHandler);
+        }
+        hideSNRChart();
     }
 
     void postInit() {}
@@ -147,19 +161,7 @@ private:
             waterfallDrawnHandler.ctx = this;
             waterfallDrawnHandler.handler = [](ImGuiContext* gctx, void* ctx) {
                 NRModule* _this = (NRModule*)ctx;
-                _this->drawSNRMeterAverages(gctx);
-            };
-            ImGui::onSNRMeterExtPoint.bindHandler(&snrMeterExtPointHandler);
-            snrMeterExtPointHandler.ctx = this;
-            snrMeterExtPointHandler.handler = [](ImGui::SNRMeterExtPoint extp, void* ctx) {
-                NRModule* _this = (NRModule*)ctx;
-                if (_this->enabled) {
-                    _this->lastsnr.insert(_this->lastsnr.begin(), extp.lastDrawnValue);
-                    if (_this->lastsnr.size() > NLASTSNR)
-                        _this->lastsnr.resize(NLASTSNR);
-
-                    _this->postSnrLocation = extp.postSnrLocation;
-                }
+                _this->tickSNRChart();
             };
 
             sigpath::iqFrontEnd.addPreprocessor(&ifnrProcessor, false);
@@ -190,8 +192,10 @@ private:
         }
         else {
             sigpath::iqFrontEnd.removePreprocessor(&ifnrProcessor);
-            ImGui::onSNRMeterExtPoint.unbindHandler(&snrMeterExtPointHandler);
             gui::mainWindow.onWaterfallDrawn.unbindHandler(&waterfallDrawnHandler);
+            // Nothing ticks once the handler is gone, so the chart would otherwise be
+            // left on screen for good.
+            hideSNRChart();
         }
     }
 
@@ -295,10 +299,15 @@ private:
             ImGui::SameLine();
             ImGui::Text("%0.01f", 32767.0 / v->scaled);
         }
-        if (ImGui::Checkbox(("SNR Chart##_radio_logmmse_nr_" + name).c_str(), &snrChartWidget)) {
+        if (ImGui::Checkbox(("SNR chart##_radio_logmmse_nr_" + name).c_str(), &snrChartWidget)) {
             config.acquire();
             config.conf["SNRChartWidget"] = snrChartWidget;
             config.release(true);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Plots the SNR of the selected VFO over the last minute, in a panel\n"
+                              "along the bottom of the window next to the audio waterfall. Useful\n"
+                              "for telling whether the noise reduction above is actually helping.");
         }
     }
 
@@ -307,42 +316,164 @@ private:
         _this->menuHandler();
     }
 
-    static const int NLASTSNR = 1500;
-    std::vector<float> lastsnr;
+    // ---- SNR chart
+    //
+    // This used to be drawn straight over the waterfall as a bare polyline running
+    // *down* the screen from wherever the SNR meter happened to sit: x was the
+    // meter's pixel length rather than a dB value, y was the sample index, and there
+    // was no scale, no units and no time base. It now lives in a window along the
+    // bottom, beside the audio waterfall, and is plotted against dB and seconds.
 
+    struct SnrSample {
+        double time;
+        float snr;
+    };
+    std::deque<SnrSample> snrHistory;
+    double lastSnrSampleTime = 0.0;
 
-    ImVec2 postSnrLocation;
+    void showSNRChart() {
+        if (gui::mainWindow.hasBottomWindow("snr_chart")) { return; }
+        gui::mainWindow.addBottomWindow("snr_chart", [this]() { drawSNRChart(); });
+    }
 
-#pragma clang diagnostic push
-#pragma ide diagnostic ignored "UnreachableCode"
+    void hideSNRChart() {
+        if (!gui::mainWindow.hasBottomWindow("snr_chart")) { return; }
+        gui::mainWindow.removeBottomWindow("snr_chart");
+    }
 
-    void drawSNRMeterAverages(ImGuiContext* gctx) {
-
+    // Called once a frame from onWaterfallDrawn, which is also where the window has
+    // to be added: the host draws the bottom windows later in the same frame.
+    void tickSNRChart() {
         if (!snrChartWidget || !enabled) {
+            hideSNRChart();
+            snrHistory.clear();
             return;
         }
-        static std::vector<float> r;
-        static int counter = 0;
-        static const int winsize = 10;
-        counter++;
-        if (counter % winsize == winsize - 1) {
-            r = dsp::math::maxeach(winsize, lastsnr);
-        }
-        ImGuiWindow* window = gctx->CurrentWindow;
-        ImU32 text = ImGui::GetColorU32(ImGuiCol_Text);
-        for (int q = 1; q < r.size(); q++) {
-            window->DrawList->AddLine(postSnrLocation + ImVec2(0 + r[q - 1], q - 1 + window->Pos.y),
-                                      postSnrLocation + ImVec2(0 + r[q], q + window->Pos.y), text);
+        showSNRChart();
+
+        // The core's own measurement, in dB over the noise beside the channel. The
+        // chart used to be fed the SNR meter's drawn pixel length instead, which is
+        // scaled by the width of the meter and so means nothing on its own.
+        double now = ImGui::GetTime();
+        if ((now - lastSnrSampleTime) < SNR_SAMPLE_PERIOD) { return; }
+        lastSnrSampleTime = now;
+
+        if (gui::waterfall.selectedVFO.empty()) { return; }
+        float snr = gui::waterfall.selectedVFOSNR;
+        if (!std::isfinite(snr)) { return; }
+
+        snrHistory.push_back({ now, snr });
+        while (!snrHistory.empty() && (now - snrHistory.front().time) > SNR_CHART_SPAN) {
+            snrHistory.pop_front();
         }
     }
 
-#pragma clang diagnostic pop
+    void drawSNRChart() {
+        ImVec2 avail = ImGui::GetContentRegionAvail();
+        if (avail.x < 40.0f || avail.y < 30.0f) { return; }
+
+        ImGui::PushFont(style::tinyFont);
+        float labelWidth = ImGui::CalcTextSize("100").x + (4.0f * style::uiScale);
+        ImGui::PopFont();
+        // The readout line above the plot is drawn in the normal font, so the room
+        // left for it has to be measured in that font.
+        float headerHeight = ImGui::GetTextLineHeightWithSpacing();
+
+        ImVec2 origin = ImGui::GetCursorScreenPos();
+        ImVec2 plotMin(origin.x + labelWidth, origin.y + headerHeight);
+        ImVec2 plotMax(origin.x + avail.x, origin.y + avail.y);
+        if (plotMax.x - plotMin.x < 10.0f || plotMax.y - plotMin.y < 10.0f) { return; }
+
+        ImDrawList* draw = ImGui::GetWindowDrawList();
+        ImU32 gridColor = ImGui::ColorConvertFloat4ToU32(gui::themeManager.fftGridColor);
+        ImU32 borderColor = ImGui::ColorConvertFloat4ToU32(gui::themeManager.fftBorderColor);
+        ImU32 textColor = ImGui::GetColorU32(ImGuiCol_Text);
+        ImVec4 traceCol = gui::themeManager.snrMeterColor;
+
+        // A fixed scale is easier to read at a glance than one that rescales itself
+        // under the trace, but a signal that runs off the top is worse, so the top
+        // only ever moves up to the next 10dB mark.
+        float top = 40.0f;
+        float latest = 0.0f;
+        float lowest = INFINITY;
+        float highest = -INFINITY;
+        double sum = 0.0;
+        for (const auto& s : snrHistory) {
+            if (s.snr > highest) { highest = s.snr; }
+            if (s.snr < lowest) { lowest = s.snr; }
+            sum += s.snr;
+        }
+        if (!snrHistory.empty()) {
+            latest = snrHistory.back().snr;
+            // Round the top up to the next 10dB mark, and no further than 100: a
+            // single wild reading should not squash the trace into the floor.
+            top = std::clamp(ceilf(highest / 10.0f) * 10.0f, 40.0f, 100.0f);
+        }
+
+        double now = ImGui::GetTime();
+        auto xOf = [&](double t) {
+            double age = now - t;
+            double f = 1.0 - (age / SNR_CHART_SPAN);
+            return plotMin.x + (float)(std::clamp(f, 0.0, 1.0) * (plotMax.x - plotMin.x));
+        };
+        auto yOf = [&](float db) {
+            float f = std::clamp(db / top, 0.0f, 1.0f);
+            return plotMax.y - (f * (plotMax.y - plotMin.y));
+        };
+
+        // dB grid, labelled down the left
+        ImGui::PushFont(style::tinyFont);
+        for (float db = 0.0f; db <= top + 0.1f; db += 10.0f) {
+            float y = yOf(db);
+            draw->AddLine(ImVec2(plotMin.x, y), ImVec2(plotMax.x, y), gridColor, 1.0f);
+            char buf[16];
+            snprintf(buf, sizeof buf, "%d", (int)db);
+            ImVec2 sz = ImGui::CalcTextSize(buf);
+            draw->AddText(ImVec2(plotMin.x - sz.x - (3.0f * style::uiScale), y - (sz.y / 2.0f)), textColor, buf);
+        }
+        // 10 second marks, so the width means something
+        for (double t = 10.0; t < SNR_CHART_SPAN; t += 10.0) {
+            float x = xOf(now - t);
+            draw->AddLine(ImVec2(x, plotMin.y), ImVec2(x, plotMax.y), gridColor, 1.0f);
+        }
+        ImGui::PopFont();
+
+        draw->AddRect(plotMin, plotMax, borderColor);
+
+        if (snrHistory.size() >= 2) {
+            ImVec4 fillCol = traceCol;
+            fillCol.w = 0.25f;
+            ImU32 fill = ImGui::ColorConvertFloat4ToU32(fillCol);
+            ImU32 trace = ImGui::ColorConvertFloat4ToU32(traceCol);
+            for (size_t i = 1; i < snrHistory.size(); i++) {
+                ImVec2 a(xOf(snrHistory[i - 1].time), yOf(snrHistory[i - 1].snr));
+                ImVec2 b(xOf(snrHistory[i].time), yOf(snrHistory[i].snr));
+                // Under the trace first, so the line stays crisp on top of it.
+                draw->AddQuadFilled(a, b, ImVec2(b.x, plotMax.y), ImVec2(a.x, plotMax.y), fill);
+                draw->AddLine(a, b, trace, 1.5f);
+            }
+        }
+
+        // Readouts on the header line: what it is, where it is now, and what it has
+        // been doing over the window.
+        ImGui::SetCursorScreenPos(origin);
+        if (snrHistory.empty()) {
+            ImGui::TextDisabled("SNR   waiting for a VFO");
+        }
+        else {
+            ImGui::TextColored(traceCol, "SNR %.1f dB", latest);
+            ImGui::SameLine();
+            ImGui::PushFont(style::tinyFont);
+            ImGui::TextDisabled("min %.0f  avg %.0f  max %.0f  over %ds",
+                                lowest, sum / (double)snrHistory.size(), highest, (int)SNR_CHART_SPAN);
+            ImGui::PopFont();
+        }
+    }
 
 
     std::string name;
     bool enabled = true;
     EventHandler<ImGuiContext*> waterfallDrawnHandler;
-    EventHandler<ImGui::SNRMeterExtPoint> snrMeterExtPointHandler;
     EventHandler<double> currentFrequencyChangedHandler;
     EventHandler<std::string> instanceCreatedHandler;
 };

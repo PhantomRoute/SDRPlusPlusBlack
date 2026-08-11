@@ -349,18 +349,22 @@ namespace displaymenu {
 
         sectionHeader("SPECTRUM");
 
-        // Each of these three is a switch plus the speed it runs at, which used to
-        // be a bare number box with nothing to say what it did or what unit it was
-        // in. They are all "how many tenths of a frame it takes to catch up".
+        // Each of these three is a switch plus the speed it runs at. Filling the rest
+        // of the line with the number box left it too narrow for three digits once
+        // the label and the (?) had taken their share, so 150 came out as 15. Wide
+        // enough for four digits and the two step buttons, and no wider.
+        float speedWidth = ImGui::CalcTextSize("8888").x + (ImGui::GetFrameHeight() * 2.0f) +
+                           (ImGui::GetStyle().ItemInnerSpacing.x * 2.0f) + (ImGui::GetStyle().FramePadding.x * 2.0f);
+
         if (ImGui::Checkbox("Peak hold##_sdrpp", &fftHold)) {
             gui::waterfall.setFFTHold(fftHold);
             core::configManager.acquire();
             core::configManager.conf["fftHold"] = fftHold;
             core::configManager.release(true);
         }
-        helpMarker("Keeps a second trace at the highest level each frequency has reached.\nThe number is how fast that trace falls back down; bigger falls faster.");
+        helpMarker("A second trace at the highest level each frequency has reached.\nThe number is how fast it falls back down.");
         ImGui::SameLine();
-        ImGui::FillWidth();
+        ImGui::SetNextItemWidth(speedWidth);
         if (ImGui::InputInt("##sdrpp_fft_hold_speed", &fftHoldSpeed)) {
             // Was unclamped, unlike the two below it. Zero freezes the peak trace
             // where it is and a negative value walks it off the top of the chart.
@@ -379,7 +383,7 @@ namespace displaymenu {
         }
         helpMarker("Averages the spectrum over time, so noise stops flickering and weak\ncarriers stand out. The number is how fast it follows a change.");
         ImGui::SameLine();
-        ImGui::FillWidth();
+        ImGui::SetNextItemWidth(speedWidth);
         if (ImGui::InputInt("##sdrpp_fft_smoothing_speed", &fftSmoothingSpeed)) {
             fftSmoothingSpeed = std::max<int>(fftSmoothingSpeed, 1);
             updateFFTSpeeds();
@@ -388,15 +392,15 @@ namespace displaymenu {
             core::configManager.release(true);
         }
 
-        if (ImGui::Checkbox("SNR meter smoothing##_sdrpp", &snrSmoothing)) {
+        if (ImGui::Checkbox("SNR smoothing##_sdrpp", &snrSmoothing)) {
             gui::waterfall.setSNRSmoothing(snrSmoothing);
             core::configManager.acquire();
             core::configManager.conf["snrSmoothing"] = snrSmoothing;
             core::configManager.release(true);
         }
-        helpMarker("Steadies the SNR meter next to the frequency readout. Anything that reads\nthat meter, the bookmark scanner included, sees the smoothed value.");
+        helpMarker("Steadies the SNR meter beside the frequency readout, and everything\nthat reads it.");
         ImGui::SameLine();
-        ImGui::FillWidth();
+        ImGui::SetNextItemWidth(speedWidth);
         if (ImGui::InputInt("##sdrpp_snr_smoothing_speed", &snrSmoothingSpeed)) {
             snrSmoothingSpeed = std::max<int>(snrSmoothingSpeed, 1);
             updateFFTSpeeds();

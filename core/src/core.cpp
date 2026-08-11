@@ -580,7 +580,7 @@ int sdrpp_main(int argc, char* argv[]) {
         // Signal path
         { "Source", true },
         { "Radio", true },
-        { "Sinks", false },
+        { "Audio", false },
         { "Recorder", false },
         // Operating
         { "Frequency Manager", false },
@@ -813,6 +813,18 @@ int sdrpp_main(int argc, char* argv[]) {
         if (!core::configManager.conf.contains(item.key())) {
             flog::info("Missing key in config {0}, repairing", item.key());
             core::configManager.conf[item.key()] = defConfig[item.key()];
+        }
+    }
+
+    // The audio output section used to be called "Sinks", which is what the DSP
+    // calls it rather than anything a listener would look for. The menu order is
+    // stored by name, so without this the renamed section loses its place and turns
+    // up at the bottom of everyone's menu.
+    if (core::configManager.conf["menuElements"].is_array()) {
+        for (auto& elem : core::configManager.conf["menuElements"]) {
+            if (elem.contains("name") && elem["name"].is_string() && elem["name"] == "Sinks") {
+                elem["name"] = "Audio";
+            }
         }
     }
 

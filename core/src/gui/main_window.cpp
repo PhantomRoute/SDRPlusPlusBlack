@@ -88,7 +88,7 @@ void MainWindow::init() {
     }
 
     gui::menu.registerEntry("Source", sourcemenu::draw, NULL);
-    gui::menu.registerEntry("Sinks", sinkmenu::draw, NULL);
+    gui::menu.registerEntry("Audio", sinkmenu::draw, NULL);
     gui::menu.registerEntry("Band Plan", bandplanmenu::draw, NULL);
     gui::menu.registerEntry("Display", displaymenu::draw, NULL);
     // No VFO Color entry: the Theme menu draws it, along with every other colour

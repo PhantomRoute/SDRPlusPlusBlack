@@ -414,13 +414,6 @@ namespace sourcemenu {
 
         sectionHeader("FREQUENCY OFFSET");
 
-        ImGui::TextDisabled("For a transverter or an up/downconverter");
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Added to every frequency you tune, so the display reads the frequency\n"
-                              "on the antenna rather than the one the SDR is really on. Leave it on\n"
-                              "None if the SDR is connected straight to the antenna.");
-        }
-
         ImGui::LeftLabel("Mode");
         ImGui::SetNextItemWidth(itemWidth - ImGui::GetCursorPosX() - 2.0f * (lineHeight + 1.5f * spacing));
         if (ImGui::Combo("##_sdrpp_offset", &offsetId, offsets.txt)) {
@@ -428,6 +421,9 @@ namespace sourcemenu {
             core::configManager.acquire();
             core::configManager.conf["selectedOffset"] = offsets.key(offsetId);
             core::configManager.release(true);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("For a transverter or converter: added to every frequency you tune, so\nthe display reads what is on the antenna. None if the SDR is connected\nstraight to it.");
         }
         ImGui::SameLine();
         ImGui::SetCursorPosX(ImGui::GetCursorPosX() - spacing);
@@ -472,18 +468,11 @@ namespace sourcemenu {
             ImGui::InputDouble("##freq_offset", &effectiveOffset, 1.0, 100.0);
             style::endDisabled();
         }
-        if (offsetId != OFFSET_ID_MANUAL) {
-            ImGui::TextDisabled("Pick Manual above to type an offset, or + to save a named one");
+        if (offsetId != OFFSET_ID_MANUAL && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            ImGui::SetTooltip("Pick Manual above to type an offset, or + to save a named one");
         }
 
         sectionHeader("OPERATOR");
-
-        ImGui::TextDisabled("Who is running this station");
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Nothing here changes how the radio behaves. It is what the decoders and\n"
-                              "reporting features put in the reports they send, and what the maps use\n"
-                              "to work out where you are.");
-        }
 
         ImGui::LeftLabel("Callsign");
         ImGui::FillWidth();
@@ -508,6 +497,9 @@ namespace sourcemenu {
                 core::configManager.conf["operatorCallsign"] = "";
                 core::configManager.release(true);
             }
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Yours. Nothing here changes how the radio behaves; it is what the\ndecoders and reporting features put in what they send.");
         }
         // Empty before anything has been typed, rather than reading as a failure.
         if (operatorCallsignRaw[0] == 0) {
