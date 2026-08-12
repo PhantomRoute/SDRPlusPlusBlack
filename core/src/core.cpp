@@ -602,6 +602,7 @@ int sdrpp_main(int argc, char* argv[]) {
         // be last - which is where the shipped decoders were landing.
         { "Noise Reduction logmmse", false },
         { "FT8/FT4 Decoder", false },
+        { "Radiosonde", false },
         { "VHF Digital Modes", false },
         { "TETRA Demodulator", false },
         { "WebSDR View", false },
@@ -697,6 +698,8 @@ int sdrpp_main(int argc, char* argv[]) {
     defConfig["moduleInstances"]["Signal ID"]["enabled"] = true;
     defConfig["moduleInstances"]["FT8/FT4 Decoder"]["module"] = "ft8_decoder";
     defConfig["moduleInstances"]["FT8/FT4 Decoder"]["enabled"] = true;
+    defConfig["moduleInstances"]["Radiosonde"]["module"] = "radiosonde_decoder";
+    defConfig["moduleInstances"]["Radiosonde"]["enabled"] = false;
     defConfig["moduleInstances"]["VHF Digital Modes"]["module"] = "ch_extravhf_decoder";
     defConfig["moduleInstances"]["VHF Digital Modes"]["enabled"] = true;
     defConfig["moduleInstances"]["TETRA Demodulator"]["module"] = "ch_tetra_demodulator";
