@@ -364,11 +364,11 @@ private:
             int dl_usg = _this->osmotetradecoder.getDlUsage();
             int ul_usg = _this->osmotetradecoder.getUlUsage();
             ImGui::Text("DL:");ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.95, 0.95, 0.05, 1.0), "%7.3f", ((float)_this->osmotetradecoder.getDlFreq()/1000000.0f));ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.95, 0.95, 0.05, 1.0), "%7.4f", ((float)_this->osmotetradecoder.getDlFreq()/1000000.0f));ImGui::SameLine();
             ImGui::Text(" MHz ");ImGui::SameLine();
             ImGui::TextColored(ImVec4(0.95, 0.95, 0.05, 1.0), (dl_usg == 0 ? "Unalloc" : (dl_usg == 1 ? "Assigned ctl" : (dl_usg == 2 ? "Common ctl" : (dl_usg == 3 ? "Reserved" : "Traffic")))));
             ImGui::Text("UL:");ImGui::SameLine();
-            ImGui::TextColored(ImVec4(0.95, 0.95, 0.05, 1.0), "%7.3f", ((float)_this->osmotetradecoder.getUlFreq()/1000000.0f));ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.95, 0.95, 0.05, 1.0), "%7.4f", ((float)_this->osmotetradecoder.getUlFreq()/1000000.0f));ImGui::SameLine();
             ImGui::Text(" MHz ");ImGui::SameLine();
             ImGui::TextColored(ImVec4(0.95, 0.95, 0.05, 1.0), (ul_usg == 0 ? "Unalloc" : "Traffic"));
             ImGui::Text("Access1: ");ImGui::SameLine();
