@@ -445,7 +445,10 @@ void MainWindow::drawUpperLine(ImGui::WaterfallVFO* vfo) {
     ImGui::SetCursorPosX(snrPos);
     ImGui::SetCursorPosY(origY + (5.0f * style::uiScale));
     ImGui::SetNextItemWidth(snrWidth);
-    ImGui::SNRMeter((vfo != NULL) ? gui::waterfall.selectedVFOSNR : 0);
+    // Zero while stopped rather than the last value measured. Nothing is arriving to
+    // update selectedVFOSNR, so it holds, and a meter sitting at 30 dB with the radio
+    // switched off reads as a live measurement.
+    ImGui::SNRMeter((vfo != NULL && sdrIsRunning()) ? gui::waterfall.selectedVFOSNR : 0);
 }
 
 long long lastDrawTime = 0;

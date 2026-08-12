@@ -116,6 +116,9 @@ public:
         if (config.conf.contains("holdSeconds") && config.conf["holdSeconds"].is_number()) {
             holdSeconds = config.conf["holdSeconds"];
         }
+        if (config.conf.contains("resetOnRetune") && config.conf["resetOnRetune"].is_boolean()) {
+            resetOnRetune = config.conf["resetOnRetune"];
+        }
         config.release();
         holdSeconds = std::clamp<float>(holdSeconds, 0.0f, 30.0f);
 
@@ -170,6 +173,12 @@ private:
     float holdSeconds = 3.0f;
     bool frozen = false;
 
+    // Whether retuning starts the timing history over. On is right when the panel is
+    // being used to characterise one signal; off is right when it is being swept
+    // along a band as a readout, where starting over at every step means the timing
+    // rows never fill in at all.
+    bool resetOnRetune = true;
+
     Measurement meas;
     double lastPanelDraw = -1000.0;
     std::vector<float> scratch;
@@ -207,8 +216,18 @@ private:
     int samplesTotal = 0;
     double dutyWindowStart = 0.0;
 
-    // ---- Drift, from where the peak has moved over the last few seconds.
-    std::deque<std::pair<double, double>> centreHistory;
+    // ---- The last ten seconds, one entry per frame. Where the peak was answers how
+    // far it has drifted; how much the level and the width moved over that span
+    // answers two questions the instantaneous numbers cannot - whether the signal is
+    // fading, and whether its width breathes with the modulation or sits still.
+    struct Trend {
+        double time = 0.0;
+        double centre = 0.0;
+        float level = 0.0f;
+        double width = 0.0;
+    };
+    static constexpr double TREND_WINDOW = 10.0;
+    std::deque<Trend> trend;
 
     // ---- A picture of the signal, which says in one glance what a column of
     // numbers takes a while to say: the shape, where the edges were measured, how far
@@ -229,22 +248,35 @@ private:
     // nothing to say whether what is on screen is a second old or ten minutes.
     double lastValidTime = 0.0;
 
-    void resetAll() {
-        hold.clear();
-        holdWidth = 0;
+    // What was true of the signal under the VFO: how often it transmitted, for how
+    // long, how far it drifted. Moving the VFO makes all of it wrong.
+    //
+    // Note what is *not* here. The peak hold is anchored to the view, not to the VFO,
+    // so sliding the VFO across a band it has already collected takes nothing away
+    // from it - which is the whole point of the picture. Nor is `shown` cleared: the
+    // last reading stays up while the next one settles, so the panel does not empty
+    // itself for a quarter of a second every time a digit is nudged.
+    void forgetSignalHistory() {
         burstLengths.clear();
         gapLengths.clear();
         onsetTimes.clear();
-        centreHistory.clear();
+        trend.clear();
         history.clear();
-        sketch.clear();
-        shownValid = false;
-        lastValidTime = 0.0;
         samplesOn = 0;
         samplesTotal = 0;
         wasOn = false;
         lastEdge = 0.0;
         dutyWindowStart = ImGui::GetTime();
+    }
+
+    // The Reset button: that, and the picture with it.
+    void resetAll() {
+        forgetSignalHistory();
+        hold.clear();
+        holdWidth = 0;
+        sketch.clear();
+        shownValid = false;
+        lastValidTime = 0.0;
     }
 
     // The median of one field over everything measured in the settling window.
@@ -333,29 +365,32 @@ private:
         double span = gui::waterfall.getViewBandwidth();
         double centre = gui::waterfall.getViewOffset() + gui::waterfall.getCenterFrequency();
 
-        // Tuning away throws all of it out. The burst lengths, the gaps, the rhythm
-        // and the duty cycle are minutes of history about one signal, and none of
-        // them were being cleared when the VFO moved: tuning off a busy repeater
-        // onto a dead channel left the panel reporting the repeater's traffic, on a
-        // frequency where nothing had transmitted at all. Half the channel width is
-        // the threshold, so nudging around inside the signal - or the Tune to it
-        // button below - does not count as a move.
+        // Tuning away makes the accumulated history wrong: the burst lengths, the
+        // gaps, the rhythm and the duty cycle are all about one signal, and tuning
+        // off a busy repeater onto a dead channel would otherwise leave the panel
+        // reporting the repeater's traffic on a frequency where nothing had
+        // transmitted at all.
+        //
+        // Only that history goes. The peak hold, the picture and the last set of
+        // numbers stay, because they are about the piece of spectrum on screen and
+        // moving the VFO across it does not make any of them untrue.
         {
             double vfoFreq = 0.0, vfoBw = 0.0;
             ImU32 vfoColor = 0;
             if (vfoInfo(vfoFreq, vfoBw, vfoColor)) {
                 double moved = fabs(vfoFreq - measuredFreq);
-                if (gui::waterfall.selectedVFO != measuredVfo ||
-                    moved > std::max<double>(vfoBw * 0.5, span / (double)dataWidth)) {
-                    gui::waterfall.releaseLatestFFT();
-                    resetAll();
+                // Half a channel width, so nudging about inside the signal - or the
+                // Tune to it button below - is not a move.
+                bool retuned = (gui::waterfall.selectedVFO != measuredVfo) ||
+                               (moved > std::max<double>(vfoBw * 0.5, span / (double)dataWidth));
+                if (retuned) {
+                    // measuredFreq is where this history was started, not where the
+                    // VFO was last frame, so crossing a band in small steps adds up
+                    // to a move instead of never quite reaching the threshold.
                     measuredVfo = gui::waterfall.selectedVFO;
                     measuredFreq = vfoFreq;
-                    return;
+                    if (resetOnRetune) { forgetSignalHistory(); }
                 }
-                // Deliberately not updated here. It is the frequency this history
-                // was started at, so that tuning across a band in small steps adds
-                // up to a move rather than never quite reaching the threshold.
             }
         }
 
@@ -366,7 +401,7 @@ private:
             holdWidth = dataWidth;
             holdSpan = span;
             holdCentre = centre;
-            centreHistory.clear();
+            trend.clear();
             // The settling window too: those measurements were taken on a different
             // bin grid, and averaging them with the new ones gave a width that was
             // neither one thing nor the other for two seconds after every zoom.
@@ -392,9 +427,15 @@ private:
         if (meas.valid) {
             lastValidTime = now;
             history.push_back(std::make_pair(now, meas));
-            centreHistory.push_back(std::make_pair(now, meas.centre));
-            while (!centreHistory.empty() && (now - centreHistory.front().first) > 8.0) {
-                centreHistory.pop_front();
+
+            Trend t;
+            t.time = now;
+            t.centre = meas.centre;
+            t.level = meas.peakDbfs;
+            t.width = meas.occupied;
+            trend.push_back(t);
+            while (!trend.empty() && (now - trend.front().time) > TREND_WINDOW) {
+                trend.pop_front();
             }
         }
         settle(now);
@@ -677,13 +718,54 @@ private:
 
     // Hz per second the peak has moved, or 0 if it is sitting still.
     double drift() const {
-        if (centreHistory.size() < 8) { return 0.0; }
-        double dt = centreHistory.back().first - centreHistory.front().first;
+        if (trend.size() < 8) { return 0.0; }
+        double dt = trend.back().time - trend.front().time;
         if (dt < 2.0) { return 0.0; }
-        double moved = centreHistory.back().second - centreHistory.front().second;
+        double moved = trend.back().centre - trend.front().centre;
         // Movement of less than one bin is the measurement's own resolution.
         if (fabs(moved) < shown.hzPerBin) { return 0.0; }
         return moved / dt;
+    }
+
+    // The spread of one field across the trend window, as the gap between its tenth
+    // and ninetieth percentile.
+    //
+    // Not the plain highest minus lowest. Over ten seconds this is several hundred
+    // per-frame measurements, and a single frame caught mid-transition sets the whole
+    // range on its own - which is exactly the noise the rest of the panel goes to
+    // some trouble to median away. Throwing away the top and bottom tenth leaves a
+    // number that says how much the signal actually moved.
+    mutable std::vector<double> swingScratch;
+    template <class Get>
+    bool swingOf(Get get, double& spread) const {
+        if (trend.size() < 20) { return false; }
+        if ((trend.back().time - trend.front().time) < 3.0) { return false; }
+
+        swingScratch.clear();
+        swingScratch.reserve(trend.size());
+        for (const auto& t : trend) { swingScratch.push_back(get(t)); }
+
+        size_t lo = swingScratch.size() / 10;
+        size_t hi = swingScratch.size() - 1 - lo;
+        std::nth_element(swingScratch.begin(), swingScratch.begin() + lo, swingScratch.end());
+        double low = swingScratch[lo];
+        std::nth_element(swingScratch.begin(), swingScratch.begin() + hi, swingScratch.end());
+        spread = swingScratch[hi] - low;
+        return true;
+    }
+
+    // How far the peak level rose and fell. One of the few things measurable here
+    // that says something about the path the signal took rather than about the
+    // transmitter that sent it.
+    bool levelSwing(double& db) const {
+        return swingOf([](const Trend& t) { return (double)t.level; }, db);
+    }
+
+    // The same for the occupied width. A width that moves belongs to a transmitter
+    // whose bandwidth follows what is being sent; a width that sits still over ten
+    // seconds belongs to one sending at a constant rate.
+    bool widthSwing(double& hz) const {
+        return swingOf([](const Trend& t) { return t.width; }, hz);
     }
 
     // The selected VFO's centre and width, so the panel can say where the signal sits
@@ -765,6 +847,18 @@ private:
         s += buf;
         if (shown.peaks >= 2 && shown.peakSpacing > 0.0) { s += ", " + fmtWidth(shown.peakSpacing) + " apart"; }
         s += "\n";
+
+        double moved = 0.0;
+        if (widthSwing(moved)) { s += "  Width moved " + fmtWidth(moved) + " over ten seconds\n"; }
+        if (levelSwing(moved)) {
+            snprintf(buf, sizeof buf, "  Level swung %.0f dB over ten seconds\n", moved);
+            s += buf;
+        }
+        double drifting = drift();
+        if (fabs(drifting) >= 1.0) {
+            snprintf(buf, sizeof buf, "  Drifting %+.0f Hz/s\n", drifting);
+            s += buf;
+        }
         s += "  Rhythm: " + rhythmText() + "\n";
         if (samplesTotal >= 20) {
             snprintf(buf, sizeof buf, "  On %.0f%% of the time\n",
@@ -922,6 +1016,19 @@ private:
                           "This is about the spectrum, not the readout: the numbers below are\n"
                           "always averaged over two seconds and refreshed four times a second.");
 
+        if (ImGui::Checkbox(("Start the timing over when I retune##_sigid_retune_" + name).c_str(), &resetOnRetune)) {
+            config.acquire();
+            config.conf["resetOnRetune"] = resetOnRetune;
+            config.release(true);
+        }
+        ImGui::HelpMarker("The TIMING rows build up over a minute or two, and they describe whichever\n"
+                          "signal was under the VFO while they did. On, moving the VFO more than half\n"
+                          "a channel starts them over, so they always describe what you are pointing\n"
+                          "at. Off, they keep counting across a retune, which is what you want when\n"
+                          "you are stepping along a band and reading the panel as you go.\n"
+                          "Either way the picture and the peak hold are left alone - those are about\n"
+                          "the spectrum on screen, not about the VFO.");
+
         if (!shownValid) {
             ImGui::Spacing();
             ImGui::TextDisabled("Nothing measured yet");
@@ -1013,6 +1120,7 @@ private:
         ImGui::Text("-3 dB     %s", fmtWidth(shown.halfPower).c_str());
         if (ImGui::IsItemHovered()) { ImGui::SetTooltip("The width of the strong part alone, at half the peak power"); }
 
+
         // Not "near": windows.h defines that as an empty macro.
         const char* comparable = yardstick(shown.occupied);
         if (comparable != NULL) { ImGui::Text("Compare   as wide as %s", comparable); }
@@ -1021,6 +1129,48 @@ private:
             ImGui::SetTooltip("Something to hold the width up against, not an identification. Plenty of\n"
                               "unrelated things share a channel width, and a signal can sit in a channel\n"
                               "far wider than itself.");
+        }
+
+        // What the receiver is doing with it. Both numbers are already on screen, but
+        // the comparison between them is the one thing here that says something about
+        // what is coming out of the speaker rather than what is on the antenna.
+        if (!haveVfo || shown.occupied <= 0.0) {
+            ImGui::Text("Filter    -");
+        }
+        else if (vfoBw < (shown.occupied * 0.9)) {
+            ImGui::Text("Filter    %s, cutting the edges off", fmtWidth(vfoBw).c_str());
+        }
+        else if (vfoBw > (shown.occupied * 1.6)) {
+            ImGui::Text("Filter    %s, wider than it needs", fmtWidth(vfoBw).c_str());
+        }
+        else {
+            ImGui::Text("Filter    %s, a good fit", fmtWidth(vfoBw).c_str());
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Your channel width against the measured one. Narrower and you are hearing\n"
+                              "part of the signal, which is why a wide signal in a narrow filter sounds\n"
+                              "muffled or breaks up. Wider and you are letting in noise, and whatever\n"
+                              "else is in the next channel along. Match width above sets it.");
+        }
+
+        // Whether the width sits still. Speech through an FM or SSB rig visibly
+        // breathes as the talker does; a transmitter sending at a fixed rate does
+        // not, whether or not it has anything to say.
+        double widthMoved = 0.0;
+        if (!widthSwing(widthMoved)) {
+            ImGui::Text("Changes   -");
+        }
+        else if (widthMoved < std::max<double>(shown.hzPerBin * 2.0, shown.occupied * 0.08)) {
+            ImGui::Text("Changes   hardly at all");
+        }
+        else {
+            ImGui::Text("Changes   by %s", fmtWidth(widthMoved).c_str());
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("How much the occupied width moved over the last ten seconds, ignoring the\n"
+                              "odd stray frame. A width that breathes belongs to something whose bandwidth\n"
+                              "follows what is being sent, which is what voice does. A width that sits\n"
+                              "still belongs to something sending at a constant rate.");
         }
 
         const char* profileNames[] = { "flat topped", "rounded", "sharply peaked" };
@@ -1073,6 +1223,20 @@ private:
             ImGui::SetTooltip("How far the signal stands above the noise. Under about 6 dB nothing here\n"
                               "is worth much; over 20 dB the measurements are as good as the resolution\n"
                               "at the bottom of this panel allows.");
+        }
+
+        // Almost everything else in this panel describes the transmitter. This one
+        // describes the path the signal took to get here.
+        double levelMoved = 0.0;
+        if (!levelSwing(levelMoved)) { ImGui::Text("Swing     -"); }
+        else if (levelMoved < 3.0) { ImGui::Text("Swing     steady"); }
+        else { ImGui::Text("Swing     %.0f dB", levelMoved); }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("How far the level rose and fell over the last ten seconds, ignoring the odd\n"
+                              "stray frame. A steady level is a signal arriving by a stable path, usually\n"
+                              "a local one. A level swinging by 10 or 20 dB is fading, which is what a\n"
+                              "signal that has come a long way by ionosphere does - and also what a\n"
+                              "transmitter that is moving does.");
         }
 
         // ---- Timing

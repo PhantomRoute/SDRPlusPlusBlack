@@ -358,6 +358,14 @@ private:
         }
         showSNRChart();
 
+        // Nothing is arriving while the radio is stopped, so selectedVFOSNR sits at
+        // whatever it last read. Sampling it anyway drew that one stale number across
+        // the chart at twenty points a second, which looks exactly like a strong,
+        // perfectly steady signal - the chart went on reporting a station that had
+        // stopped being received. Stop collecting and the trace stops advancing,
+        // which is what actually happened.
+        if (!gui::mainWindow.sdrIsRunning()) { return; }
+
         // The core's own measurement, in dB over the noise beside the channel. The
         // chart used to be fed the SNR meter's drawn pixel length instead, which is
         // scaled by the width of the meter and so means nothing on its own.
@@ -470,26 +478,34 @@ private:
             // not fall to the floor and back between two real readings.
             colValue.assign(cols, 0.0f);
             int firstCol = -1;
+            int lastCol = -1;
             float carry = 0.0f;
             for (int c = 0; c < cols; c++) {
                 if (colCount[c] > 0) {
                     carry = colSum[c] / (float)colCount[c];
                     if (firstCol < 0) { firstCol = c; }
+                    lastCol = c;
                 }
                 colValue[c] = carry;
             }
 
-            if (firstCol >= 0 && firstCol < cols - 1) {
+            // Carrying forward is right in the middle of the trace, where it bridges
+            // a dropped frame. It is wrong at the end: with the radio stopped there
+            // are no samples in any column since, and carrying the last one to the
+            // right hand edge drew a flat line across the rest of the minute that is
+            // indistinguishable from a live, dead steady signal. The trace ends where
+            // the readings do, and the gap after it stays empty.
+            if (firstCol >= 0 && lastCol > firstCol) {
                 // One pass of a 3 tap average over the columns. Enough to take the
                 // hard edge off without flattening anything worth seeing.
                 colSmooth.assign(colValue.begin(), colValue.end());
-                for (int c = firstCol + 1; c < cols - 1; c++) {
+                for (int c = firstCol + 1; c < lastCol; c++) {
                     colSmooth[c] = (colValue[c - 1] + colValue[c] + colValue[c + 1]) / 3.0f;
                 }
 
                 tracePoints.clear();
-                tracePoints.reserve(cols - firstCol);
-                for (int c = firstCol; c < cols; c++) {
+                tracePoints.reserve(lastCol - firstCol + 1);
+                for (int c = firstCol; c <= lastCol; c++) {
                     tracePoints.push_back(ImVec2(plotMin.x + (float)c, yOf(colSmooth[c])));
                 }
 
@@ -520,7 +536,17 @@ private:
         // been doing over the window.
         ImGui::SetCursorScreenPos(origin);
         if (snrHistory.empty()) {
-            ImGui::TextDisabled("SNR   waiting for a VFO");
+            ImGui::TextDisabled("%s", gui::mainWindow.sdrIsRunning() ? "SNR   waiting for a VFO" : "SNR   radio stopped");
+        }
+        // The big number is the newest reading, which stops being a reading at all
+        // once nothing is arriving. Saying so beats showing the last one as if the
+        // radio were still on it.
+        else if (!gui::mainWindow.sdrIsRunning()) {
+            ImGui::TextDisabled("SNR   radio stopped");
+            ImGui::SameLine();
+            ImGui::PushFont(style::tinyFont);
+            ImGui::TextDisabled("last %.0f dB", snrHistory.back().snr);
+            ImGui::PopFont();
         }
         else {
             ImGui::TextColored(traceCol, "SNR %.1f dB", latest);

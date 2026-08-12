@@ -136,10 +136,23 @@ public:
             srId = defaultId;
         }
 
+        // Order matters here, and it was the wrong way round.
+        //
+        // setSampleRate takes the stream's control mutex and, from under it, tells
+        // everything upstream to change rate - which for the radio means tearing the
+        // whole audio chain down and building it again. That was being done with the
+        // old device still open and its callback still reading out of the packer the
+        // chain feeds, so the teardown was racing a live audio thread. Stopping the
+        // device first leaves nothing reading while the pipeline is rebuilt.
+        //
+        // running is also latched: doStart can fail - a device that is busy, or that
+        // will not take the rate - and the result used to be thrown away, leaving
+        // running set with no stream open. Every later stop then worked on a closed
+        // stream.
+        bool wasRunning = running;
+        if (wasRunning) { doStop(); }
         _stream->setSampleRate(sampleRate);
-
-        if (running) { doStop(); }
-        if (running) { doStart(); }
+        if (wasRunning) { running = doStart(); }
     }
 
     void menuHandler() {
@@ -161,11 +174,12 @@ public:
         ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());
         if (ImGui::Combo(("##_audio_sink_sr_" + _streamName).c_str(), &srId, sampleRatesTxt.c_str())) {
             sampleRate = sampleRates[srId];
+            // Same order as selectById: close the device before rebuilding the
+            // pipeline behind it, and keep whether the reopen actually worked.
+            bool wasRunning = running;
+            if (wasRunning) { doStop(); }
             _stream->setSampleRate(sampleRate);
-            if (running) {
-                doStop();
-                doStart();
-            }
+            if (wasRunning) { running = doStart(); }
             config.acquire();
             config.conf[_streamName]["devices"][devList[devId].name] = sampleRate;
             config.release(true);
@@ -219,8 +233,18 @@ private:
         stereoPacker.stop();
         monoPacker.out.stopReader();
         stereoPacker.out.stopReader();
-        audio.stopStream();
-        audio.closeStream();
+        // RtAudio 5 throws out of these if the stream is not open or the device has
+        // gone away, and unlike doStart nothing here was catching it. An exception
+        // thrown from inside a menu handler unwinds through the middle of an ImGui
+        // frame, which does not end well. The buffers still have to be released
+        // either way, so this cannot be left to propagate.
+        try {
+            audio.stopStream();
+            audio.closeStream();
+        }
+        catch (const std::exception& e) {
+            flog::error("Could not close audio device: {0}", e.what());
+        }
         monoPacker.out.clearReadStop();
         stereoPacker.out.clearReadStop();
     }
