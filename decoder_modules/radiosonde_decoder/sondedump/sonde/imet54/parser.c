@@ -47,6 +47,20 @@ imet54_parse(SondeData *dst, const uint8_t *frame)
     float lat, lon, alt, temp, rh;
     int hour, minute, second, ms;
     int position_ok = 1;
+    int have_ptu = 0;
+
+    /* The caller hands us an uninitialised SondeData off the stack and only ever
+     * looks at the fields the bitmask claims are present - but the bitmask is per
+     * group, not per field. Setting DATA_PTU therefore promises temperature,
+     * humidity *and* pressure, and anything left unwritten is read as whatever was
+     * on the stack. Pressure is the one that bites: this sonde has no barometer, so
+     * nothing below ever writes it, and the caller's "derive it from altitude if it
+     * is not positive" fallback keeps any stack garbage that happens to be positive
+     * and reports it as a measurement. */
+    dst->temp = -273.15f;   /* absolute zero: obviously not a reading, if one is missed */
+    dst->rh = 0.0f;
+    dst->pressure = 0.0f;   /* no barometer; the caller derives it from altitude */
+    dst->calib_percent = 0.0f;
 
     /* Serial number */
     serial = u4be(frame + IMET54_POS_SN);
@@ -102,8 +116,8 @@ imet54_parse(SondeData *dst, const uint8_t *frame)
     if (u4be(frame + IMET54_POS_T) != IMET54_NO_DATA) {
         temp = f4be(frame + IMET54_POS_T);
         if (temp > -120.0f && temp < 80.0f) {
-            dst->fields |= DATA_PTU;
             dst->temp = temp;
+            have_ptu = 1;
         }
     }
 
@@ -111,16 +125,18 @@ imet54_parse(SondeData *dst, const uint8_t *frame)
         rh = f4be(frame + IMET54_POS_RH);
         if (rh < 0.0f) { rh = 0.0f; }
         if (rh > 100.0f) { rh = 100.0f; }
-        dst->fields |= DATA_PTU;
         dst->rh = rh;
+        have_ptu = 1;
         /* The humidity sensor lags badly in the cold, so what it reports high up is
          * closer to a trend than a reading. Nothing to be done about that here. */
     }
 
-    /* The iMet-54 carries no pressure sensor: what other sondes report is derived
-     * from altitude, and the caller does that if it wants it. Calibration is not
-     * transmitted piecemeal either, so there is no percentage to report. */
-    if (dst->fields & DATA_PTU) { dst->calib_percent = 100.0f; }
+    /* Calibration is not transmitted piecemeal the way the Vaisala sondes do it, so
+     * there is nothing to count up to: whatever arrived is all there is. */
+    if (have_ptu) {
+        dst->fields |= DATA_PTU;
+        dst->calib_percent = 100.0f;
+    }
 
     return position_ok ? 0 : -1;
 }

@@ -9,8 +9,8 @@
 
 struct imet54decoder {
     Framer f;
-    /* The framer needs room for the frame plus the sync word it aligns to. */
-    uint8_t raw_frame[(IMET54_FRAME_LEN + IMET54_SYNC_LEN) / 8 + 8];
+    /* Two frames' worth - see IMET54_RAW_FRAME_LEN. */
+    uint8_t raw_frame[IMET54_RAW_FRAME_LEN];
     uint8_t frame[IMET54_DATA_LEN];
 };
 

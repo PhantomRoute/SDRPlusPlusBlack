@@ -210,6 +210,13 @@ void IQFrontEnd::flushInputBuffer() {
 }
 
 void IQFrontEnd::start() {
+    // Deliberately not seeding the watchdog timestamp here. This runs once, when the
+    // window is built, and never again - play and stop drive the *source*, not the
+    // front end - so a value stored here would be minutes old by the time anyone
+    // pressed play. The gap between pressing play and the first sample is the main
+    // window's to account for, because it is the only one that knows when play was
+    // pressed.
+
     // Start input buffer
     inBuf.start();
 
@@ -255,6 +262,10 @@ double IQFrontEnd::getEffectiveSamplerate() {
 
 void IQFrontEnd::handler(dsp::complex_t* data, int count, void* ctx) {
     IQFrontEnd* _this = (IQFrontEnd*)ctx;
+
+    // Proof of life for the watchdog. This runs off the sample flow itself, so it
+    // stops the moment the source does, whatever the reason and whichever source.
+    _this->_lastSampleTime.store(currentTimeMillis());
 
     // Apply window
     volk_32fc_32f_multiply_32fc((lv_32fc_t*)_this->fftPlan->getInput()->data(), (lv_32fc_t*)data, _this->fftWindowBuf, _this->_nzFFTSize);

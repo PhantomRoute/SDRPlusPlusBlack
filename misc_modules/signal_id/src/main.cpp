@@ -72,9 +72,25 @@ namespace {
     double rasterStep(double freq, double hzPerBin) {
         for (double step : RASTER_STEPS) {
             if (hzPerBin > (step / 4.0)) { continue; }
+
+            // How close counts as on the grid. Two things bound it, and getting the
+            // relationship backwards makes the row worse than useless.
+            //
+            // It cannot be tighter than the measurement: the centre is only known to
+            // about a bin, so a bin is the floor - with a small floor of its own for
+            // very fine bins, where drift alone moves the peak further than that.
+            //
+            // It must not be a large slice of the step either, and that is the part
+            // that was wrong: the tolerance used to be max(bin, 1% of step), so a
+            // coarse FFT widened the window rather than narrowing it. At 250 Hz bins
+            // that made the 1 kHz grid match roughly half of all frequencies, and the
+            // panel reported it as evidence the transmitter had been put there.
+            double tolerance = std::max<double>(hzPerBin, step * 0.002);
+            if (tolerance > step * 0.02) { tolerance = step * 0.02; }
+
             double off = fmod(fabs(freq), step);
             double err = std::min<double>(off, step - off);
-            if (err <= std::max<double>(hzPerBin, step * 0.01)) { return step; }
+            if (err <= tolerance) { return step; }
         }
         return 0.0;
     }
@@ -216,6 +232,15 @@ private:
     int samplesTotal = 0;
     double dutyWindowStart = 0.0;
 
+    // When the signal last went up or down. The burst and gap lengths are durations
+    // with no timestamps attached, so this is what says whether they are still
+    // describing something that is happening.
+    double lastTransition = 0.0;
+    // After this long with no transition at all, they are not. Generous, because a
+    // beacon on a one minute cycle is a real thing and its numbers should not be
+    // thrown away between overs.
+    static constexpr double TIMING_EXPIRY = 90.0;
+
     // ---- The last ten seconds, one entry per frame. Where the peak was answers how
     // far it has drifted; how much the level and the width moved over that span
     // answers two questions the instantaneous numbers cannot - whether the signal is
@@ -266,6 +291,7 @@ private:
         samplesTotal = 0;
         wasOn = false;
         lastEdge = 0.0;
+        lastTransition = 0.0;
         dutyWindowStart = ImGui::GetTime();
     }
 
@@ -468,6 +494,7 @@ private:
                     std::deque<double>& into = wasOn ? burstLengths : gapLengths;
                     into.push_back(held);
                     while (into.size() > 20) { into.pop_front(); }
+                    lastTransition = now;
                     if (on) {
                         onsetTimes.push_back(now);
                         while (onsetTimes.size() > 20) { onsetTimes.pop_front(); }
@@ -481,7 +508,16 @@ private:
 
     // The gap from one transmission starting to the next, and how much that gap
     // varies. Returns false until there are enough of them to say anything.
+    // Whether the burst and gap history still describes something that is happening.
+    // Without this the timing rows go on quoting the last twenty transmissions of a
+    // beacon that stopped an hour ago, directly under a State row saying there is
+    // nothing above the noise.
+    bool timingExpired() const {
+        return lastTransition > 0.0 && (ImGui::GetTime() - lastTransition) > TIMING_EXPIRY;
+    }
+
     bool rhythm(double& period, double& spread) const {
+        if (timingExpired()) { return false; }
         if (onsetTimes.size() < 4) { return false; }
         double sum = 0.0;
         int count = 0;
@@ -523,7 +559,16 @@ private:
         int hiBin = (int)ceil((hi - viewStart) / hzPerBin);
         loBin = std::clamp<int>(loBin, 0, dataWidth - 1);
         hiBin = std::clamp<int>(hiBin, 0, dataWidth - 1);
-        if ((hiBin - loBin) < 4) { return; }
+        // Same reasoning as the early return above, and it was missed here: pan or
+        // zoom until the signal is off the edge of the view and both bins clamp to
+        // the same end, leaving nothing to draw. Returning without clearing kept the
+        // last good trace on screen against a sketchLo/sketchHi that no longer
+        // describe anything, so the picture and its markers disagreed with each other
+        // and with the view.
+        if ((hiBin - loBin) < 4) {
+            sketch.clear();
+            return;
+        }
 
         // At most this many columns, taking the loudest bin in each. A max rather
         // than an average, so a narrow carrier inside a wide window does not get
@@ -1248,7 +1293,11 @@ private:
         else { ImGui::Text("On        -"); }
         if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Over the last twenty seconds or so"); }
 
-        if (!burstLengths.empty()) {
+        // All three of the rows below describe the last twenty transmissions, and
+        // stop meaning anything once those stopped happening.
+        bool timingOld = timingExpired();
+
+        if (!burstLengths.empty() && !timingOld) {
             ImGui::Text("Bursts    %s", fmtTime(average(burstLengths)).c_str());
             if (ImGui::IsItemHovered()) {
                 double shortest = *std::min_element(burstLengths.begin(), burstLengths.end());
@@ -1263,7 +1312,7 @@ private:
             ImGui::Text("Bursts    -");
         }
 
-        if (!gapLengths.empty()) { ImGui::Text("Gaps      %s", fmtTime(average(gapLengths)).c_str()); }
+        if (!gapLengths.empty() && !timingOld) { ImGui::Text("Gaps      %s", fmtTime(average(gapLengths)).c_str()); }
         else { ImGui::Text("Gaps      -"); }
         if (ImGui::IsItemHovered()) { ImGui::SetTooltip("How long it waits between transmissions, averaged the same way"); }
 

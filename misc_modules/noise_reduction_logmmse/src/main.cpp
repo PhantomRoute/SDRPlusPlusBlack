@@ -330,6 +330,9 @@ private:
     };
     std::deque<SnrSample> snrHistory;
     double lastSnrSampleTime = 0.0;
+    // Non-zero while the radio is stopped: the clock the chart is drawn against, held
+    // at the moment sampling stopped so the trace does not scroll away under itself.
+    double chartFrozenAt = 0.0;
     // Scratch for the per-column collapse below, kept between frames so drawing the
     // chart doesn't allocate on every one.
     std::vector<float> colSum;
@@ -362,9 +365,19 @@ private:
         // whatever it last read. Sampling it anyway drew that one stale number across
         // the chart at twenty points a second, which looks exactly like a strong,
         // perfectly steady signal - the chart went on reporting a station that had
-        // stopped being received. Stop collecting and the trace stops advancing,
-        // which is what actually happened.
-        if (!gui::mainWindow.sdrIsRunning()) { return; }
+        // stopped being received.
+        //
+        // Stopping the sampling is only half of it. The horizontal axis is "seconds
+        // ago", measured against the clock every frame, so with the radio stopped the
+        // trace went on sliding left and off the chart and the grid marks crawled
+        // with it - which still reads as a running chart even though no new reading
+        // has been taken. Freezing the clock at the moment it stopped leaves the last
+        // minute on screen, still, until it starts again.
+        if (!gui::mainWindow.sdrIsRunning()) {
+            if (chartFrozenAt <= 0.0) { chartFrozenAt = ImGui::GetTime(); }
+            return;
+        }
+        chartFrozenAt = 0.0;
 
         // The core's own measurement, in dB over the noise beside the channel. The
         // chart used to be fed the SNR meter's drawn pixel length instead, which is
@@ -425,7 +438,9 @@ private:
             top = std::clamp(ceilf(highest / 10.0f) * 10.0f, 40.0f, 100.0f);
         }
 
-        double now = ImGui::GetTime();
+        // The clock everything below is positioned against. Frozen while the radio is
+        // stopped, so the chart holds the last minute instead of scrolling it away.
+        double now = (chartFrozenAt > 0.0) ? chartFrozenAt : ImGui::GetTime();
         auto xOf = [&](double t) {
             double age = now - t;
             double f = 1.0 - (age / SNR_CHART_SPAN);

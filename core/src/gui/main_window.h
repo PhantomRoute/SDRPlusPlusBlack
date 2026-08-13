@@ -25,6 +25,13 @@ public:
     }
     bool sdrIsRunning();
 
+    // Notices a source that has stopped producing samples while the radio still
+    // thinks it is running, and stops it. Called once a frame from draw().
+    void checkSourceAlive();
+    // Millis at which play was last pressed, so the watchdog above does not count the
+    // gap before the first sample as silence.
+    long long playStartTime = 0;
+
     void performDetectedLLMAction(const std::string &whisperResult, std::string command);
 
     static float* acquireFFTBuffer(void* ctx);

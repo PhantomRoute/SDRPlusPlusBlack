@@ -46,6 +46,15 @@
 #define IMET54_CODED_BITS 1728
 #define IMET54_DATA_LEN 108
 
+/* The buffer the framer is given has to hold two frames, not one.
+ *
+ * framer_read() realigns by demodulating framelen + sync_offset bits into it, and
+ * correlate() searches the whole frame for the sync word, so sync_offset can be
+ * most of a frame on its own. One frame's worth of bytes is not enough and the
+ * overrun lands on whatever follows in the struct. This is why every sonde that
+ * ships with sondedump declares its raw frame as an array of two. */
+#define IMET54_RAW_FRAME_LEN (2 * (IMET54_FRAME_LEN / 8) + 8)
+
 /* Field offsets within the 108 byte payload. All multi-byte values big endian. */
 #define IMET54_POS_SN 0x00       /* uint32  serial number */
 #define IMET54_POS_GPSTIME 0x04  /* int32   HHMMSSmmm */

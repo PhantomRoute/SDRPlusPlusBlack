@@ -6,6 +6,7 @@
 #include "utils/usleep.h"
 #include "utils/cty.h"
 #include <stdio.h>
+#include <algorithm>
 #include <thread>
 #include <complex>
 #include <gui/widgets/waterfall.h>
@@ -985,6 +986,8 @@ void MainWindow::setPlayState(bool _playing) {
         }
         sigpath::sourceManager.tune(gui::waterfall.getCenterFrequency());
         playing = true;
+        // What the watchdog measures its silence from until the first sample lands.
+        playStartTime = currentTimeMillis();
         onPlayStateChange.emit(true);
     }
     else {
@@ -997,6 +1000,47 @@ void MainWindow::setPlayState(bool _playing) {
 
 bool MainWindow::sdrIsRunning() {
     return playing;
+}
+
+// A source that dies while running does not report it. An SDR pulled out of its
+// socket, a network source whose far end went away, a server that dropped the
+// connection: the reading thread ends, and everything upstream carries on believing
+// it is receiving. The waterfall freezes, the SNR meter holds its last value, every
+// decoder sits waiting for samples that will never come, and the only clue is that
+// nothing changes - which looks a lot like a quiet band.
+//
+// So: if the radio says it is playing and nothing has reached the front end for
+// several seconds, stop it properly and say what happened. Stopping is the same path
+// the stop button takes, which is what anyone would press once they worked out what
+// had gone wrong; doing it here just saves them working it out.
+void MainWindow::checkSourceAlive() {
+    // Long enough that no healthy source trips it. Even one FFT per second is well
+    // inside this, and a source that has genuinely gone quiet for five seconds has
+    // stopped, whatever the reason.
+    const long long TIMEOUT_MS = 5000;
+
+    if (!playing) { return; }
+
+    // Measured from whichever is later: the last sample, or the moment play was
+    // pressed. The second half matters and is easy to get wrong - a device takes a
+    // moment to hand over its first samples, and the front end's own clock is no help
+    // because it is started once when the window is built and never again. Timing
+    // from that would mean every play after the first few seconds of the session
+    // looked like a source that had already died, and the radio would stop the
+    // instant it was started.
+    long long reference = std::max<long long>(playStartTime, sigpath::iqFrontEnd.getLastSampleTime());
+    if (reference <= 0) { return; }
+
+    long long silence = currentTimeMillis() - reference;
+    // A clock that went backwards - a system time change, an NTP step - is not a dead
+    // radio, and stopping the user's receiver over one would be its own bug.
+    if (silence < 0 || silence < TIMEOUT_MS) { return; }
+
+    flog::error("No samples for {0} ms, stopping. The source appears to have gone away.", silence);
+    setPlayState(false);
+    ImGui::InsertNotification({ ImGuiToastType_Error, 8000,
+                                "The source stopped sending samples, so the radio has been stopped.\n"
+                                "If it was unplugged or the connection dropped, restore it and press play." });
 }
 
 

@@ -1697,6 +1697,11 @@ void MobileMainWindow::draw() {
     // Both layouts pass through here, unlike MainWindow::draw().
     runMainThreadTasks();
 
+    // Which is exactly why the watchdog goes here and not there: MainWindow::draw()
+    // is only reached in the default layout, so a source dying while the transceiver
+    // layout was up would have gone unnoticed.
+    checkSourceAlive();
+
     auto ctm = currentTimeNanos();
     updateAudioWaterfallPipeline();
 

@@ -73,6 +73,19 @@ public:
         _currentStreamTime = x;
     }
 
+    /**
+     * When samples last reached the front end, in milliseconds.
+     *
+     * A source that dies mid-stream - a dongle pulled out of its socket, a network
+     * source whose far end went away - simply stops calling us. Nothing in the source
+     * interface reports that, and every source reports it differently or not at all,
+     * so this is the one place that notices: it is fed by the sample flow itself and
+     * therefore works for every source without any of them having to cooperate.
+     *
+     * Zero means nothing has arrived since the last start.
+     */
+    long long getLastSampleTime() { return _lastSampleTime.load(); }
+
     Event<double> onEffectiveSampleRateChange;
 
     std::string operatorCallsign; // callsign assigned to radio.
@@ -85,6 +98,7 @@ public:
 
 protected:
     std::atomic<long long> _currentStreamTime = 0; // unix time millis. 0 means realtime, otherwise simulated time.
+    std::atomic<long long> _lastSampleTime = 0;    // see getLastSampleTime()
     static void handler(dsp::complex_t* data, int count, void* ctx);
     void updateFFTPath(bool updateWaterfall = false);
     void generateFFTWindow();
