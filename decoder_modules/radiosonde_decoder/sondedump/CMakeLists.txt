@@ -56,6 +56,11 @@ set(SONDEDUMP_SOURCES
     sonde/mrz-n1/frame.c
     sonde/mrz-n1/parser.c
 
+    # Not from upstream sondedump - see ../README.md
+    sonde/imet54/imet54.c
+    sonde/imet54/frame.c
+    sonde/imet54/parser.c
+
     xdata/xdata.c
 
     gps/ecef.c

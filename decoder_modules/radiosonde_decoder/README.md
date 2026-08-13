@@ -8,6 +8,39 @@ Supported: **RS41** (Vaisala), **DFM06/09** (GRAW), **iMS-100 / RS-11G** (Meisei
 **M10 / M20** (Meteomodem), **iMet-1/4** (InterMet), **SRS-C50** (Meteolabor) and
 **MRZ-N1** (Meteo-Radiy). They are mostly found between 400 and 406 MHz.
 
+Plus **iMet-54** (InterMet), which is ours — see below.
+
+### The iMet-54 decoder
+
+`sondedump/sonde/imet54/` is **not** upstream sondedump code. Upstream has never had
+an iMet-54 decoder, and the iMet-4 decoder next to it cannot be made to do the job:
+the -4 is 1200 baud AFSK, the -54 is 4800 baud GFSK, sent 8N1, interleaved in 64 bit
+blocks and protected by Hamming[8,4].
+
+It was written against two independent reference implementations, which was the
+whole reason for trusting it:
+
+- [`rs1729/RS`](https://github.com/rs1729/RS) `demod/mod/imet54mod.c` (GPL-3.0), the
+  SDR decoder that [radiosonde_auto_rx](https://github.com/projecthorus/radiosonde_auto_rx)
+  drives as sonde type `IMET5`
+- [`sakul7-stack/iMet54`](https://github.com/sakul7-stack/iMet54) (MIT), an
+  ESP32/CC1101 receiver where the radio chip demodulates in hardware
+
+The two were reverse engineered separately, for completely different hardware, and
+agree on every constant: sync word, baud rate, frame length, the Hamming code and
+its lookup table, the 8x8 interleaver, the CRC polynomials and all the field
+offsets. Where they agreed, the value was used; nothing here was guessed.
+
+The frame maths also lands the same way from both directions: 220 symbols of 10 bits
+= 2200 bits on air, minus the start and stop bits = 1760, minus the four header
+symbols = 1728 coded bits = 27 blocks of 64, halving through Hamming[8,4] to the 108
+byte payload both sources describe.
+
+Two things the iMet-54 does not send, so the panel cannot show them: **pressure**
+(there is no barometer - other sondes' figures are derived from altitude) and a
+**date** (only a time of day, so it is combined with today's UTC date, which is
+wrong for a few seconds either side of midnight).
+
 There is no automatic type detection — pick the family in the panel. The channel
 width changes with the choice, so a wrong pick is usually obvious against the signal
 on the waterfall.

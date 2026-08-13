@@ -92,13 +92,17 @@ private:
     radiosonde::Decoder<IMET4Decoder, imet4_decoder_init, imet4_decoder_deinit, imet4_decode> imet4decoder;
     radiosonde::Decoder<C50Decoder, c50_decoder_init, c50_decoder_deinit, c50_decode> c50decoder;
     radiosonde::Decoder<MRZN1Decoder, mrzn1_decoder_init, mrzn1_decoder_deinit, mrzn1_decode> mrzn1decoder;
+    radiosonde::Decoder<IMET54Decoder, imet54_decoder_init, imet54_decoder_deinit, imet54_decode> imet54decoder;
 
-    SondeType types[7] = {
+    SondeType types[8] = {
         { "RS41 (Vaisala)", 10000.0f, &rs41decoder },
         { "DFM06/09 (GRAW)", 15000.0f, &dfm09decoder },
         { "iMS-100 / RS-11G (Meisei)", 20000.0f, &ims100decoder },
         { "M10 / M20 (Meteomodem)", 50000.0f, &m10decoder },
         { "iMet-1/4 (InterMet)", 20000.0f, &imet4decoder },
+        // 4800 baud GFSK, so it needs a wider channel than the 1200 baud AFSK
+        // iMet-1/4 above. Same width as the RS41, which runs at the same rate.
+        { "iMet-54 (InterMet)", 15000.0f, &imet54decoder },
         { "SRS-C50 (Meteolabor)", 20000.0f, &c50decoder },
         { "MRZ-N1 (Meteo-Radiy)", 20000.0f, &mrzn1decoder },
     };

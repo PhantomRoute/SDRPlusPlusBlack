@@ -100,6 +100,7 @@ RadiosondeDecoderModule::RadiosondeDecoderModule(std::string name) {
     imet4decoder.init(&resampler.out, DECODER_SAMPLE_RATE, sondeDataHandler, this);
     c50decoder.init(&resampler.out, DECODER_SAMPLE_RATE, sondeDataHandler, this);
     mrzn1decoder.init(&resampler.out, DECODER_SAMPLE_RATE, sondeDataHandler, this);
+    imet54decoder.init(&resampler.out, DECODER_SAMPLE_RATE, sondeDataHandler, this);
 
     // selectType builds the channel at the right width and starts the decoder, so
     // there is nothing to start here first.
@@ -335,7 +336,11 @@ void RadiosondeDecoderModule::menuHandler(void* ctx) {
         ImGui::SetTooltip("Which family of sonde to decode. They are not interchangeable, and there is\n"
                           "no auto detection: if you do not know, RS41 is the most widely flown, and\n"
                           "the channel width changes with the choice so a wrong pick usually looks\n"
-                          "obviously wrong on the waterfall.");
+                          "obviously wrong on the waterfall.\n"
+                          "\n"
+                          "The two InterMet entries are different radios, not settings of one: the\n"
+                          "iMet-1/4 is 1200 baud audio shift keying, the iMet-54 is 4800 baud\n"
+                          "frequency shift keying in a wider channel. Neither will decode the other.");
     }
 
     _this->drawTelemetry();
