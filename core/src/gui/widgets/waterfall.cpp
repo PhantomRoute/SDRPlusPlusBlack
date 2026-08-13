@@ -1637,6 +1637,23 @@ namespace ImGui {
     }
 
     void WaterFall::setFFTSmoothing(bool enabled) {
+        // Both locks, and in this order, because everywhere else that holds both
+        // takes latestFFTMtx first: pushFFT holds it across the whole function and
+        // grabs smoothingBufMtx part way down to apply the smoothing, and onResize
+        // takes them in that order too.
+        //
+        // This function used to take smoothingBufMtx first and then reach for
+        // latestFFTMtx to copy the current FFT in - the opposite order, and the only
+        // place that did it. Tick the FFT smoothing box at the wrong moment and the
+        // DSP thread would be inside pushFFT holding latestFFTMtx and waiting for
+        // smoothingBufMtx, while the UI thread held smoothingBufMtx and waited for
+        // latestFFTMtx. Neither could proceed: the FFT thread stopped, so reception
+        // stopped, and the UI froze with it. Intermittent, because it needed the
+        // click to land inside pushFFT's window.
+        //
+        // Taking latestFFTMtx up front also covers the dataWidth read below, which
+        // onResize changes under both of these.
+        std::lock_guard<std::recursive_mutex> lck0(latestFFTMtx);
         std::lock_guard<std::mutex> lck(smoothingBufMtx);
         fftSmoothing = enabled;
 
@@ -1652,7 +1669,6 @@ namespace ImGui {
         // Allocate and copy existing FFT into it
         smoothingBuf = new float[dataWidth];
         if (latestFFT) {
-            std::lock_guard<std::recursive_mutex> lck2(latestFFTMtx);
             memcpy(smoothingBuf, latestFFT, dataWidth * sizeof(float));
         }
         else {

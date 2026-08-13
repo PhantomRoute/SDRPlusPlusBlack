@@ -1036,7 +1036,13 @@ void MainWindow::checkSourceAlive() {
     // radio, and stopping the user's receiver over one would be its own bug.
     if (silence < 0 || silence < TIMEOUT_MS) { return; }
 
-    flog::error("No samples for {0} ms, stopping. The source appears to have gone away.", silence);
+    // (int64_t), not the long long it already is. flog only has __toString__
+    // overloads for the fixed width types, and on any LP64 target - which is every
+    // Linux and macOS build - int64_t is long, so long long is a distinct type that
+    // matches flog's catch-all template instead. That template does (std::string)value
+    // and fails to compile. Android has an explicit long long overload for this exact
+    // reason; nothing else does.
+    flog::error("No samples for {0} ms, stopping. The source appears to have gone away.", (int64_t)silence);
     setPlayState(false);
     ImGui::InsertNotification({ ImGuiToastType_Error, 8000,
                                 "The source stopped sending samples, so the radio has been stopped.\n"
