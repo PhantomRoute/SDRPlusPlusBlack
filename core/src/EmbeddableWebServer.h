@@ -500,7 +500,12 @@ char* strdupDecodeGETorPOSTParam(const char* paramNameIncludingEquals, const cha
     /* Ok paramStart points at -->"name=" ; let's make it point at "=" */
     paramStart = strstr(paramStart, "=");
     if (NULL == paramStart) {
-        ews_printf("It's very suspicious that we couldn't find an equals sign after searching for '%s' in '%s'\n", paramStart, paramString);
+        /* LOCAL FIX (not upstream): this printed paramStart, which inside this branch
+         * is NULL by definition - passing NULL to %s is undefined, and crashes rather
+         * than printing on some C libraries. The name being searched for is what the
+         * message meant to report anyway. Reachable when a caller passes a name with
+         * no equals sign in a build where the assert above is compiled out. */
+        ews_printf("It's very suspicious that we couldn't find an equals sign after searching for '%s' in '%s'\n", paramNameIncludingEquals, paramString);
         return strdupIfNotNull(valueIfNotFound);
     }
     /* We need to skip past the "=" */
@@ -839,6 +844,10 @@ void heapStringAppendFormatV(struct HeapString* string, const char* format, va_l
     assert(string->capacity >= string->length + appendLength + 1);
     /* perform the actual vsnprintf that does the work */
     size_t actualAppendLength = vsnprintf(&string->contents[string->length], string->capacity - string->length, format, apCopy);
+    /* LOCAL FIX (not upstream): every va_copy has to be matched by a va_end. It is a
+     * no-op on the usual x86-64 ABIs, which is why this has gone unnoticed, but it is
+     * required by the standard and does real work on some targets. */
+    va_end(apCopy);
     string->length += appendLength;
     assert(actualAppendLength == appendLength && "We called vsnprintf twice with the same format and value arguments and got different string lengths");
     /* explicitly null terminate in case I messed up the vsnprinf logic */

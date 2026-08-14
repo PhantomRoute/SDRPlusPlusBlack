@@ -51,13 +51,24 @@ namespace SmGui {
         DRAW_LIST_ELEM_TYPE_STRING,
     };
 
+    // Every member is given a value here because the push* functions each fill in
+    // only the one field their type uses, and `DrawListElem elem;` leaves the rest
+    // indeterminate. Nothing reads them today - both the draw loop and the
+    // serialiser branch on `type` and only touch the matching field - so this is not
+    // fixing a live bug. It is fixing how easily one could be introduced: that
+    // invariant is convention held in four separate places, and the day someone
+    // reads the wrong field the result is a nondeterministic difference between the
+    // server and the client, over the network, with nothing in the logs.
     struct DrawListElem {
-        DrawListElemType type;
-        DrawStep step;
-        bool forceSync;
-        bool b;
-        int i;
-        float f;
+        DrawListElemType type = DRAW_LIST_ELEM_TYPE_DRAW_STEP;
+        // Neither enum has a "none" member, so these fall back to their zero values.
+        // FILL_WIDTH is the harmless one to land on: it draws nothing and only sets a
+        // flag for the next item.
+        DrawStep step = DRAW_STEP_FILL_WIDTH;
+        bool forceSync = false;
+        bool b = false;
+        int i = 0;
+        float f = 0.0f;
         std::string str;
     };
 
