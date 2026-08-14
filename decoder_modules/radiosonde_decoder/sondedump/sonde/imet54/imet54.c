@@ -12,6 +12,7 @@ volatile int imet54_stat_framed = 0;
 volatile int imet54_stat_ecc_fail = 0;
 volatile int imet54_stat_crc_fail = 0;
 volatile int imet54_stat_ok = 0;
+volatile int imet54_stat_last_bad = 0;
 
 struct imet54decoder {
     Framer f;
@@ -59,18 +60,23 @@ imet54_decode(IMET54Decoder *self, SondeData *dst, const float *src, size_t len)
     dst->fields = 0;
     imet54_stat_framed++;
 
-    /* Undo 8N1, the interleaver and the Hamming code. A frame that cannot be
-     * corrected is one the framer locked onto in the wrong place, or noise: report
-     * that nothing came of it rather than parsing whatever fell out. */
+    /* Undo 8N1, the interleaver and the Hamming code. */
     errcount = imet54_frame_decode(self->frame, self->raw_frame);
-    if (errcount < 0) {
+    imet54_stat_last_bad = errcount;
+
+    /* Beyond about a quarter of the codewords ruined there is no signal here to
+     * speak of - the framer matched noise, or the payload is being read from the
+     * wrong offset. Counting that separately from a checksum failure is what makes
+     * the two distinguishable from outside. */
+    if (errcount < 0 || errcount > (IMET54_DATA_LEN * 2) / 4) {
         imet54_stat_ecc_fail++;
         return PARSED;
     }
 
     /* The CRC covers the first 0x34 bytes, which is everything the parser reads
-     * except the humidity sensor temperature. Checking it is what keeps a frame
-     * that survived the Hamming decode by luck from being reported as telemetry. */
+     * except the humidity sensor temperature. With ruined codewords passed through
+     * as zeroes rather than rejected, this is what stops a partly broken frame being
+     * reported as telemetry. */
     if (!imet54_frame_crc_ok(self->frame)) {
         imet54_stat_crc_fail++;
         return PARSED;

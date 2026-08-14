@@ -63,6 +63,7 @@ imet54_frame_decode(uint8_t *dst, const uint8_t *raw_bits)
     uint8_t deinter[IMET54_CODED_BITS];      /* interleaver undone */
     int i, j, n;
     int corrected = 0;
+    int bad = 0;
     int out = 0;
     uint8_t nibble[IMET54_DATA_LEN * 2];
 
@@ -95,15 +96,28 @@ imet54_frame_decode(uint8_t *dst, const uint8_t *raw_bits)
         }
     }
 
-    /* Hamming decode, eight bits at a time into one nibble. */
+    /* Hamming decode, eight bits at a time into one nibble.
+     *
+     * A codeword that cannot be repaired does not abandon the frame. Hamming[8,4]
+     * fixes one bit in eight, and there are 216 codewords here, so over the air at
+     * any realistic distance a frame will nearly always contain one the code cannot
+     * save - discarding the whole frame for it throws away every frame. The
+     * reference implementation does not do that either: it decodes all of them,
+     * keeps a note of which ones were bad, and lets the checksum decide.
+     *
+     * A ruined codeword becomes nibble 0, which is what the reference ends up with
+     * too, and the count of them comes back to the caller as the return value.
+     * That number is also the cheapest evidence there is about alignment: a handful
+     * means a weak signal, while a couple of hundred out of 216 means the payload is
+     * not where we think it is, because random bytes almost never land on one of the
+     * sixteen valid codewords. */
     for (i = 0; i < IMET54_CODED_BITS / 8; i++) {
         uint8_t *code = deinter + 8 * i;
         uint8_t byte = 0;
         int ecc = ham_correct(code);
         int nib;
 
-        if (ecc < 0) { return -1; }
-        corrected += ecc;
+        if (ecc > 0) { corrected += ecc; }
 
         /* The codeword is carried least significant bit first */
         for (j = 0; j < 8; j++) {
@@ -113,19 +127,21 @@ imet54_frame_decode(uint8_t *dst, const uint8_t *raw_bits)
         for (nib = 0; nib < 16; nib++) {
             if (byte == HAM_LUT[nib]) { break; }
         }
-        /* Correction above should have landed on a valid codeword. If it did not,
-         * the frame is not ours to salvage. */
-        if (nib >= 16) { return -1; }
+        if (nib >= 16) {
+            bad++;
+            nib = 0;
+        }
 
         nibble[i] = (uint8_t)nib;
     }
+    (void)corrected;
 
     /* Two nibbles to a byte, high one first. */
     for (out = 0; out < IMET54_DATA_LEN; out++) {
         dst[out] = (uint8_t)((nibble[2 * out] << 4) | (nibble[2 * out + 1] & 0x0F));
     }
 
-    return corrected;
+    return bad;
 }
 
 /* CRC32/802.3 with a non-standard final xor, computed over the first 0x34 bytes

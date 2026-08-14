@@ -24,6 +24,9 @@ extern volatile int imet54_stat_framed;
 extern volatile int imet54_stat_ecc_fail;
 extern volatile int imet54_stat_crc_fail;
 extern volatile int imet54_stat_ok;
+/* Ruined codewords in the most recent frame, out of 216. A handful is a weak
+ * signal; a couple of hundred means the payload offset is wrong. */
+extern volatile int imet54_stat_last_bad;
 
 /**
  * Initialize an iMet-54 frame decoder

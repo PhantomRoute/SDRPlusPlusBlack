@@ -16,8 +16,12 @@
  *                 byte, most significant bit first, aligned so that the sync word
  *                 starts at bit zero
  *
- * @return the number of single bit errors corrected, or -1 if any codeword was
- *         damaged beyond what Hamming[8,4] can repair
+ * @return how many of the 216 codewords were damaged beyond what Hamming[8,4] can
+ *         repair, or -1 if the frame was too short to contain a payload at all.
+ *         Zero is a clean frame; a handful is a weak signal; a couple of hundred
+ *         means the payload is not being read from the right place. Ruined codewords
+ *         become zero nibbles - it is the caller's job to decide, from this count
+ *         and from the checksum, whether the result is worth anything.
  */
 int imet54_frame_decode(uint8_t *dst, const uint8_t *raw_bits);
 

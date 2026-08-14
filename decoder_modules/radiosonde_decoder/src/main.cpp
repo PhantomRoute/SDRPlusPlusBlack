@@ -382,6 +382,13 @@ void RadiosondeDecoderModule::drawTelemetry() {
             if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Framed, but the payload did not survive error correction. If this tracks\nFramed one for one, the payload is being read from the wrong offset."); }
             ImGui::TextDisabled("CRC fail  %d", imet54_stat_crc_fail);
             if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Error correction succeeded and the checksum still disagreed."); }
+            ImGui::TextDisabled("Bad words %d / 216", imet54_stat_last_bad);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Codewords in the last frame that error correction could not repair.\n"
+                                  "A handful is a weak signal and the checksum will sort it out.\n"
+                                  "A hundred or more means the payload is being read from the wrong\n"
+                                  "place - random bytes almost never land on a valid codeword.");
+            }
         }
         return;
     }
