@@ -80,13 +80,14 @@ imet54_frame_decode(uint8_t *dst, const uint8_t *raw_bits)
         if (pos > 0 && pos < 9) { stripped[n++] = bits[i]; }
     }
 
-    /* The header symbols are data as far as the above is concerned. Drop them now,
-     * leaving exactly the coded payload. */
-    if (n - IMET54_HEADER_DATA_BITS < IMET54_CODED_BITS) { return -1; }
+    /* The sync and preamble are data as far as the above is concerned. Step over all
+     * of them - both the symbols the correlator matched and the three that follow it
+     * - leaving exactly the coded payload. */
+    if (n - IMET54_PAYLOAD_OFFSET_BITS < IMET54_CODED_BITS) { return -1; }
 
     /* Undo the interleaver: each 64 bit block is an 8x8 bit matrix, transposed. */
     for (n = 0; n + 64 <= IMET54_CODED_BITS; n += 64) {
-        const uint8_t *in = stripped + IMET54_HEADER_DATA_BITS + n;
+        const uint8_t *in = stripped + IMET54_PAYLOAD_OFFSET_BITS + n;
         for (i = 0; i < 8; i++) {
             for (j = 0; j < 8; j++) {
                 deinter[n + 8 * j + i] = in[8 * i + j];

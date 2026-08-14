@@ -33,13 +33,31 @@
 
 /* 8N1: ten bits on air per byte */
 #define IMET54_SYMBOL_BITS 10
-#define IMET54_SYMBOLS 220
-#define IMET54_FRAME_LEN (IMET54_SYMBOLS * IMET54_SYMBOL_BITS)      /* 2200 bits */
 
-/* The header symbols are part of the frame the framer hands back, and are dropped
- * once the start and stop bits have been taken out. */
+/* How much of the sync the correlator above matched, in symbols: 0x00 0xAA 0x24 0x24. */
 #define IMET54_HEADER_SYMBOLS (IMET54_SYNC_LEN / IMET54_SYMBOL_BITS)    /* 4 */
-#define IMET54_HEADER_DATA_BITS (IMET54_HEADER_SYMBOLS * 8)              /* 32 */
+
+/* And how much of it is still sitting in the stream afterwards.
+ *
+ * This is the part that is easy to get wrong and produces a decoder that finds the
+ * signal, frames it, and never decodes a single byte. The sync the sonde actually
+ * sends is FIVE bytes, 0x24 0x24 0x24 0x24 0x42, of which the correlation window
+ * above covers only the first two - so 0x24 0x24 0x42 are still there, ahead of the
+ * payload, and have to be stepped over.
+ *
+ * rs1729 skips 3 bytes here and not 7 because his bit buffer starts *after* the
+ * matched header. sondedump's framer keeps the sync word at the front of the frame
+ * (see RS41Frame, whose first member is its syncword), so both parts get skipped
+ * here: the 4 matched symbols and the 3 that follow. */
+#define IMET54_TRAILING_SYNC_SYMBOLS 3
+#define IMET54_PREAMBLE_SYMBOLS (IMET54_HEADER_SYMBOLS + IMET54_TRAILING_SYNC_SYMBOLS)  /* 7 */
+/* In de-8N1'd bits, which is where the skip is applied. */
+#define IMET54_PAYLOAD_OFFSET_BITS (IMET54_PREAMBLE_SYMBOLS * 8)        /* 56 */
+
+/* Seven symbols of sync and preamble, then 216 symbols carrying the coded payload.
+ * The framer is asked for all of it because the sync is part of the frame here. */
+#define IMET54_SYMBOLS (IMET54_PREAMBLE_SYMBOLS + 217)                  /* 224 */
+#define IMET54_FRAME_LEN (IMET54_SYMBOLS * IMET54_SYMBOL_BITS)          /* 2240 bits */
 
 /* What is left is 27 blocks of 64 bits, which halve to 108 bytes through the
  * Hamming decode. Both reference implementations arrive at the same numbers. */

@@ -370,6 +370,19 @@ void RadiosondeDecoderModule::drawTelemetry() {
     if (!have) {
         ImGui::TextDisabled("Nothing decoded yet");
         ImGui::TextDisabled("Tune the marker onto the signal");
+
+        // For the iMet-54 only, because it is the one decoder here that is ours and
+        // the only one whose silence has no other explanation to hand. Says which of
+        // the three stages is failing instead of leaving it to guesswork.
+        if (types[selectedType].decoder == &imet54decoder) {
+            ImGui::Separator();
+            ImGui::TextDisabled("Framed    %d", imet54_stat_framed);
+            if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Times the sync word was found. Zero means it is not seeing the signal at\nall - check the frequency, and that the channel covers the whole of it."); }
+            ImGui::TextDisabled("FEC fail  %d", imet54_stat_ecc_fail);
+            if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Framed, but the payload did not survive error correction. If this tracks\nFramed one for one, the payload is being read from the wrong offset."); }
+            ImGui::TextDisabled("CRC fail  %d", imet54_stat_crc_fail);
+            if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Error correction succeeded and the checksum still disagreed."); }
+        }
         return;
     }
 

@@ -7,6 +7,12 @@
 #include "parser.h"
 #include "protocol.h"
 
+/* See include/imet54.h for what these are for. */
+volatile int imet54_stat_framed = 0;
+volatile int imet54_stat_ecc_fail = 0;
+volatile int imet54_stat_crc_fail = 0;
+volatile int imet54_stat_ok = 0;
+
 struct imet54decoder {
     Framer f;
     /* Two frames' worth - see IMET54_RAW_FRAME_LEN. */
@@ -51,18 +57,26 @@ imet54_decode(IMET54Decoder *self, SondeData *dst, const float *src, size_t len)
     }
 
     dst->fields = 0;
+    imet54_stat_framed++;
 
     /* Undo 8N1, the interleaver and the Hamming code. A frame that cannot be
      * corrected is one the framer locked onto in the wrong place, or noise: report
      * that nothing came of it rather than parsing whatever fell out. */
     errcount = imet54_frame_decode(self->frame, self->raw_frame);
-    if (errcount < 0) { return PARSED; }
+    if (errcount < 0) {
+        imet54_stat_ecc_fail++;
+        return PARSED;
+    }
 
     /* The CRC covers the first 0x34 bytes, which is everything the parser reads
      * except the humidity sensor temperature. Checking it is what keeps a frame
      * that survived the Hamming decode by luck from being reported as telemetry. */
-    if (!imet54_frame_crc_ok(self->frame)) { return PARSED; }
+    if (!imet54_frame_crc_ok(self->frame)) {
+        imet54_stat_crc_fail++;
+        return PARSED;
+    }
 
+    imet54_stat_ok++;
     imet54_parse(dst, self->frame);
 
     return PARSED;
