@@ -71,22 +71,27 @@ namespace {
     // are wider than the spacing.
     double rasterStep(double freq, double hzPerBin) {
         for (double step : RASTER_STEPS) {
-            if (hzPerBin > (step / 4.0)) { continue; }
-
-            // How close counts as on the grid. Two things bound it, and getting the
-            // relationship backwards makes the row worse than useless.
+            // How close counts as on the grid. Two things bound it, and they only
+            // both hold at a resolution fine enough to see the grid at all.
             //
             // It cannot be tighter than the measurement: the centre is only known to
             // about a bin, so a bin is the floor - with a small floor of its own for
             // very fine bins, where drift alone moves the peak further than that.
             //
-            // It must not be a large slice of the step either, and that is the part
-            // that was wrong: the tolerance used to be max(bin, 1% of step), so a
-            // coarse FFT widened the window rather than narrowing it. At 250 Hz bins
-            // that made the 1 kHz grid match roughly half of all frequencies, and the
-            // panel reported it as evidence the transmitter had been put there.
+            // It must not be a large slice of the step either, or a coarse FFT widens
+            // the window rather than narrowing it. At 250 Hz bins a tolerance of 1% of
+            // the step matched the 1 kHz grid on roughly half of all frequencies, and
+            // the panel reported it as evidence the transmitter had been put there.
+            //
+            // Those two bounds cross at 2% of the step, and bins coarser than that
+            // cannot answer for this grid either way. Capping the tolerance there
+            // while still testing the step - which is what used to happen, since the
+            // step was only skipped once a bin passed a quarter of it - left the
+            // tolerance finer than the resolution it was measured at, so whether a
+            // signal matched came down to where its peak happened to land in a bin.
+            // Both a yes and a no meant nothing. Skip the step and say nothing.
+            if (hzPerBin > (step * 0.02)) { continue; }
             double tolerance = std::max<double>(hzPerBin, step * 0.002);
-            if (tolerance > step * 0.02) { tolerance = step * 0.02; }
 
             double off = fmod(fabs(freq), step);
             double err = std::min<double>(off, step - off);
@@ -136,7 +141,10 @@ public:
             resetOnRetune = config.conf["resetOnRetune"];
         }
         config.release();
-        holdSeconds = std::clamp<float>(holdSeconds, 0.0f, 30.0f);
+        // The same range the slider offers. Clamping to a wider one left a stored
+        // value above the slider's maximum in effect while the slider drew at its end
+        // stop, so the panel showed a hold time it was not using.
+        holdSeconds = std::clamp<float>(holdSeconds, 0.0f, 10.0f);
 
         tickHandler.ctx = this;
         tickHandler.handler = [](ImGuiContext* gctx, void* ctx) {
@@ -637,6 +645,12 @@ private:
 
         int lo = 0, hi = dataWidth - 1;
         searchWindow(hzPerBin, viewStart, viewCentre, dataWidth, lo, hi);
+        // Both ends clamp together once the VFO is off the side of the view, leaving a
+        // window of a bin or two sitting on the edge of the FFT - which is where the
+        // window function puts its worst rubbish. measure() already refuses that; this
+        // is what decides whether the signal is on, so without the same refusal an
+        // edge artefact off-screen was keying the burst and gap timing.
+        if ((hi - lo) < 4) { return 0.0f; }
 
         float peak = -INFINITY;
         for (int i = lo; i <= hi; i++) {
@@ -860,6 +874,17 @@ private:
     std::string headline() const {
         char buf[128];
         double old = stale();
+        // Freeze stops the measuring, so the age below goes up exactly as it does when
+        // a signal has stopped - and the sentence for that one reads as though the
+        // signal had gone away, which is a strange thing to be told about a reading
+        // you asked to be held still.
+        if (frozen) {
+            if (old > 1.0) {
+                snprintf(buf, sizeof buf, "Frozen. Everything below was measured %s ago.", fmtTime(old).c_str());
+                return std::string(buf);
+            }
+            return "Frozen. Nothing below changes until you untick it.";
+        }
         if (old > 2.0) {
             snprintf(buf, sizeof buf, "Nothing to measure here now. Everything below is %s old.",
                      fmtTime(old).c_str());
@@ -1061,7 +1086,7 @@ private:
                           "This is about the spectrum, not the readout: the numbers below are\n"
                           "always averaged over two seconds and refreshed four times a second.");
 
-        if (ImGui::Checkbox(("Start the timing over when I retune##_sigid_retune_" + name).c_str(), &resetOnRetune)) {
+        if (ImGui::Checkbox(("Restart on retune##_sigid_retune_" + name).c_str(), &resetOnRetune)) {
             config.acquire();
             config.conf["resetOnRetune"] = resetOnRetune;
             config.release(true);

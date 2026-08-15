@@ -1,5 +1,5 @@
 {
-    "name": "South Africa Complete",
+    "name": "South Africa",
     "country_name": "South Africa",
     "country_code": "ZA",
     "author_name": "PhantomRoute",
@@ -192,7 +192,7 @@
             "end": 137000000
         },
         {
-            "name": "Meteorological-Satellite (NOAA)",
+            "name": "LEO Satellites",
             "type": "satellite",
             "start": 137000000,
             "end": 138000000

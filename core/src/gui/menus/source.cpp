@@ -129,7 +129,21 @@ namespace sourcemenu {
     void onSourceUnregister(std::string name, void* ctx) {
         if (name != selectedSource) { return; }
 
-        // TODO: Stop everything
+        // The source being listened to is about to stop existing. Nothing used to
+        // happen here, so the radio stayed in its playing state with no source under
+        // it: the play button read as running, the source combo stayed greyed out
+        // behind "Stop the radio to change the source", and the only thing that got
+        // it back was the dead-source watchdog five seconds later - which then
+        // blamed the device for going away when in fact it had been unloaded on
+        // purpose from the Module Manager.
+        //
+        // Stopping here is the same path the stop button takes. The module has
+        // already stopped its own hardware by this point (every source module calls
+        // its stop handler before unregistering), so this is bookkeeping the rest of
+        // the application needs rather than another attempt to touch the device.
+        if (gui::mainWindow.sdrIsRunning()) {
+            gui::mainWindow.setPlayState(false);
+        }
     }
 
     void onSourceSelected(std::string name, void* ctx) {

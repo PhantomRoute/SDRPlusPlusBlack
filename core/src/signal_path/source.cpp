@@ -54,14 +54,23 @@ namespace {
         void forget(SourceManager::SourceHandler* handler) {
             {
                 std::lock_guard<std::mutex> lock(mtx);
-                if (target != handler) { return; }
-                target = nullptr;
-                signature.clear();
-                haveSignature = false;
-                changed = false;
+                if (target == handler) {
+                    target = nullptr;
+                    signature.clear();
+                    haveSignature = false;
+                    changed = false;
+                }
             }
             // Wait out a probe already in flight so the module can't be
             // destroyed while its probe handler is still running.
+            //
+            // Unconditionally, whoever the probe belongs to. Returning early when
+            // this handler was no longer the target was wrong: the worker copies
+            // the target and takes probeMtx before dropping mtx, so a probe on
+            // this handler can still be running after something else has become
+            // the target. Selecting a different source and then unloading the old
+            // one - which is two clicks apart, and a probe takes tens of
+            // milliseconds - walked straight into a destroyed module.
             std::lock_guard<std::mutex> probeLock(probeMtx);
         }
 
@@ -129,8 +138,18 @@ namespace {
     // on the UI thread, so they must not run every frame.
     std::chrono::steady_clock::time_point nextUnprobedRefresh;
 
+    std::string sourceConfigEndpoint(const std::string& sourceName) {
+        return "/source/" + sourceName + "/config";
+    }
+
     void registerSourceConfigEndpoint(const std::string& sourceName, SourceManager::SourceHandler* handler) {
-        httpdebug::procfs::registerEndpoint("/source/" + sourceName + "/config", [sourceName]() -> std::string {
+        // registerEndpoint appends without looking for an existing path, and this
+        // runs on every selectSource() - which is every time the user picks a
+        // source, and again for the current one every time any source module
+        // registers or unregisters, since the menu reselects on both. The endpoint
+        // list grew another copy of this path each time and never shrank.
+        httpdebug::procfs::unregister(sourceConfigEndpoint(sourceName));
+        httpdebug::procfs::registerEndpoint(sourceConfigEndpoint(sourceName), [sourceName]() -> std::string {
                 core::configManager.acquire();
                 std::string json = core::configManager.conf[sourceName].dump();
                 core::configManager.release();
@@ -188,9 +207,16 @@ void SourceManager::unregisterSource(std::string name) {
     if (sources[name]->probeHandler != NULL) {
         deviceProbeWorker().forget(sources[name]);
     }
+    // The module is going away, so its endpoint has to go with it. Left behind, it
+    // stayed in the listing describing a source that is no longer loaded.
+    httpdebug::procfs::unregister(sourceConfigEndpoint(name));
     if (name == selectedName) {
         if (selectedHandler != NULL) {
-            sources[selectedName]->deselectHandler(sources[selectedName]->ctx);
+            // Through the handler, not sources[selectedName]. They are the same
+            // pointer whenever the two are in step, but map::operator[] on a name
+            // that had gone stale would insert a null handler and dereference it,
+            // turning a bookkeeping slip into a crash at the worst moment.
+            selectedHandler->deselectHandler(selectedHandler->ctx);
         }
         sigpath::iqFrontEnd.setInput(&nullSource);
         selectedHandler = NULL;
@@ -216,7 +242,9 @@ void SourceManager::selectSource(std::string name) {
         return;
     }
     if (selectedHandler != NULL) {
-        sources[selectedName]->deselectHandler(sources[selectedName]->ctx);
+        // See unregisterSource: the handler already is the selected source, and
+        // going back through the map by name only adds a way to get it wrong.
+        selectedHandler->deselectHandler(selectedHandler->ctx);
     }
     selectedHandler = sources[name];
     selectedHandler->selectHandler(selectedHandler->ctx);

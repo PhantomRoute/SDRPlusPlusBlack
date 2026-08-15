@@ -811,7 +811,7 @@ private:
     int recMode = RECORDER_MODE_AUDIO;
     int containerId;
     int sampleTypeId;
-    bool stereo = true;
+    bool stereo = false;
     std::string selectedStreamName = "";
     float audioVolume = 1.0f;
     bool ignoreSilence = false;
