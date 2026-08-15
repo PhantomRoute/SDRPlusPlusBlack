@@ -314,8 +314,18 @@ jobs:
         - name: Install volk
           run: git clone --recursive https://github.com/gnuradio/volk && cd volk && mkdir build && cd build && cmake -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 -DCMAKE_BUILD_TYPE=Release .. && make -j3 && sudo make install && cd ../../
 
+        # The standalone API installers are gone from SDRplay's download area as of
+        # August 2026 - SDRconnect bundles the API now - so this 404s through no
+        # fault of ours and took the whole job with it. Same treatment as libdlcr
+        # below: let it fail and drop the one module that needs it.
         - name: Install SDRplay API
+          id: sdrplay
+          continue-on-error: true
           run: wget https://www.sdrplay.com/software/SDRplayAPI-macos-installer-universal-3.15.0.pkg && sudo installer -pkg SDRplayAPI-macos-installer-universal-3.15.0.pkg -target /
+
+        - name: Note a missing SDRplay API
+          if: steps.sdrplay.outcome != 'success'
+          run: echo "::warning::The SDRplay API could not be installed, so the SDRplay source module is not in this build."
 
         - name: Install libiio
           run: wget https://github.com/analogdevicesinc/libiio/archive/refs/tags/v0.25.zip && 7z x v0.25.zip && cd libiio-0.25 && mkdir build && cd build && cmake -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 -DCMAKE_BUILD_TYPE=Release .. && make -j3 && sudo make install && cd ../../
@@ -389,7 +399,7 @@ jobs:
 
         - name: Prepare CMake
           working-directory: ${{runner.workspace}}/build
-          run: cmake -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 $GITHUB_WORKSPACE -DOPT_BUILD_PLUTOSDR_SOURCE=ON -DOPT_BUILD_BLADERF_SOURCE=ON -DOPT_BUILD_SDRPLAY_SOURCE=ON -DOPT_BUILD_LIMESDR_SOURCE=ON -DOPT_BUILD_AUDIO_SINK=OFF -DOPT_BUILD_PORTAUDIO_SINK=ON -DOPT_BUILD_NEW_PORTAUDIO_SINK=ON -DOPT_BUILD_M17_DECODER=ON -DOPT_BUILD_PERSEUS_SOURCE=OFF -DOPT_BUILD_AUDIO_SOURCE=OFF -DUSE_BUNDLE_DEFAULTS=ON -DOPT_BUILD_RFNM_SOURCE=ON -DOPT_BUILD_FOBOSSDR_SOURCE=ON -DOPT_BUILD_DRAGONLABS_SOURCE=${{ steps.libdlcr.outcome == 'success' && 'ON' || 'OFF' }} -DOPT_BUILD_CH_EXTRAVHF_DECODER=ON -DOPT_BUILD_USRP_SOURCE=ON "-DCMAKE_PREFIX_PATH=$(brew --prefix)/uhd" -DCMAKE_BUILD_TYPE=Release
+          run: cmake -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 $GITHUB_WORKSPACE -DOPT_BUILD_PLUTOSDR_SOURCE=ON -DOPT_BUILD_BLADERF_SOURCE=ON -DOPT_BUILD_SDRPLAY_SOURCE=${{ steps.sdrplay.outcome == 'success' && 'ON' || 'OFF' }} -DOPT_BUILD_LIMESDR_SOURCE=ON -DOPT_BUILD_AUDIO_SINK=OFF -DOPT_BUILD_PORTAUDIO_SINK=ON -DOPT_BUILD_NEW_PORTAUDIO_SINK=ON -DOPT_BUILD_M17_DECODER=ON -DOPT_BUILD_PERSEUS_SOURCE=OFF -DOPT_BUILD_AUDIO_SOURCE=OFF -DUSE_BUNDLE_DEFAULTS=ON -DOPT_BUILD_RFNM_SOURCE=ON -DOPT_BUILD_FOBOSSDR_SOURCE=ON -DOPT_BUILD_DRAGONLABS_SOURCE=${{ steps.libdlcr.outcome == 'success' && 'ON' || 'OFF' }} -DOPT_BUILD_CH_EXTRAVHF_DECODER=ON -DOPT_BUILD_USRP_SOURCE=ON "-DCMAKE_PREFIX_PATH=$(brew --prefix)/uhd" -DCMAKE_BUILD_TYPE=Release
 
         - name: Build
           working-directory: ${{runner.workspace}}/build
@@ -466,8 +476,18 @@ jobs:
         - name: Install volk
           run: git clone --recursive https://github.com/gnuradio/volk && cd volk && mkdir build && cd build && cmake -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 -DCMAKE_BUILD_TYPE=Release .. && make -j3 && sudo make install && cd ../../
 
+        # The standalone API installers are gone from SDRplay's download area as of
+        # August 2026 - SDRconnect bundles the API now - so this 404s through no
+        # fault of ours and took the whole job with it. Same treatment as libdlcr
+        # below: let it fail and drop the one module that needs it.
         - name: Install SDRplay API
+          id: sdrplay
+          continue-on-error: true
           run: wget https://www.sdrplay.com/software/SDRplayAPI-macos-installer-universal-3.15.0.pkg && sudo installer -pkg SDRplayAPI-macos-installer-universal-3.15.0.pkg -target /
+
+        - name: Note a missing SDRplay API
+          if: steps.sdrplay.outcome != 'success'
+          run: echo "::warning::The SDRplay API could not be installed, so the SDRplay source module is not in this build."
 
         - name: Install libiio
           run: wget https://github.com/analogdevicesinc/libiio/archive/refs/tags/v0.25.zip && 7z x v0.25.zip && cd libiio-0.25 && mkdir build && cd build && cmake -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 -DCMAKE_BUILD_TYPE=Release .. && make -j3 && sudo make install && cd ../../
@@ -541,7 +561,7 @@ jobs:
 
         - name: Prepare CMake
           working-directory: ${{runner.workspace}}/build
-          run: cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 $GITHUB_WORKSPACE -DOPT_BUILD_PLUTOSDR_SOURCE=ON -DOPT_BUILD_BLADERF_SOURCE=ON -DOPT_BUILD_SDRPLAY_SOURCE=ON -DOPT_BUILD_LIMESDR_SOURCE=ON -DOPT_BUILD_AUDIO_SINK=OFF -DOPT_BUILD_PORTAUDIO_SINK=ON -DOPT_BUILD_NEW_PORTAUDIO_SINK=ON -DOPT_BUILD_M17_DECODER=OFF -DOPT_BUILD_PERSEUS_SOURCE=OFF -DOPT_BUILD_AUDIO_SOURCE=OFF -DOPT_BUILD_RFNM_SOURCE=ON -DOPT_BUILD_FOBOSSDR_SOURCE=ON -DOPT_BUILD_HYDRASDR_SOURCE=ON -DOPT_BUILD_DRAGONLABS_SOURCE=${{ steps.libdlcr.outcome == 'success' && 'ON' || 'OFF' }} -DUSE_BUNDLE_DEFAULTS=ON -DCMAKE_BUILD_TYPE=Release -DOPT_BUILD_CH_EXTRAVHF_DECODER=ON -DOPT_BUILD_USRP_SOURCE=ON "-DCMAKE_PREFIX_PATH=$(brew --prefix)/uhd"
+          run: cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 $GITHUB_WORKSPACE -DOPT_BUILD_PLUTOSDR_SOURCE=ON -DOPT_BUILD_BLADERF_SOURCE=ON -DOPT_BUILD_SDRPLAY_SOURCE=${{ steps.sdrplay.outcome == 'success' && 'ON' || 'OFF' }} -DOPT_BUILD_LIMESDR_SOURCE=ON -DOPT_BUILD_AUDIO_SINK=OFF -DOPT_BUILD_PORTAUDIO_SINK=ON -DOPT_BUILD_NEW_PORTAUDIO_SINK=ON -DOPT_BUILD_M17_DECODER=OFF -DOPT_BUILD_PERSEUS_SOURCE=OFF -DOPT_BUILD_AUDIO_SOURCE=OFF -DOPT_BUILD_RFNM_SOURCE=ON -DOPT_BUILD_FOBOSSDR_SOURCE=ON -DOPT_BUILD_HYDRASDR_SOURCE=ON -DOPT_BUILD_DRAGONLABS_SOURCE=${{ steps.libdlcr.outcome == 'success' && 'ON' || 'OFF' }} -DUSE_BUNDLE_DEFAULTS=ON -DCMAKE_BUILD_TYPE=Release -DOPT_BUILD_CH_EXTRAVHF_DECODER=ON -DOPT_BUILD_USRP_SOURCE=ON "-DCMAKE_PREFIX_PATH=$(brew --prefix)/uhd"
 
         - name: Build
           working-directory: ${{runner.workspace}}/build

@@ -12,12 +12,25 @@ apt install -y unzip build-essential cmake git libfftw3-dev libglfw3-dev libvolk
             libcodec2-dev autoconf libtool xxd libspdlog-dev liborc-0.4-dev
 
 # Install SDRPlay libraries
+# The standalone RSP API installers are gone from SDRplay's download area as of
+# August 2026 - SDRconnect bundles the API now - so this 404s through no fault of
+# ours. Under `set -e` that failed the whole job, and every other source module in
+# the package went down with it for the sake of one optional device. Try for it and
+# carry on without it, which also means the build goes back to including SDRplay by
+# itself if the file reappears.
 SDRPLAY_ARCH=$(dpkg --print-architecture)
-wget https://www.sdrplay.com/software/SDRplay_RSP_API-Linux-3.15.2.run
-7z x ./SDRplay_RSP_API-Linux-3.15.2.run
-7z x ./SDRplay_RSP_API-Linux-3.15.2
-cp $SDRPLAY_ARCH/libsdrplay_api.so.3.15 /usr/lib/libsdrplay_api.so
-cp inc/* /usr/include/
+SDRPLAY_RUN=SDRplay_RSP_API-Linux-3.15.2.run
+SDRPLAY_OPT=OFF
+if wget "https://www.sdrplay.com/software/$SDRPLAY_RUN"; then
+    7z x "./$SDRPLAY_RUN"
+    7z x "./${SDRPLAY_RUN%.run}"
+    cp $SDRPLAY_ARCH/libsdrplay_api.so.3.15 /usr/lib/libsdrplay_api.so
+    cp inc/* /usr/include/
+    SDRPLAY_OPT=ON
+else
+    echo "WARNING: could not download $SDRPLAY_RUN from sdrplay.com."
+    echo "WARNING: building without SDRplay support."
+fi
 
 # Install libperseus
 git clone https://github.com/Microtelecom/libperseus-sdr
@@ -62,7 +75,7 @@ cd ../../
 cd SDRPlusPlus
 mkdir build
 cd build
-cmake .. -DOPT_BUILD_BLADERF_SOURCE=ON -DOPT_BUILD_LIMESDR_SOURCE=ON -DOPT_BUILD_SDRPLAY_SOURCE=ON -DOPT_BUILD_NEW_PORTAUDIO_SINK=ON -DOPT_BUILD_M17_DECODER=ON -DOPT_BUILD_PERSEUS_SOURCE=ON -DOPT_BUILD_RFNM_SOURCE=ON -DOPT_BUILD_FOBOSSDR_SOURCE=ON -DOPT_BUILD_HYDRASDR_SOURCE=ON -DOPT_BUILD_CH_EXTRAVHF_DECODER=ON -DOPT_BUILD_CH_TETRA_DEMODULATOR=ON
+cmake .. -DOPT_BUILD_BLADERF_SOURCE=ON -DOPT_BUILD_LIMESDR_SOURCE=ON -DOPT_BUILD_SDRPLAY_SOURCE=$SDRPLAY_OPT -DOPT_BUILD_NEW_PORTAUDIO_SINK=ON -DOPT_BUILD_M17_DECODER=ON -DOPT_BUILD_PERSEUS_SOURCE=ON -DOPT_BUILD_RFNM_SOURCE=ON -DOPT_BUILD_FOBOSSDR_SOURCE=ON -DOPT_BUILD_HYDRASDR_SOURCE=ON -DOPT_BUILD_CH_EXTRAVHF_DECODER=ON -DOPT_BUILD_CH_TETRA_DEMODULATOR=ON
 make VERBOSE=1 -j2
 
 cd ..

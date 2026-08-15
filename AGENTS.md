@@ -48,6 +48,14 @@ sudo apt install -y \
 
 Download and install the SDRPlay API.
 
+> **This download is currently a 404.** The standalone RSP API installers are gone from
+> `sdrplay.com/software/` as of August 2026 — SDRconnect bundles the API
+> now, and there is no public direct link to the `.run` for it. The CI build scripts
+> treat the API as optional and configure with `-DOPT_BUILD_SDRPLAY_SOURCE=OFF` when
+> it cannot be fetched, so a local build without it works the same way. Skip this step
+> unless you already have a copy of the installer, and pass
+> `-DOPT_BUILD_SDRPLAY_SOURCE=OFF` to cmake if you do skip it.
+
 ```bash
 wget https://www.sdrplay.com/software/SDRplay_RSP_API-Linux-3.15.2.run
 7z x ./SDRplay_RSP_API-Linux-3.15.2.run
