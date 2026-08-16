@@ -7,6 +7,7 @@
 #include <functional>
 #include <mutex>
 #include <string>
+#include "afc.h"
 #include "varicode.h"
 
 namespace psk {
@@ -15,21 +16,20 @@ namespace psk {
     // span several symbols, so its tap count scales with this.
     static const int SAMPLES_PER_SYMBOL = 16;
 
-    // How wide the channel filter is, as a multiple of the symbol rate. A PSK31
-    // signal is about one baud wide, so this is mostly tuning tolerance - room for
-    // the carrier to sit off centre and still be inside the filter while the Costas
-    // loop pulls it in. Tighter would reject neighbours better and be much harder to
-    // tune onto by hand.
+    // How wide the channel filter is by default, as a multiple of the symbol rate. A
+    // PSK31 signal is about one baud wide, so most of this is tuning tolerance: room
+    // for the carrier to sit off centre and still be inside the filter for the AFC to
+    // find it. Adjustable at runtime between these limits - wide enough to catch a
+    // signal well off where you clicked, or narrow enough to shut out the station
+    // next door on a crowded band.
     //
-    // Being inside the filter is necessary but not sufficient. The matched filter is
-    // only about one baud wide and sits at DC, so a carrier more than a few hertz off
-    // is attenuated and distorted before the Costas loop ever sees it: measured
-    // against generated signals, decoding is perfect out to about +/-3 Hz and gone by
-    // +/-6 Hz, and neither widening the loop nor the filter moves that much. Closing
-    // the gap between the 3 Hz the decoder wants and the 60 Hz this filter passes
-    // needs a frequency estimator ahead of the matched filter, which this does not
-    // have yet. Until then: tune it accurately, and use the constellation to tell.
+    // The filter is now the thing that bounds how far off tune a signal can be and
+    // still decode: the AFC's own limit is a quarter of the sample rate, which is
+    // always wider than this.
     static const double BANDWIDTH_IN_BAUD = 4.0;
+    static const double MIN_BANDWIDTH_IN_BAUD = 1.5;
+    // Capped by the sample rate, which is SAMPLES_PER_SYMBOL baud wide.
+    static const double MAX_BANDWIDTH_IN_BAUD = (double)SAMPLES_PER_SYMBOL;
 
     struct Mode {
         const char* name;
@@ -62,9 +62,22 @@ namespace psk {
             return MODES[modeIdx].baud * (double)SAMPLES_PER_SYMBOL;
         }
 
+        // The filter width in hertz for a given mode, at the current setting.
         double bandwidthFor(int modeIdx) const {
-            return MODES[modeIdx].baud * BANDWIDTH_IN_BAUD;
+            return MODES[modeIdx].baud * bandwidthInBaud;
         }
+
+        double minBandwidthFor(int modeIdx) const {
+            return MODES[modeIdx].baud * MIN_BANDWIDTH_IN_BAUD;
+        }
+
+        double maxBandwidthFor(int modeIdx) const {
+            return MODES[modeIdx].baud * MAX_BANDWIDTH_IN_BAUD;
+        }
+
+        // As a multiple of the symbol rate, so the setting means the same thing at
+        // every speed and survives a mode change.
+        double bandwidthInBaud = BANDWIDTH_IN_BAUD;
 
         void init(dsp::stream<dsp::complex_t>* in, int modeIdx) {
             _modeIdx = modeIdx;
@@ -86,27 +99,33 @@ namespace psk {
             // both decode a signal buried in sigma 0.7 of it without an error.
             double costasBw = 0.06 / (double)SAMPLES_PER_SYMBOL;
 
-            demod.init(in, baud, sr, taps, 0.5, 0.02f, costasBw, 1e-6, 0.01);
+            // Frequency first, then the matched filter. The other way round and the
+            // filter has already thrown away what the AFC needs to measure.
+            afc.init(in, sr, baud);
+            demod.init(&afc.out, baud, sr, taps, 0.5, 0.02f, costasBw, 1e-6, 0.01);
             symSink.init(&demod.out, symbolHandler, this);
         }
 
         void setInput(dsp::stream<dsp::complex_t>* in) {
-            demod.setInput(in);
+            afc.setInput(in);
         }
 
         void setMode(int modeIdx) {
             _modeIdx = modeIdx;
+            afc.setRates(sampleRateFor(modeIdx), MODES[modeIdx].baud);
             demod.setSamplerate(sampleRateFor(modeIdx));
             demod.setSymbolrate(MODES[modeIdx].baud);
             reset();
         }
 
         void start() {
+            afc.start();
             demod.start();
             symSink.start();
         }
 
         void stop() {
+            afc.stop();
             demod.stop();
             symSink.stop();
         }
@@ -115,7 +134,15 @@ namespace psk {
             varicode.reset();
             prevSym = dsp::complex_t{ 0.0f, 0.0f };
             quality = 0.0f;
+            if (afc.ready()) { afc.reset(); }
         }
+
+        // How far off the VFO centre the signal actually is, in hertz.
+        double offsetHz() const { return afc.offsetHz(); }
+
+        // Whether that figure is being measured right now, or is the last one from
+        // before the signal went away.
+        bool afcTracking() const { return afc.coherence() >= afc.minCoherence; }
 
         // 0 to 1, and about 0.64 on noise. Measures the same thing the bit decision
         // does: how nearly each symbol lies along the previous one's axis, whichever
@@ -151,6 +178,7 @@ namespace psk {
             }
         }
 
+        AFC afc;
         dsp::demod::PSK<2> demod;
 
     private:

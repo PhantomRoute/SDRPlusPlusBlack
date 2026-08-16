@@ -62,13 +62,20 @@ public:
         if (config.conf[name].contains("squelch")) {
             squelch = config.conf[name]["squelch"];
         }
+        if (config.conf[name].contains("bandwidthInBaud")) {
+            rx.bandwidthInBaud = config.conf[name]["bandwidthInBaud"];
+        }
         config.release();
         squelch = std::clamp<float>(squelch, 0.64f, 1.0f);
+        rx.bandwidthInBaud = std::clamp<double>(rx.bandwidthInBaud, psk::MIN_BANDWIDTH_IN_BAUD,
+                                                psk::MAX_BANDWIDTH_IN_BAUD);
         modeId = modes.valueId(modeIdx);
 
+        // Not bandwidth-locked: the width is a control now, so the VFO has to accept
+        // a range and the edges can be dragged on the waterfall like any other.
         vfo = sigpath::vfoManager.createVFO(name, ImGui::WaterfallVFO::REF_CENTER, 0,
                                             rx.bandwidthFor(modeIdx), rx.sampleRateFor(modeIdx),
-                                            rx.bandwidthFor(modeIdx), rx.bandwidthFor(modeIdx), true);
+                                            rx.minBandwidthFor(modeIdx), rx.maxBandwidthFor(modeIdx), false);
         // One hertz, because PSK31 is narrow enough that the usual snapping would put
         // the signal outside the filter.
         vfo->setSnapInterval(1);
@@ -96,7 +103,7 @@ public:
         vfo = sigpath::vfoManager.createVFO(name, ImGui::WaterfallVFO::REF_CENTER,
                                             std::clamp<double>(0, -bw / 2.0, bw / 2.0),
                                             rx.bandwidthFor(modeIdx), rx.sampleRateFor(modeIdx),
-                                            rx.bandwidthFor(modeIdx), rx.bandwidthFor(modeIdx), true);
+                                            rx.minBandwidthFor(modeIdx), rx.maxBandwidthFor(modeIdx), false);
         vfo->setSnapInterval(1);
         rx.setInput(vfo->output);
         rx.reset();
@@ -142,6 +149,30 @@ private:
         textDirty = true;
     }
 
+    void setBandwidthHz(double hz) {
+        double baud = psk::MODES[modeIdx].baud;
+        rx.bandwidthInBaud = std::clamp<double>(hz / baud, psk::MIN_BANDWIDTH_IN_BAUD,
+                                                psk::MAX_BANDWIDTH_IN_BAUD);
+        if (enabled && vfo != NULL) { vfo->setBandwidth(rx.bandwidthFor(modeIdx)); }
+        config.acquire();
+        config.conf[name]["bandwidthInBaud"] = rx.bandwidthInBaud;
+        config.release(true);
+    }
+
+    // The VFO edges can be dragged on the waterfall, which changes the filter without
+    // going through the slider. Pick that up so the two agree and the width is still
+    // there after a restart.
+    void followWaterfallBandwidth() {
+        if (!enabled || vfo == NULL) { return; }
+        if (!vfo->getBandwidthChanged()) { return; }
+        double baud = psk::MODES[modeIdx].baud;
+        rx.bandwidthInBaud = std::clamp<double>(vfo->getBandwidth() / baud,
+                                                psk::MIN_BANDWIDTH_IN_BAUD, psk::MAX_BANDWIDTH_IN_BAUD);
+        config.acquire();
+        config.conf[name]["bandwidthInBaud"] = rx.bandwidthInBaud;
+        config.release(true);
+    }
+
     void selectMode(int newIdx) {
         if (newIdx == modeIdx) { return; }
         modeIdx = newIdx;
@@ -149,7 +180,7 @@ private:
         // The symbol rate decides both how much spectrum the signal needs and how
         // fast the baseband has to be sampled, so the VFO changes with it.
         if (enabled) {
-            vfo->setBandwidthLimits(rx.bandwidthFor(modeIdx), rx.bandwidthFor(modeIdx), true);
+            vfo->setBandwidthLimits(rx.minBandwidthFor(modeIdx), rx.maxBandwidthFor(modeIdx), false);
             vfo->setSampleRate(rx.sampleRateFor(modeIdx), rx.bandwidthFor(modeIdx));
             rx.setMode(modeIdx);
         }
@@ -162,6 +193,8 @@ private:
     static void menuHandler(void* ctx) {
         PSKDecoderModule* _this = (PSKDecoderModule*)ctx;
         float menuWidth = ImGui::GetContentRegionAvail().x;
+
+        _this->followWaterfallBandwidth();
 
         if (!_this->enabled) { style::beginDisabled(); }
 
@@ -190,10 +223,32 @@ private:
                               "Nudge the VFO a hertz at a time until the two clusters appear.");
         }
 
-        // Tuning this mode is unusually fussy and nothing else on screen says so.
-        ImGui::PushTextWrapPos(0.0f);
-        ImGui::TextDisabled("Tune to within a few Hz - the two clusters above are the test.");
-        ImGui::PopTextWrapPos();
+        // What the AFC is having to take out. This is the number that says whether
+        // the VFO is really on the signal, which the waterfall alone cannot show at
+        // these widths, and it is worth watching: a reading that keeps climbing is a
+        // drifting transmitter, and one near the edge of the filter means the signal
+        // is about to fall out of it.
+        double off = _this->rx.offsetHz();
+        double halfFilter = _this->rx.bandwidthFor(_this->modeIdx) / 2.0;
+        bool nearEdge = fabs(off) > (halfFilter * 0.8);
+        bool tracking = _this->rx.afcTracking();
+        ImGui::LeftLabel("Offset");
+        if (!tracking) {
+            // Say so rather than showing a stale number as though it were current.
+            ImGui::TextDisabled("%+.1f Hz  (holding - nothing to measure)", off);
+        }
+        else if (nearEdge) {
+            ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.3f, 1.0f), "%+.1f Hz  (near the filter edge)", off);
+        }
+        else {
+            ImGui::Text("%+.1f Hz", off);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("How far the signal is from the middle of the filter, which the decoder\n"
+                              "corrects for by itself. Tuning closer is still worth it - the further out\n"
+                              "it sits, the more of the signal the filter is cutting off. Widen the\n"
+                              "bandwidth below if it will not stay inside.");
+        }
 
         float q = _this->rx.getQuality();
         ImGui::LeftLabel("Quality");
@@ -205,6 +260,23 @@ private:
             ImGui::SetTooltip("How tightly the symbols are landing where BPSK symbols should. Empty is\n"
                               "noise, full is a clean signal. The squelch below is set against this.");
         }
+
+        // Adjustable because signals are not all the width the mode says they should
+        // be: a wide or distorted one needs more room, and a crowded band needs less
+        // so the station next door stays out of it.
+        float bwHz = (float)_this->rx.bandwidthFor(_this->modeIdx);
+        float bwMin = (float)_this->rx.minBandwidthFor(_this->modeIdx);
+        float bwMax = (float)_this->rx.maxBandwidthFor(_this->modeIdx);
+        ImGui::LeftLabel("Bandwidth");
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - (32.0f * style::uiScale));
+        if (ImGui::SliderFloat(("##psk_bw_" + _this->name).c_str(), &bwHz, bwMin, bwMax, "%.0f Hz")) {
+            _this->setBandwidthHz(bwHz);
+        }
+        ImGui::HelpMarker("How much spectrum the decoder listens to. The signal itself is about one\n"
+                          "baud wide - 31 Hz for BPSK31 - and the rest is room for it to sit off\n"
+                          "centre. Widen it for a signal that is fat, distorted or drifting; narrow\n"
+                          "it to keep the station next door out. You can also drag the edges of the\n"
+                          "VFO on the waterfall.");
 
         ImGui::LeftLabel("Squelch");
         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - (32.0f * style::uiScale));
