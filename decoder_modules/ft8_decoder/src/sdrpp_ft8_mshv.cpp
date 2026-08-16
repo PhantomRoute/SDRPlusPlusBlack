@@ -32,7 +32,13 @@
 
 namespace ft8 {
 
+    // MSHV's own mode numbering, from DecoderMs::setMode. Zero is not a placeholder:
+    // it really is MSK144, which is why it is spelled out here rather than left to
+    // look like an uninitialised value. (12 is the msk144ms long-buffer variant,
+    // which this does not use - the block feeding here is whole-buffer, so the
+    // decoder wants its full-file path.)
     enum {
+        DMS_MSK144 = 0,
         DMS_FT8 = 11,
         DMS_FT4 = 13
     } DecoderMSMode;
@@ -74,8 +80,10 @@ namespace ft8 {
             dms->setMode(DMS_FT8);
         } else if (std::string("ft4") == mode) {
             dms->setMode(DMS_FT4);
+        } else if (std::string("msk144") == mode) {
+            dms->setMode(DMS_MSK144);
         } else {
-            fprintf(stderr, "ERROR: invalid mode is specified. Valid modes: ft8, ft4\n");
+            fprintf(stderr, "ERROR: invalid mode is specified. Valid modes: ft8, ft4, msk144\n");
             exit(1);
         }
         {

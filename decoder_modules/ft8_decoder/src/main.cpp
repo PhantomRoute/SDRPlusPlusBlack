@@ -44,7 +44,8 @@ ConfigManager config;
 
 enum DecodedMode {
     DM_FT8 = 1,
-    DM_FT4 = 2
+    DM_FT4 = 2,
+    DM_MSK144 = 3
 };
 
 static ImVec2 baseTextSize; // 6 wide chars
@@ -398,12 +399,57 @@ struct SingleFT4Decoder : SingleDecoder {
 
 };
 
+// MSK144, for meteor scatter.
+//
+// The decoder behind this is MSHV's, the same engine FT8 and FT4 already go through,
+// and it has been compiled into this module all along - decodermsk144.cpp and its
+// companions were in the tree with nothing calling them. All that was missing was a
+// mode to reach them by: DecoderMs dispatches MSK144 on mode 0, and the backend
+// refused any mode string but ft8 and ft4.
+//
+// NOT YET CONFIRMED ON AIR. The plumbing is right and the decoder is proven code,
+// but MSK144 differs from FT8 in ways this shares nothing with: it decodes short
+// pings inside the period rather than one signal spanning it, and MSHV's level gate
+// and its callsign hashing were only ever exercised here by the FT8 path. It is off
+// by default for that reason. If it turns out to need more, the places to look are
+// the SetWords call in sdrpp_ft8_mshv.cpp, which passes placeholder callsigns, and
+// s_f_rtd, which chooses between the ping-at-a-time and whole-buffer decoders.
+struct SingleMSK144Decoder : SingleDecoder {
+
+    SingleMSK144Decoder() {
+        // Off unless asked for: meteor scatter is a 6m and 2m activity, and running
+        // another VFO and decode thread costs the same whether or not anyone wants it.
+        processingEnabled = false;
+    }
+
+    // MSK144 keeps to the same 15 second sequences as FT8, so the block the rest of
+    // this module cuts is already the right length.
+    double getBlockDuration() override {
+        return 15;
+    }
+
+    DecodedMode getModeDM() override {
+        return DM_MSK144;
+    }
+
+    std::string getModeString() override {
+        return "msk144";
+    }
+
+    std::pair<int,int> calculateVFOCenterOffsetForMode(double centerFrequency, double ifBandwidth) override {
+        // The calling frequencies. Almost all of the activity is on two metres.
+        static std::vector<int> frequencies = { 50260000, 70230000, 144150000, 222065000, 432065000 };
+        return calculateVFOCenterOffset(frequencies, centerFrequency, ifBandwidth);
+    }
+};
+
 class FT8DecoderModule : public ModuleManager::Instance, public FT8ModuleInterface {
 
     SingleFT8Decoder ft8decoder;
     SingleFT4Decoder ft4decoder;
+    SingleMSK144Decoder msk144decoder;
 
-    std::vector<SingleDecoder *>allDecoders = { &ft8decoder, &ft4decoder };
+    std::vector<SingleDecoder *>allDecoders = { &ft8decoder, &ft4decoder, &msk144decoder };
 
     //    const int CAPTURE_SAMPLE_RATE = 12000;
 
@@ -435,6 +481,14 @@ public:
                 return INVALID_OFFSET;
             }
             return ft4decoder.previousCenterOffset-USB_BANDWIDTH;
+        } else if (mode == "MSK144") {
+            // Answering rather than throwing: this is a public interface other
+            // modules call by mode name, and a mode that exists in the list but
+            // throws here turns a question into a crash.
+            if (msk144decoder.previousCenterOffset == INVALID_OFFSET) {
+                return INVALID_OFFSET;
+            }
+            return msk144decoder.previousCenterOffset-USB_BANDWIDTH;
         }
         throw std::runtime_error("Unknown mode");
     }
@@ -471,6 +525,9 @@ public:
                     break;
                 case DM_FT4:
                     snprintf(modeString, sizeof modeString, "FT4");
+                    break;
+                case DM_MSK144:
+                    snprintf(modeString, sizeof modeString, "MSK144");
                     break;
                 default:
                     snprintf(modeString, sizeof modeString, "???");
@@ -762,6 +819,9 @@ public:
         if (config.conf[name].find("processingEnabledFT4") != config.conf[name].end()) {
             ft4decoder.processingEnabled = config.conf[name]["processingEnabledFT4"].get<bool>();
         }
+        if (config.conf[name].find("processingEnabledMSK144") != config.conf[name].end()) {
+            msk144decoder.processingEnabled = config.conf[name]["processingEnabledMSK144"].get<bool>();
+        }
         if (config.conf[name].find("enablePSKReporter") != config.conf[name].end()) {
             enablePSKReporter = config.conf[name]["enablePSKReporter"].get<bool>();
         }
@@ -918,6 +978,39 @@ public:
             ImGui::Text("Error: %s", _this->ft4decoder.decodeError);
             ImGui::PopStyleColor();
         }
+
+        auto msk144processing = _this->msk144decoder.blockProcessorsRunning.load();
+        if (msk144processing) {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 0, 1.0f));
+        }
+        ImGui::LeftLabel("Decode MSK144");
+        if (msk144processing) {
+            ImGui::PopStyleColor();
+        }
+        ImGui::FillWidth();
+        if (ImGui::Checkbox(CONCAT("##_processing_enabled_msk144_", _this->name), &_this->msk144decoder.processingEnabled)) {
+            config.acquire();
+            config.conf[_this->name]["processingEnabledMSK144"] = _this->msk144decoder.processingEnabled;
+            config.release(true);
+            if (!_this->msk144decoder.processingEnabled) {
+                _this->clearDecodedResults(_this->msk144decoder.getModeDM());
+            }
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Meteor scatter, on 6m and 2m. Not yet confirmed against a real signal -\n"
+                              "the decoder behind it is the same proven MSHV engine FT8 uses, but this\n"
+                              "is the first thing to point it at MSK144. Off by default.");
+        }
+        ImGui::SameLine();
+        stat = "";
+        stat += _this->msk144decoder.onTheFrequency ? "[+]" : "[-]";
+        ImGui::Text("%s Count: %d(%d) in %d..%d msec", stat.c_str(), _this->msk144decoder.lastDecodeCount.load(), _this->msk144decoder.totalCallsignsDisplayed.load(), _this->msk144decoder.lastDecodeTime0.load(), _this->msk144decoder.lastDecodeTime.load());
+        if (_this->msk144decoder.decodeError[0]) {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0, 0, 1.0f));
+            ImGui::Text("Error: %s", _this->msk144decoder.decodeError);
+            ImGui::PopStyleColor();
+        }
+
         if (false) {
             //
             // PSK Reporter not completed yet
@@ -1057,6 +1150,10 @@ void FT8DrawableDecodedResult::draw(const ImVec2& _origin, ImGuiWindow* window) 
     case DM_FT8:
         window->DrawList->AddRectFilled(origin, origin + ImVec2(modeSize.x, modeSize.y), IM_COL32(255, 0, 0, 255));
         window->DrawList->AddText(origin, white, "ft8");
+        break;
+    case DM_MSK144:
+        window->DrawList->AddRectFilled(origin, origin + ImVec2(modeSize.x, modeSize.y), IM_COL32(0, 160, 255, 255));
+        window->DrawList->AddText(origin, white, "msk");
         break;
     }
     ImGui::PopFont();
