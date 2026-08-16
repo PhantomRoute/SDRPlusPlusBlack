@@ -285,7 +285,11 @@ class FT8DecoderModule;
 static std::vector<int> ft8Frequencies = { 1840000, 3573000, 5357000, 7074000, 10136000, 14074000, 18100000, 21074000, 24915000, 28074000, 50323000, 144174000, 222065000, 432065000  };
 
 struct SingleDecoder {
-    FT8DecoderModule *mod;
+    // Null until the module claims this decoder in its constructor. Uninitialised
+    // before - which meant a decoder that was added to allDecoders but missed out of
+    // the list of assignments read whatever was on the stack, and the play button
+    // dereferenced it.
+    FT8DecoderModule *mod = nullptr;
     std::vector<dsp::stereo_t> reader;
     double ADJUST_PERIOD = 0.1; // seconds before adjusting the vfo offset after user changed the center freq
     int beforeAdjust = (int)(VFO_SAMPLE_RATE * ADJUST_PERIOD);
@@ -294,7 +298,7 @@ struct SingleDecoder {
     dsp::stream<dsp::complex_t> iqdata = "singledecoder.iqdata";
     std::atomic_bool running;
     bool processingEnabled = true;
-    FT8DecoderModule *mod2;
+    FT8DecoderModule *mod2 = nullptr;
     char decodeError[1000] = {0};
 
     void handleData(int rd, dsp::stereo_t* inputData);
@@ -788,8 +792,12 @@ public:
 
     FT8DecoderModule(std::string name) {
         this->name = name;
-        ft8decoder.mod = ft8decoder.mod2 = this;
-        ft4decoder.mod = ft4decoder.mod2 = this;
+        // Over allDecoders rather than naming each one. Written out by hand, adding a
+        // decoder to the list and forgetting to add it here left mod dangling, and
+        // the first thing to dereference it was the play button.
+        std::for_each(allDecoders.begin(), allDecoders.end(), [this](SingleDecoder* d) {
+            d->mod = d->mod2 = this;
+        });
         gui::waterfall.afterWaterfallDraw.bindHandler(&afterWaterfallDrawListener);
         afterWaterfallDrawListener.ctx = this;
         afterWaterfallDrawListener.handler = [](ImGui::WaterFall::WaterfallDrawArgs args, void* ctx) {
@@ -1459,6 +1467,10 @@ void SingleDecoder::init(const std::string &name) {
     onPlayStateChange.ctx = this;
     onPlayStateChange.handler = [](bool playing, void* ctx) {
         SingleDecoder* thiz = (SingleDecoder*)ctx;
+        // Guarded because this is the first thing to touch mod after a decoder is
+        // added, and losing the decoded list is a far better failure than taking the
+        // application down the moment somebody presses play.
+        if (!thiz->mod) { return; }
         thiz->mod->clearDecodedResults(thiz->getModeDM());
     };
     running = true;
