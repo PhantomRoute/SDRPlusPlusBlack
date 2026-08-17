@@ -24,7 +24,7 @@ namespace tonedetect {
         int dcsInverted = 0;    // the same waveform read as an inverted code
 
         bool operator==(const Result& o) const {
-            return kind == o.kind && ctcssFreq == o.ctcssFreq && dcsNormal == o.dcsNormal;
+            return kind == o.kind && ctcssFreq == o.ctcssFreq && dcsNormal == o.dcsNormal && dcsInverted == o.dcsInverted;
         }
 
         // The badge drawn over the waterfall. Short enough not to crowd the spectrum
@@ -75,23 +75,22 @@ namespace tonedetect {
     };
     static const int CTCSS_TONE_COUNT = (int)(sizeof(CTCSS_TONES) / sizeof(CTCSS_TONES[0]));
 
-    // What the squelch is listening for. A DCS code and its inverted form are
-    // different waveforms - D023I is the same thing on air as D047N - so the
-    // polarity has to be part of the selection, exactly as it is on a radio.
-    struct Target {
-        enum Mode {
-            OFF,
+    // One signalling code, named the way a radio names it. A DCS code and its
+    // inverted form are different waveforms - D023I is the same thing on air as
+    // D047N - so the polarity is part of the identity, exactly as it is on a radio.
+    struct ToneKey {
+        enum Kind {
             CTCSS,
             DCS
         };
 
-        Mode mode = OFF;
+        Kind kind = CTCSS;
         float ctcssFreq = 100.0f;
         int dcsCode = 23;
         bool dcsInverted = false;
 
         bool matches(const Result& r) const {
-            switch (mode) {
+            switch (kind) {
             case CTCSS:
                 return r.kind == Result::CTCSS && std::fabs(r.ctcssFreq - ctcssFreq) < 0.05f;
             case DCS:
@@ -100,6 +99,152 @@ namespace tonedetect {
             default:
                 return false;
             }
+        }
+
+        bool operator==(const ToneKey& o) const {
+            if (kind != o.kind) { return false; }
+            if (kind == CTCSS) { return std::fabs(ctcssFreq - o.ctcssFreq) < 0.05f; }
+            return dcsCode == o.dcsCode && dcsInverted == o.dcsInverted;
+        }
+
+        // Short enough for a row of a list. "100.0" rather than "CTCSS 100.0 Hz",
+        // because the list already says what it is a list of.
+        std::string label() const {
+            char buf[32];
+            if (kind == CTCSS) {
+                snprintf(buf, sizeof buf, "%.1f Hz", ctcssFreq);
+            }
+            else {
+                snprintf(buf, sizeof buf, "D%03d%c", dcsCode, dcsInverted ? 'I' : 'N');
+            }
+            return buf;
+        }
+
+        // A reading turned into something the squelch can be set to. DCS is named by
+        // its normal code: that is the column the decoded word was found in, so it is
+        // the code the transmitter is set to.
+        static ToneKey fromResult(const Result& r) {
+            ToneKey k;
+            if (r.kind == Result::DCS) {
+                k.kind = DCS;
+                k.dcsCode = r.dcsNormal;
+                k.dcsInverted = false;
+            }
+            else {
+                k.kind = CTCSS;
+                k.ctcssFreq = r.ctcssFreq;
+            }
+            return k;
+        }
+    };
+
+    // How many codes one channel can be told to open for. A business channel split
+    // across a handful of areas is the case this exists for; past a dozen or so the
+    // list stops being a filter and you may as well use ANY.
+    static const int TONE_LIST_MAX = 16;
+
+    // What the squelch is listening for.
+    //
+    // OFF, CTCSS and DCS keep their values because they are written into the config
+    // and into bookmarks; ANY and LIST are appended. ANY opens for any tone or code
+    // that decodes at all, which is what you want on a channel whose users you do not
+    // know. LIST opens for any of `keys`, for a channel where you know the handful of
+    // codes in use and want the rest kept out.
+    //
+    // Fixed capacity rather than a vector: the audio thread reads this under a lock
+    // and the whole struct is copied on every change, so it stays trivially copyable
+    // and allocation free.
+    struct Target {
+        enum Mode {
+            OFF,
+            CTCSS,
+            DCS,
+            ANY,
+            LIST
+        };
+
+        Mode mode = OFF;
+        float ctcssFreq = 100.0f;
+        int dcsCode = 23;
+        bool dcsInverted = false;
+        int keyCount = 0;
+        ToneKey keys[TONE_LIST_MAX];
+
+        // The CTCSS and DCS modes as the single-entry list they are, so callers that
+        // only care about "which codes open this" have one thing to walk.
+        ToneKey singleKey() const {
+            ToneKey k;
+            k.kind = (mode == DCS) ? ToneKey::DCS : ToneKey::CTCSS;
+            k.ctcssFreq = ctcssFreq;
+            k.dcsCode = dcsCode;
+            k.dcsInverted = dcsInverted;
+            return k;
+        }
+
+        bool matches(const Result& r) const {
+            if (r.kind == Result::NONE) { return false; }
+            switch (mode) {
+            case CTCSS:
+            case DCS:
+                return singleKey().matches(r);
+            case ANY:
+                // Anything that decoded is by definition a code someone is sending.
+                return true;
+            case LIST:
+                for (int i = 0; i < keyCount && i < TONE_LIST_MAX; i++) {
+                    if (keys[i].matches(r)) { return true; }
+                }
+                return false;
+            default:
+                return false;
+            }
+        }
+
+        // True when the code is in the list afterwards, which includes it having been
+        // there already. The duplicate check comes before the capacity check on
+        // purpose: a code that is already accepted is not a failure to add, and
+        // reporting one would have a full list refuse codes it already opens for.
+        // The target's own name for the code that produced this reading, when the
+        // target names codes at all. A DCS waveform has two valid names - D023I and
+        // D047N are the same thing on air - so deriving the name from the reading
+        // would echo back the other one and read as though the wrong code had opened
+        // the squelch. False in ANY mode, which names nothing.
+        bool findMatchingKey(const Result& r, ToneKey* out) const {
+            if (r.kind == Result::NONE) { return false; }
+            switch (mode) {
+            case CTCSS:
+            case DCS: {
+                ToneKey k = singleKey();
+                if (!k.matches(r)) { return false; }
+                *out = k;
+                return true;
+            }
+            case LIST:
+                for (int i = 0; i < keyCount && i < TONE_LIST_MAX; i++) {
+                    if (keys[i].matches(r)) {
+                        *out = keys[i];
+                        return true;
+                    }
+                }
+                return false;
+            default:
+                return false;
+            }
+        }
+
+        bool addKey(const ToneKey& k) {
+            for (int i = 0; i < keyCount; i++) {
+                if (keys[i] == k) { return true; }
+            }
+            if (keyCount >= TONE_LIST_MAX) { return false; }
+            keys[keyCount++] = k;
+            return true;
+        }
+
+        void removeKey(int index) {
+            if (index < 0 || index >= keyCount) { return; }
+            for (int i = index; i < keyCount - 1; i++) { keys[i] = keys[i + 1]; }
+            keys[--keyCount] = ToneKey();
         }
     };
 

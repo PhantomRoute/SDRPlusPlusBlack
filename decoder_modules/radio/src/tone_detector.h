@@ -47,6 +47,8 @@ namespace tonedetect {
         static const int HOLD_TICKS = 6;       // ~3 s of analyses, for the readout
         static const int GATE_ARM_TICKS = 2;   // how long an identification stays valid
         static const int FAST_WINDOW = 112;    // 1/6 s - the squelch's closing latency
+        static const int MAX_CANDIDATES = 3;   // tones reported per analysis
+        static const int MAX_PEAKS = 5;        // peaks examined to find them
 
     public:
         ToneDetector() {}
@@ -158,6 +160,8 @@ namespace tonedetect {
             // Closed until something is heard, never open-by-default: a squelch that
             // fails open is not a squelch.
             gateArmed = 0;
+            openKey = ToneKey();
+            openKeyValid = false;
             fastPresent = false;
             fastPos = 0;
             fastTunedTo = 0.0f;
@@ -176,6 +180,17 @@ namespace tonedetect {
         bool isGateOpen() {
             std::lock_guard<std::mutex> lck(resultMtx);
             return !squelchEnabled || (gateArmed > 0 && fastPresent);
+        }
+
+        // Which code the gate has latched onto, for the UI to name. In the modes that
+        // accept more than one code this is the only way to say which of them opened
+        // it; in the single-code modes it is the one that was asked for. False while
+        // nothing is latched.
+        bool getOpenKey(ToneKey* out) {
+            std::lock_guard<std::mutex> lck(resultMtx);
+            if (!openKeyValid) { return false; }
+            *out = openKey;
+            return true;
         }
 
         // Strips the tone out of what reaches the speaker, the way a radio does it.
@@ -205,14 +220,16 @@ namespace tonedetect {
 
         void setSquelch(bool enabled, const Target& target) {
             std::lock_guard<std::mutex> lck(resultMtx);
-            bool wasEnabled = squelchEnabled;
             squelchEnabled = enabled && target.mode != Target::OFF;
             _target = target;
             // Start closed on every change, so switching to a different tone cannot
-            // leave audio passing on the strength of the previous one's evidence.
-            if (!wasEnabled || !squelchEnabled) { gateArmed = 0; }
+            // leave audio passing on the strength of the previous one's evidence. It
+            // has to be unconditional: clearing it only on an on/off transition left
+            // a target change carrying up to GATE_ARM_TICKS of arming earned by the
+            // code that was selected before.
+            gateArmed = 0;
+            openKeyValid = false;
             fastPresent = false;
-            fastTunedTo = 0.0f;
         }
 
         inline int process(int count, const dsp::stereo_t* in, dsp::stereo_t* out) {
@@ -291,8 +308,12 @@ namespace tonedetect {
             for (int k = 0; k < 3; k++) { fastS1[k] = 0.0f; fastS2[k] = 0.0f; }
         }
 
-        // Runs six times a second, so reading the target under the lock here costs
-        // nothing, unlike doing it per sample.
+        // Runs six times a second, so reading the latched code under the lock here
+        // costs nothing, unlike doing it per sample.
+        //
+        // It follows the code the gate actually latched onto rather than the target,
+        // because in the modes that accept more than one code the target does not name
+        // a frequency to watch - only the identification does.
         void evaluateFast() {
             float power[3];
             for (int k = 0; k < 3; k++) {
@@ -301,28 +322,39 @@ namespace tonedetect {
 
             std::lock_guard<std::mutex> lck(resultMtx);
 
-            // The references sit far enough off the tone to be outside the mainlobe
-            // of a Hann window this short, so they read the noise either side of it.
-            // Comparing against them rather than against the block's total energy is
-            // what stops speech - which is far louder than the tone - from reading as
-            // the tone having gone.
-            if (_target.mode == Target::DCS) {
+            if (!openKeyValid) {
+                fastPresent = false;
+            }
+            else if (openKey.kind == ToneKey::DCS) {
                 fastPresent = (sampleIndex - lastDcsMatchSample) < DCS_PRESENCE_SAMPLES;
             }
-            else if (_target.mode == Target::CTCSS) {
-                if (_target.ctcssFreq != fastTunedTo) { retuneFast(_target.ctcssFreq); }
-                // Not std::max: core compiles this header through
-                // mobile_main_window.cpp, which drags in windows.h, where max is a
-                // function-like macro and std::max(a, b) becomes std::(a, b).
-                float reference = (power[1] > power[2]) ? power[1] : power[2];
-                fastPresent = power[0] > FAST_MIN_RATIO * reference;
-            }
             else {
-                fastPresent = false;
+                // This frame was accumulated with whatever the Goertzels were tuned to
+                // while it ran, so it only answers for that frequency. Judge it first
+                // and retune for the next frame afterwards: retuning first reads a
+                // frame measured at one frequency as an answer about another, and on
+                // the first frame after arming that means judging a Goertzel whose
+                // coefficients were still zero - a tone at a quarter of the work rate,
+                // which is nothing that was ever asked about.
+                if (openKey.ctcssFreq == fastTunedTo) {
+                    // The references sit far enough off the tone to be outside the
+                    // mainlobe of a Hann window this short, so they read the noise
+                    // either side of it. Comparing against them rather than against
+                    // the block's total energy is what stops speech - which is far
+                    // louder than the tone - from reading as the tone having gone.
+                    //
+                    // Not std::max: core compiles this header through
+                    // mobile_main_window.cpp, which drags in windows.h, where max is a
+                    // function-like macro and std::max(a, b) becomes std::(a, b).
+                    float reference = (power[1] > power[2]) ? power[1] : power[2];
+                    fastPresent = power[0] > FAST_MIN_RATIO * reference;
+                }
+                retuneFast(openKey.ctcssFreq);
             }
         }
 
         void retuneFast(float freq) {
+            if (freq == fastTunedTo) { return; }
             fastTunedTo = freq;
             const float f[3] = { freq, freq - FAST_REF_OFFSET_HZ, freq + FAST_REF_OFFSET_HZ };
             for (int k = 0; k < 3; k++) {
@@ -341,11 +373,21 @@ namespace tonedetect {
             sinceLastAnalysis = 0;
             if (windowFilled < CTCSS_WINDOW) { return; }
 
-            tick(analyse());
+            Result candidates[MAX_CANDIDATES];
+            int found = analyse(candidates);
+            tick(candidates, found);
         }
 
-        // Returns the tone this window shows, or a NONE result if there isn't one.
-        Result analyse() {
+        // Fills `out` with the tones this window shows, loudest first, and returns how
+        // many there were - none if there is nothing above the noise that lands on a
+        // standard tone.
+        //
+        // More than one, because the loudest thing between 60 and 260 Hz is not always
+        // the signalling tone. Mains hum is both a legitimate CTCSS frequency at 100
+        // and 120 Hz and the biggest peak in the band on plenty of receivers, and a
+        // search that reports only the strongest peak hands the gate that instead of
+        // the tone it was told to open for.
+        int analyse(Result* out) {
             // Unwrap the ring into the zero padded FFT input. The tail stays zero
             // from init, which is what buys the finer peak interpolation.
             for (int i = 0; i < CTCSS_WINDOW; i++) {
@@ -360,13 +402,13 @@ namespace tonedetect {
             int hi = binOf(SEARCH_HIGH_HZ);
             if (lo < 1) { lo = 1; }
             if (hi > bins - 2) { hi = bins - 2; }
-            if (hi <= lo) { return Result(); }
+            if (hi <= lo) { return 0; }
 
             int peak = lo;
             for (int i = lo; i <= hi; i++) {
                 if (spectrum[i] > spectrum[peak]) { peak = i; }
             }
-            if (!std::isfinite(spectrum[peak])) { return Result(); }
+            if (!std::isfinite(spectrum[peak])) { return 0; }
 
             // Median of the band with the peak's own skirt masked out. A median
             // rather than a mean, so that a second tone or the bottom of speech
@@ -377,38 +419,69 @@ namespace tonedetect {
                 if (!std::isfinite(spectrum[i])) { continue; }
                 floorBuf.push_back(spectrum[i]);
             }
-            if (floorBuf.size() < 16) { return Result(); }
+            if (floorBuf.size() < 16) { return 0; }
             std::nth_element(floorBuf.begin(), floorBuf.begin() + floorBuf.size() / 2, floorBuf.end());
             float noiseFloor = floorBuf[floorBuf.size() / 2];
 
-            if (spectrum[peak] - noiseFloor < CTCSS_MIN_SNR_DB) { return Result(); }
-
-            // Parabolic interpolation over the dB peak. A one second window is far
-            // too coarse on its own to tell 150.0 from 151.4 - the interpolated
-            // position is what separates them.
-            float y1 = spectrum[peak - 1];
-            float y2 = spectrum[peak];
-            float y3 = spectrum[peak + 1];
-            float denom = y1 - 2.0f * y2 + y3;
-            float delta = (denom != 0.0f) ? (0.5f * (y1 - y3) / denom) : 0.0f;
-            if (!(delta > -1.0f && delta < 1.0f)) { delta = 0.0f; }
-            float freq = ((float)peak + delta) * (float)WORK_RATE / (float)FFT_SIZE;
-
-            int best = -1;
-            float bestErr = SNAP_TOLERANCE_HZ;
-            for (int i = 0; i < CTCSS_TONE_COUNT; i++) {
-                float err = std::fabs(freq - CTCSS_TONES[i]);
-                if (err < bestErr) {
-                    bestErr = err;
-                    best = i;
+            // Peel the peaks off in order of height, masking out the skirt of each one
+            // taken so the next pass finds a separate tone rather than the side of the
+            // one before it - the same guard width the noise floor uses, for the same
+            // reason. Room for more peaks than tones reported, because a peak that
+            // snaps to no standard tone still has to be taken off the table before the
+            // next pass can see past it, and mains hum at 60 Hz - below the lowest
+            // CTCSS tone at 67.0 - is exactly that case.
+            int claimed[MAX_PEAKS];
+            int claimedCount = 0;
+            int count = 0;
+            while (claimedCount < MAX_PEAKS && count < MAX_CANDIDATES) {
+                int p = -1;
+                for (int i = lo; i <= hi; i++) {
+                    if (!std::isfinite(spectrum[i])) { continue; }
+                    bool masked = false;
+                    for (int c = 0; c < claimedCount; c++) {
+                        if (std::abs(i - claimed[c]) <= PEAK_GUARD_BINS) {
+                            masked = true;
+                            break;
+                        }
+                    }
+                    if (masked) { continue; }
+                    if (p < 0 || spectrum[i] > spectrum[p]) { p = i; }
                 }
-            }
-            if (best < 0) { return Result(); }
+                // Ordered by height, so the first peak too quiet to call is also the
+                // last: nothing further down the list can clear the threshold.
+                if (p < 0 || spectrum[p] - noiseFloor < CTCSS_MIN_SNR_DB) { break; }
+                claimed[claimedCount++] = p;
 
-            Result r;
-            r.kind = Result::CTCSS;
-            r.ctcssFreq = CTCSS_TONES[best];
-            return r;
+                // Parabolic interpolation over the dB peak. A one second window is far
+                // too coarse on its own to tell 150.0 from 151.4 - the interpolated
+                // position is what separates them.
+                float y1 = spectrum[p - 1];
+                float y2 = spectrum[p];
+                float y3 = spectrum[p + 1];
+                float denom = y1 - 2.0f * y2 + y3;
+                float delta = (denom != 0.0f) ? (0.5f * (y1 - y3) / denom) : 0.0f;
+                if (!(delta > -1.0f && delta < 1.0f)) { delta = 0.0f; }
+                float freq = ((float)p + delta) * (float)WORK_RATE / (float)FFT_SIZE;
+
+                int best = -1;
+                float bestErr = SNAP_TOLERANCE_HZ;
+                for (int i = 0; i < CTCSS_TONE_COUNT; i++) {
+                    float err = std::fabs(freq - CTCSS_TONES[i]);
+                    if (err < bestErr) {
+                        bestErr = err;
+                        best = i;
+                    }
+                }
+                // A peak that lands between two standard tones is something else on
+                // the channel, not a tone. Skip it and keep looking - it is exactly
+                // the case that used to hide the real one.
+                if (best < 0) { continue; }
+
+                out[count].kind = Result::CTCSS;
+                out[count].ctcssFreq = CTCSS_TONES[best];
+                count++;
+            }
+            return count;
         }
 
         void feedDCS(float s) {
@@ -460,7 +533,11 @@ namespace tonedetect {
             dcsSeenThisTick = true;
             // Only a match on the code actually being listened for keeps the gate
             // open, hence the target check rather than just "some code decoded".
-            if (_target.matches(r)) { lastDcsMatchSample = sampleIndex; }
+            // Once the gate has latched onto one code, that code alone holds it:
+            // otherwise on a channel set to accept several, one user's code would hold
+            // open a gate that another user's code opened, and the audio would never
+            // close between them.
+            if (openKeyValid ? openKey.matches(r) : _target.matches(r)) { lastDcsMatchSample = sampleIndex; }
         }
 
         // The half second CTCSS analysis is also the clock for publishing and for
@@ -470,8 +547,24 @@ namespace tonedetect {
         //
         // DCS wins when both are present. A channel carries one or the other, and a
         // locked Golay word is far harder to fake than a spectral peak.
-        void tick(const Result& ctcss) {
+        void tick(const Result* candidates, int candidateCount) {
             std::lock_guard<std::mutex> lck(resultMtx);
+
+            // Of the tones this window showed, the one the squelch would open for takes
+            // the confirmation slot, and the loudest takes it when none of them is
+            // wanted. Without the preference a louder unrelated peak keeps the slot
+            // every window and the tone that was asked for is never counted at all,
+            // which is how a receiver with mains hum in the audio ends up unable to
+            // open on its own channel's tone. With no squelch target set this is just
+            // the loudest peak, as before.
+            Result ctcss;
+            for (int i = 0; i < candidateCount; i++) {
+                if (_target.matches(candidates[i])) {
+                    ctcss = candidates[i];
+                    break;
+                }
+            }
+            if (ctcss.kind == Result::NONE && candidateCount > 0) { ctcss = candidates[0]; }
 
             if (ctcss.kind == Result::NONE) {
                 ctcssCount = 0;
@@ -502,21 +595,48 @@ namespace tonedetect {
             // it needs one agreeing analysis instead of two - about a second to open
             // instead of two. That is loose for identification, where a wrong answer
             // is shown to the user, but safe here: the frequency still has to snap to
-            // the one tone that was asked for, or the Golay word still has to carry
-            // the one code that was asked for.
+            // a standard tone the target accepts, or the Golay word still has to carry
+            // a code it accepts.
             //
             // No fast path for opening. A quarter second window cannot separate 150.0
             // from 151.4 - they are inside each other's mainlobe at that length - so a
             // quick-opening squelch would let the neighbouring tone through. Slower
             // and right beats faster and wrong; the tail is short so speech is not
             // chopped once it is open.
-            bool matched = (dcsSeenThisTick && dcsCount >= 1 && _target.matches(dcsCandidate)) ||
-                           (ctcssCount >= 1 && _target.matches(ctcssCandidate));
+            bool dcsMatched = dcsSeenThisTick && dcsCount >= 1 && _target.matches(dcsCandidate);
+            bool ctcssMatched = ctcssCount >= 1 && _target.matches(ctcssCandidate);
             // Arms the gate; the fast presence check is what actually holds it
             // open, so this only has to remember that the right tone was identified
             // recently enough for a momentary dropout not to need re-deciding.
-            if (matched) { gateArmed = GATE_ARM_TICKS; }
-            else if (gateArmed > 0) { gateArmed--; }
+            //
+            // Latching which code did it is what makes the modes that accept several
+            // codes work at all: the fast check needs one frequency to watch, and in
+            // those modes the target does not name one.
+            if (dcsMatched || ctcssMatched) {
+                // DCS wins when both are present, for the same reason it wins the
+                // readout above.
+                const Result& src = dcsMatched ? dcsCandidate : ctcssCandidate;
+                // Named the way the target names it where the target has a name for
+                // it, so the readout echoes back the code the operator selected rather
+                // than the other name for the same waveform. ANY mode names nothing,
+                // so there the reading itself is the only name available.
+                ToneKey k;
+                if (!_target.findMatchingKey(src, &k)) { k = ToneKey::fromResult(src); }
+                if (!openKeyValid || !(k == openKey)) {
+                    openKey = k;
+                    openKeyValid = true;
+                    // Presence measured for one code says nothing about another.
+                    fastPresent = false;
+                }
+                gateArmed = GATE_ARM_TICKS;
+            }
+            else if (gateArmed > 0) {
+                gateArmed--;
+                if (gateArmed == 0) {
+                    openKeyValid = false;
+                    fastPresent = false;
+                }
+            }
 
             if (!dcsSeenThisTick) {
                 dcsCandidate = Result();
@@ -583,6 +703,10 @@ namespace tonedetect {
         bool squelchEnabled = false;
         Target _target;
         int gateArmed = 0;
+        // The code the gate is currently open on, which is what the fast check watches
+        // and what the UI names. Set from an identification, not from the target.
+        ToneKey openKey;
+        bool openKeyValid = false;
 
         // Fast "is that tone still there" monitor, for closing
         std::vector<float> fastHann;

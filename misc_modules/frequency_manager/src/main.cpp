@@ -332,6 +332,109 @@ private:
         return names.c_str();
     }
 
+    // The accept list is carried in plain types across the module boundary, so it
+    // comes back as RadioToneListEntry rather than as the ToneKey that knows how to
+    // compare and name itself.
+    static tonedetect::ToneKey toneKeyOf(const RadioToneListEntry& e) {
+        tonedetect::ToneKey k;
+        k.kind = (e.kind == (int)tonedetect::ToneKey::DCS) ? tonedetect::ToneKey::DCS : tonedetect::ToneKey::CTCSS;
+        k.ctcssFreq = e.ctcssFreq;
+        k.dcsCode = e.dcsCode;
+        k.dcsInverted = e.dcsInverted;
+        return k;
+    }
+
+    static void toneListRemove(RadioToneSettings& t, int index) {
+        if (index < 0 || index >= t.listCount) { return; }
+        for (int i = index; i < t.listCount - 1; i++) { t.list[i] = t.list[i + 1]; }
+        t.list[--t.listCount] = RadioToneListEntry();
+    }
+
+    // Duplicate check before the capacity check, matching tonedetect::Target::addKey:
+    // a code already in the list is not something a full list should refuse.
+    static void toneListAdd(RadioToneSettings& t, const RadioToneListEntry& e) {
+        for (int i = 0; i < t.listCount; i++) {
+            if (toneKeyOf(t.list[i]) == toneKeyOf(e)) { return; }
+        }
+        if (t.listCount >= RADIO_TONE_LIST_MAX) { return; }
+        t.list[t.listCount++] = e;
+    }
+
+    // The accept list's rows of the edit dialog: what the bookmark opens for, with a
+    // way to take each one out, and a picker to add another. A business channel split
+    // across areas carries a different code per area, and this is where a bookmark for
+    // one records all of them.
+    void drawToneListRows(RadioToneSettings& t) {
+        for (int i = 0; i < t.listCount; i++) {
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            if (i == 0) { ImGui::LeftLabel("Codes"); }
+            ImGui::TableSetColumnIndex(1);
+            if (ImGui::Button(("X##freq_manager_edit_tonedel" + std::to_string(i) + "_" + name).c_str())) {
+                toneListRemove(t, i);
+                // The rows after it have shifted down, so stop rather than keep drawing
+                // against indices that have moved.
+                break;
+            }
+            ImGui::SameLine();
+            ImGui::TextUnformatted(toneKeyOf(t.list[i]).label().c_str());
+        }
+        if (t.listCount == 0) {
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::LeftLabel("Codes");
+            ImGui::TableSetColumnIndex(1);
+            // An empty list mutes the channel outright, which is worth saying rather
+            // than leaving to be discovered on air.
+            ImGui::TextDisabled("Empty - nothing opens the squelch.");
+        }
+
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::LeftLabel("Add");
+        ImGui::TableSetColumnIndex(1);
+        int addKind = (editedToneAdd.kind == (int)tonedetect::ToneKey::DCS) ? 1 : 0;
+        ImGui::SetNextItemWidth(addKind ? 75 : 85);
+        if (ImGui::Combo(("##freq_manager_edit_toneaddkind" + name).c_str(), &addKind, "CTCSS\0DCS\0")) {
+            editedToneAdd.kind = addKind ? (int)tonedetect::ToneKey::DCS : (int)tonedetect::ToneKey::CTCSS;
+        }
+        ImGui::SameLine();
+        if (addKind) {
+            ImGui::SetNextItemWidth(75);
+            const auto& codes = dcsCodes();
+            auto it = std::find(codes.begin(), codes.end(), editedToneAdd.dcsCode);
+            int codeId = (it == codes.end()) ? 0 : (int)std::distance(codes.begin(), it);
+            if (ImGui::Combo(("##freq_manager_edit_toneaddcode" + name).c_str(), &codeId, dcsCodeNames())) {
+                editedToneAdd.dcsCode = codes[codeId];
+            }
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(75);
+            int pol = editedToneAdd.dcsInverted ? 1 : 0;
+            if (ImGui::Combo(("##freq_manager_edit_toneaddpol" + name).c_str(), &pol, "Normal\0Invert\0")) {
+                editedToneAdd.dcsInverted = (pol != 0);
+            }
+        }
+        else {
+            ImGui::SetNextItemWidth(115);
+            int toneId = 0;
+            for (int i = 0; i < tonedetect::CTCSS_TONE_COUNT; i++) {
+                if (std::fabs(tonedetect::CTCSS_TONES[i] - editedToneAdd.ctcssFreq) < 0.05f) { toneId = i; break; }
+            }
+            if (ImGui::Combo(("##freq_manager_edit_toneaddtone" + name).c_str(), &toneId, ctcssToneNames())) {
+                editedToneAdd.ctcssFreq = tonedetect::CTCSS_TONES[toneId];
+            }
+        }
+
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(1);
+        bool full = t.listCount >= RADIO_TONE_LIST_MAX;
+        if (full) { style::beginDisabled(); }
+        if (ImGui::Button(("Add code##freq_manager_edit_toneadd" + name).c_str())) {
+            toneListAdd(t, editedToneAdd);
+        }
+        if (full) { style::endDisabled(); }
+    }
+
     // The tone rows of the edit dialog. Only shown for NFM, since that is the only
     // demodulator the radio will accept tone settings for - offering them against
     // an SSB bookmark would just be a control that does nothing.
@@ -366,14 +469,24 @@ private:
             ImGui::LeftLabel("Type");
             ImGui::TableSetColumnIndex(1);
             ImGui::SetNextItemWidth(200);
-            int modeSel = (t.mode == 2) ? 1 : 0;
-            if (ImGui::Combo(("##freq_manager_edit_tonetype" + name).c_str(), &modeSel, "CTCSS\0DCS\0")) {
-                t.mode = modeSel ? 2 : 1;
+            // Offset by one, because mode 0 is "off" and the checkbox above is what
+            // sets that; the combo only chooses between the modes that are on.
+            int modeSel = (t.mode >= 1 && t.mode <= 4) ? (t.mode - 1) : 0;
+            if (ImGui::Combo(("##freq_manager_edit_tonetype" + name).c_str(), &modeSel, "CTCSS\0DCS\0Any tone\0Custom list\0")) {
+                t.mode = modeSel + 1;
             }
 
-            ImGui::TableNextRow();
-            ImGui::TableSetColumnIndex(0);
-            if (t.mode == 2) {
+            if (t.mode == 3) {
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(1);
+                ImGui::TextDisabled("Opens for any CTCSS tone or DCS code.");
+            }
+            else if (t.mode == 4) {
+                drawToneListRows(t);
+            }
+            else if (t.mode == 2) {
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
                 ImGui::LeftLabel("Code");
                 ImGui::TableSetColumnIndex(1);
                 ImGui::SetNextItemWidth(110);
@@ -391,6 +504,8 @@ private:
                 }
             }
             else {
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
                 ImGui::LeftLabel("Tone");
                 ImGui::TableSetColumnIndex(1);
                 ImGui::SetNextItemWidth(200);
@@ -663,6 +778,18 @@ private:
         bm["tone"]["dcsInverted"] = t.dcsInverted;
         bm["tone"]["filter"] = t.filterEnabled;
         bm["tone"]["identify"] = t.identifyEnabled;
+        // Written whatever the mode, so that a bookmark toggled to a single code and
+        // back keeps the list of codes that was worked out on the channel.
+        json list = json::array();
+        for (int i = 0; i < t.listCount && i < RADIO_TONE_LIST_MAX; i++) {
+            json e;
+            e["kind"] = t.list[i].kind;
+            e["ctcss"] = t.list[i].ctcssFreq;
+            e["dcsCode"] = t.list[i].dcsCode;
+            e["dcsInverted"] = t.list[i].dcsInverted;
+            list.push_back(e);
+        }
+        bm["tone"]["list"] = list;
     }
 
     // Absent on every bookmark saved before tones existed, hence the flag: those are
@@ -684,6 +811,19 @@ private:
         t.dcsInverted = j.value("dcsInverted", false);
         t.filterEnabled = j.value("filter", false);
         t.identifyEnabled = j.value("identify", false);
+        if (j.contains("list") && j["list"].is_array()) {
+            // Capped rather than assumed to fit: bookmark files get hand edited and
+            // shared around, and the destination is a fixed size array.
+            for (const auto& e : j["list"]) {
+                if (!e.is_object()) { continue; }
+                if (t.listCount >= RADIO_TONE_LIST_MAX) { break; }
+                RadioToneListEntry& out = t.list[t.listCount++];
+                out.kind = e.value("kind", 0);
+                out.ctcssFreq = e.value("ctcss", 100.0f);
+                out.dcsCode = e.value("dcsCode", 23);
+                out.dcsInverted = e.value("dcsInverted", false);
+            }
+        }
         return t;
     }
 
@@ -1272,6 +1412,9 @@ private:
     std::string editedBookmarkName = "";
     std::string firstEditedBookmarkName = "";
     FrequencyBookmark editedBookmark;
+    // What the accept list's pickers are showing, which is not part of the bookmark
+    // until it is added.
+    RadioToneListEntry editedToneAdd;
 
     std::vector<std::string> listNames;
     std::string listNamesTxt = "";

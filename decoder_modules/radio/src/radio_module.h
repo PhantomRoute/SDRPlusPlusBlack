@@ -25,6 +25,12 @@
 
 extern ConfigManager config;
 
+// The interface header spells its own copy of the accept list's capacity, because it
+// is the boundary between separately built modules and has no includes. This is the
+// one place both are visible, so it is where the two are held to each other.
+static_assert(RADIO_TONE_LIST_MAX == tonedetect::TONE_LIST_MAX,
+              "RadioToneSettings and tonedetect::Target must agree on the accept list size");
+
 #define CONCAT(a, b) ((std::string(a) + b).c_str())
 
 extern std::map<DeemphasisMode, double> deempTaus;
@@ -638,6 +644,31 @@ private:
                 else {
                     ImGui::TextUnformatted(r.longLabel().c_str());
                 }
+
+                // Identifying a tone and then having to find it again in a combo of
+                // 52 is the sort of thing that loses you the transmission. In list
+                // mode this appends instead of replacing, which is how you build up
+                // the set of codes on a channel by sitting on it and listening.
+                bool listMode = (_this->toneTarget.mode == tonedetect::Target::LIST);
+                bool listFull = listMode && _this->toneTarget.keyCount >= tonedetect::TONE_LIST_MAX;
+                bool canUse = (r.kind != tonedetect::Result::NONE) && !listFull;
+                if (!canUse) { style::beginDisabled(); }
+                std::string useLabel = (listMode ? "Add heard tone to list##_radio_toneid_use_" : "Squelch on heard tone##_radio_toneid_use_") + _this->name;
+                if (ImGui::Button(useLabel.c_str())) {
+                    _this->applyHeardTone(r);
+                }
+                if (!canUse) { style::endDisabled(); }
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                    if (listFull) {
+                        ImGui::SetTooltip("The list is full.");
+                    }
+                    else if (listMode) {
+                        ImGui::SetTooltip("Adds the tone shown above to the list of codes this channel\nopens for, and leaves the rest of the list alone.");
+                    }
+                    else {
+                        ImGui::SetTooltip("Switches the tone squelch on and sets it to the tone shown above,\nwithout having to find it in the picker.");
+                    }
+                }
             }
 
             if (ImGui::Checkbox(("Remove tone from audio##_radio_tonefilt_ena_" + _this->name).c_str(), &_this->toneFilterEnabled)) {
@@ -660,19 +691,37 @@ private:
             }
             if (_this->toneSqEnabled) {
                 ImGui::SameLine();
-                if (_this->toneDetector.isGateOpen()) { ImGui::TextUnformatted("open"); }
-                else { ImGui::TextDisabled("muted"); }
+                // Which code let the audio through, not just that something did. On a
+                // channel set to accept several that is the whole point of watching it.
+                tonedetect::ToneKey openKey;
+                if (!_this->toneDetector.isGateOpen()) { ImGui::TextDisabled("muted"); }
+                else if (_this->toneDetector.getOpenKey(&openKey)) { ImGui::Text("open (%s)", openKey.label().c_str()); }
+                else { ImGui::TextUnformatted("open"); }
 
                 if (!_this->enabled) { style::beginDisabled(); }
-                int mode = (_this->toneTarget.mode == tonedetect::Target::DCS) ? 1 : 0;
+                int mode = toneModeIndex(_this->toneTarget.mode);
                 ImGui::LeftLabel("Type");
                 ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());
-                if (ImGui::Combo(("##_radio_tonesq_mode_" + _this->name).c_str(), &mode, "CTCSS\0DCS\0")) {
-                    _this->toneTarget.mode = mode ? tonedetect::Target::DCS : tonedetect::Target::CTCSS;
+                if (ImGui::Combo(("##_radio_tonesq_mode_" + _this->name).c_str(), &mode, "CTCSS\0DCS\0Any tone\0Custom list\0")) {
+                    _this->toneTarget.mode = toneModeFromIndex(mode);
                     _this->updateToneBlock(true);
                 }
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                    ImGui::SetTooltip("CTCSS or DCS opens for one code, the way a radio does.\n"
+                                      "Any tone opens for whatever code it can decode, for a channel\n"
+                                      "whose users you do not know yet.\n"
+                                      "Custom list opens for the handful of codes you name and keeps\n"
+                                      "the rest out - a business channel split across several areas\n"
+                                      "carries a different code per area.");
+                }
 
-                if (_this->toneTarget.mode == tonedetect::Target::DCS) {
+                if (_this->toneTarget.mode == tonedetect::Target::ANY) {
+                    ImGui::TextDisabled("Opens for any CTCSS tone or DCS code.");
+                }
+                else if (_this->toneTarget.mode == tonedetect::Target::LIST) {
+                    _this->drawToneList(menuWidth);
+                }
+                else if (_this->toneTarget.mode == tonedetect::Target::DCS) {
                     ImGui::LeftLabel("Code");
                     float remaining = menuWidth - ImGui::GetCursorPosX();
                     ImGui::SetNextItemWidth(remaining * 0.55f);
@@ -882,11 +931,28 @@ private:
             if (conf.contains("toneSquelchEnabled")) { toneSqEnabled = conf["toneSquelchEnabled"]; }
             if (conf.contains("toneSquelchMode")) {
                 int m = conf["toneSquelchMode"];
-                if (m >= 0 && m <= (int)tonedetect::Target::DCS) { toneTarget.mode = (tonedetect::Target::Mode)m; }
+                if (m >= 0 && m <= (int)tonedetect::Target::LIST) { toneTarget.mode = (tonedetect::Target::Mode)m; }
             }
             if (conf.contains("toneSquelchCtcss")) { toneTarget.ctcssFreq = conf["toneSquelchCtcss"]; }
             if (conf.contains("toneSquelchDcsCode")) { toneTarget.dcsCode = conf["toneSquelchDcsCode"]; }
             if (conf.contains("toneSquelchDcsInverted")) { toneTarget.dcsInverted = conf["toneSquelchDcsInverted"]; }
+            if (conf.contains("toneSquelchList") && conf["toneSquelchList"].is_array()) {
+                // Every field checked rather than trusted: this is a hand editable
+                // file, and a bad entry here would either throw out of the middle of
+                // demodulator selection or leave the squelch pointed at a code that
+                // does not exist.
+                for (const auto& e : conf["toneSquelchList"]) {
+                    if (!e.is_object()) { continue; }
+                    tonedetect::ToneKey k;
+                    if (e.contains("kind") && e["kind"].is_number_integer() && (int)e["kind"] == (int)tonedetect::ToneKey::DCS) {
+                        k.kind = tonedetect::ToneKey::DCS;
+                    }
+                    if (e.contains("ctcss") && e["ctcss"].is_number()) { k.ctcssFreq = e["ctcss"]; }
+                    if (e.contains("dcsCode") && e["dcsCode"].is_number_integer()) { k.dcsCode = e["dcsCode"]; }
+                    if (e.contains("dcsInverted") && e["dcsInverted"].is_boolean()) { k.dcsInverted = e["dcsInverted"]; }
+                    if (!toneTarget.addKey(k)) { break; }
+                }
+            }
         }
         config.release();
 
@@ -901,8 +967,13 @@ private:
         // Configure bandwidth
         setBandwidth(bandwidth);
 
-        // Configure noise blanker
+        // Configure noise blanker. The running amplitude average has to go with the
+        // rate: it was accumulated at the old demodulator's sample rate and level, and
+        // carrying it across means the first samples on the new one are measured
+        // against an average belonging to a different channel - which either blanks
+        // everything or nothing until it settles.
         nb.setRate(500.0 / ifSamplerate);
+        nb.reset();
         setNBLevel(nbLevel);
         setNBEnabled(nbAllowed && nbEnabled);
 
@@ -1066,6 +1137,114 @@ private:
         return 0;
     }
 
+    // The mode combo's order is not Target::Mode's numbering: OFF is not offered
+    // there, because the checkbox above it is what turns the squelch off, so
+    // everything below OFF shifts down by one.
+    static int toneModeIndex(tonedetect::Target::Mode m) {
+        switch (m) {
+        case tonedetect::Target::DCS: return 1;
+        case tonedetect::Target::ANY: return 2;
+        case tonedetect::Target::LIST: return 3;
+        default: return 0;
+        }
+    }
+
+    static tonedetect::Target::Mode toneModeFromIndex(int i) {
+        switch (i) {
+        case 1: return tonedetect::Target::DCS;
+        case 2: return tonedetect::Target::ANY;
+        case 3: return tonedetect::Target::LIST;
+        default: return tonedetect::Target::CTCSS;
+        }
+    }
+
+    // The accept list, editable in place. It lives in the menu rather than behind a
+    // dialog because it is built while listening to the channel - you hear a code
+    // you did not know about and add it - not filled in ahead of time.
+    void drawToneList(float menuWidth) {
+        for (int i = 0; i < toneTarget.keyCount; i++) {
+            std::string delId = "X##_radio_tonesq_del_" + std::to_string(i) + "_" + name;
+            if (ImGui::Button(delId.c_str())) {
+                toneTarget.removeKey(i);
+                updateToneBlock(true);
+                // Everything after it has shifted down, so stop rather than carry on
+                // drawing rows against indices that have moved.
+                break;
+            }
+            ImGui::SameLine();
+            ImGui::TextUnformatted(toneTarget.keys[i].label().c_str());
+        }
+        if (toneTarget.keyCount == 0) {
+            // An empty list mutes the radio outright, which is worth saying plainly
+            // rather than leaving the user to wonder why nothing comes through.
+            ImGui::TextDisabled("Empty - nothing opens the squelch.");
+        }
+
+        ImGui::LeftLabel("Add");
+        int addKind = (toneAddKey.kind == tonedetect::ToneKey::DCS) ? 1 : 0;
+        float remaining = menuWidth - ImGui::GetCursorPosX();
+        ImGui::SetNextItemWidth(remaining * (addKind ? 0.3f : 0.4f));
+        if (ImGui::Combo(("##_radio_tonesq_addkind_" + name).c_str(), &addKind, "CTCSS\0DCS\0")) {
+            toneAddKey.kind = addKind ? tonedetect::ToneKey::DCS : tonedetect::ToneKey::CTCSS;
+        }
+        ImGui::SameLine();
+        if (addKind) {
+            ImGui::SetNextItemWidth(remaining * 0.35f);
+            int codeId = dcsCodeIndex(toneAddKey.dcsCode);
+            if (ImGui::Combo(("##_radio_tonesq_addcode_" + name).c_str(), &codeId, dcsCodeNames())) {
+                toneAddKey.dcsCode = dcsCodes()[codeId];
+            }
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());
+            int pol = toneAddKey.dcsInverted ? 1 : 0;
+            if (ImGui::Combo(("##_radio_tonesq_addpol_" + name).c_str(), &pol, "Normal\0Invert\0")) {
+                toneAddKey.dcsInverted = (pol != 0);
+            }
+        }
+        else {
+            ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());
+            int toneId = ctcssToneIndex(toneAddKey.ctcssFreq);
+            if (ImGui::Combo(("##_radio_tonesq_addtone_" + name).c_str(), &toneId, ctcssToneNames())) {
+                toneAddKey.ctcssFreq = tonedetect::CTCSS_TONES[toneId];
+            }
+        }
+
+        bool full = toneTarget.keyCount >= tonedetect::TONE_LIST_MAX;
+        if (full) { style::beginDisabled(); }
+        if (ImGui::Button(("Add code##_radio_tonesq_add_" + name).c_str(), ImVec2(menuWidth, 0))) {
+            toneTarget.addKey(toneAddKey);
+            updateToneBlock(true);
+        }
+        if (full) { style::endDisabled(); }
+    }
+
+    // Turns what is being heard into what the squelch is set to. In list mode it
+    // appends and leaves the rest alone; otherwise it points the squelch at that one
+    // code and switches it on, which is the "that is the one, use it" case.
+    void applyHeardTone(const tonedetect::Result& r) {
+        if (r.kind == tonedetect::Result::NONE) { return; }
+        tonedetect::ToneKey k = tonedetect::ToneKey::fromResult(r);
+        if (toneTarget.mode == tonedetect::Target::LIST) {
+            toneTarget.addKey(k);
+        }
+        else {
+            if (k.kind == tonedetect::ToneKey::DCS) {
+                toneTarget.mode = tonedetect::Target::DCS;
+                toneTarget.dcsCode = k.dcsCode;
+                toneTarget.dcsInverted = k.dcsInverted;
+            }
+            else {
+                toneTarget.mode = tonedetect::Target::CTCSS;
+                toneTarget.ctcssFreq = k.ctcssFreq;
+            }
+        }
+        // Either way the point of the button is to make the squelch use what is being
+        // heard, so it switches the squelch on rather than quietly editing a setting
+        // that is not in circuit.
+        toneSqEnabled = true;
+        updateToneBlock(true);
+    }
+
     // Sub-audible signalling only exists on FM, so the block is only ever in circuit
     // for NFM. It carries a decimation and an FFT twice a second, so it is taken out
     // of the chain rather than left idling when neither feature is on.
@@ -1086,6 +1265,19 @@ private:
         conf["toneSquelchCtcss"] = toneTarget.ctcssFreq;
         conf["toneSquelchDcsCode"] = toneTarget.dcsCode;
         conf["toneSquelchDcsInverted"] = toneTarget.dcsInverted;
+        // Written whatever the mode, so that switching to a single code and back does
+        // not throw away a list that took a while on the channel to build.
+        json list = json::array();
+        for (int i = 0; i < toneTarget.keyCount; i++) {
+            const tonedetect::ToneKey& k = toneTarget.keys[i];
+            json e;
+            e["kind"] = (int)k.kind;
+            e["ctcss"] = k.ctcssFreq;
+            e["dcsCode"] = k.dcsCode;
+            e["dcsInverted"] = k.dcsInverted;
+            list.push_back(e);
+        }
+        conf["toneSquelchList"] = list;
         config.release(true);
     }
 
@@ -1308,6 +1500,14 @@ private:
             _out->dcsInverted = _this->toneTarget.dcsInverted;
             _out->filterEnabled = _this->toneFilterEnabled;
             _out->identifyEnabled = _this->toneIdEnabled;
+            _out->listCount = (std::min)(_this->toneTarget.keyCount, RADIO_TONE_LIST_MAX);
+            for (int i = 0; i < _out->listCount; i++) {
+                const tonedetect::ToneKey& k = _this->toneTarget.keys[i];
+                _out->list[i].kind = (int)k.kind;
+                _out->list[i].ctcssFreq = k.ctcssFreq;
+                _out->list[i].dcsCode = k.dcsCode;
+                _out->list[i].dcsInverted = k.dcsInverted;
+            }
         }
         else if (code == RADIO_IFACE_CMD_SET_TONE_SETTINGS && in && _this->enabled) {
             RadioToneSettings* _in = (RadioToneSettings*)in;
@@ -1317,12 +1517,23 @@ private:
             _this->toneSqEnabled = _in->squelchEnabled;
             _this->toneFilterEnabled = _in->filterEnabled;
             _this->toneIdEnabled = _in->identifyEnabled;
-            if (_in->mode >= 0 && _in->mode <= (int)tonedetect::Target::DCS) {
+            if (_in->mode >= 0 && _in->mode <= (int)tonedetect::Target::LIST) {
                 _this->toneTarget.mode = (tonedetect::Target::Mode)_in->mode;
             }
             _this->toneTarget.ctcssFreq = _in->ctcssFreq;
             _this->toneTarget.dcsCode = _in->dcsCode;
             _this->toneTarget.dcsInverted = _in->dcsInverted;
+            // Replaced wholesale rather than merged: recalling a bookmark should leave
+            // the radio set to that channel's codes and nothing else.
+            _this->toneTarget.keyCount = 0;
+            for (int i = 0; i < _in->listCount && i < RADIO_TONE_LIST_MAX; i++) {
+                tonedetect::ToneKey k;
+                k.kind = (_in->list[i].kind == (int)tonedetect::ToneKey::DCS) ? tonedetect::ToneKey::DCS : tonedetect::ToneKey::CTCSS;
+                k.ctcssFreq = _in->list[i].ctcssFreq;
+                k.dcsCode = _in->list[i].dcsCode;
+                k.dcsInverted = _in->list[i].dcsInverted;
+                if (!_this->toneTarget.addKey(k)) { break; }
+            }
             _this->updateToneBlock(true);
         }
         else if (code == RADIO_IFACE_CMD_GET_MODE && out) {
@@ -1413,6 +1624,9 @@ private:
     bool toneFilterEnabled = false;
     bool toneSqEnabled = false;
     tonedetect::Target toneTarget;
+    // What the list editor's pickers are currently showing, which is not part of the
+    // squelch's state until it is added.
+    tonedetect::ToneKey toneAddKey;
 
 
     demod::Demodulator* selectedDemod = NULL;
