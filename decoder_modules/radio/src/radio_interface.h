@@ -58,6 +58,11 @@ struct RadioToneSettings {
     // switching a bookmark's mode back and forth does not lose the codes.
     int listCount = 0;
     RadioToneListEntry list[RADIO_TONE_LIST_MAX];
+
+    // Whether to close on the phase flip or turn-off code a radio sends when it stops
+    // transmitting, rather than waiting for the tone itself to stop. On by default,
+    // which is what a handheld does.
+    bool tailCloseEnabled = true;
 };
 
 enum {

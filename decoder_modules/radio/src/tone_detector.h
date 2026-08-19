@@ -10,6 +10,7 @@
 #include <volk/volk.h>
 #include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -47,6 +48,8 @@ namespace tonedetect {
         static const int HOLD_TICKS = 6;       // ~3 s of analyses, for the readout
         static const int GATE_ARM_TICKS = 2;   // how long an identification stays valid
         static const int FAST_WINDOW = 112;    // 1/6 s - the squelch's closing latency
+        static const int BURST_BLOCK = 21;     // ~31 ms, the phase detector's step
+        static const int BURST_HISTORY = 4;    // ~125 ms of it, shorter than any burst
         static const int MAX_CANDIDATES = 3;   // tones reported per analysis
         static const int MAX_PEAKS = 5;        // peaks examined to find them
 
@@ -165,6 +168,11 @@ namespace tonedetect {
             fastPresent = false;
             fastPos = 0;
             fastTunedTo = 0.0f;
+            tailLockout = 0;
+            burstTunedTo = 0.0f;
+            burstStep = 0.0f;
+            resetBurst();
+            lastOpenKeyValid = false;
             lastDcsMatchSample = -DCS_PRESENCE_SAMPLES;
             for (int k = 0; k < 3; k++) { fastS1[k] = 0.0f; fastS2[k] = 0.0f; }
         }
@@ -193,6 +201,20 @@ namespace tonedetect {
             return true;
         }
 
+        // The code that most recently held the gate open, kept for a couple of seconds
+        // after it shuts. getOpenKey answers for the present moment and goes blank the
+        // instant the gate closes, which on a short transmission - and with the tail
+        // detector shortening them further - is before anyone has looked up at it.
+        bool getLastOpenKey(ToneKey* out) {
+            std::lock_guard<std::mutex> lck(resultMtx);
+            if (!lastOpenKeyValid) { return false; }
+            auto age = std::chrono::duration_cast<std::chrono::milliseconds>(
+                           std::chrono::steady_clock::now() - lastOpenAt).count();
+            if (age > OPEN_KEY_HOLD_MS) { return false; }
+            *out = lastOpenKey;
+            return true;
+        }
+
         // Strips the tone out of what reaches the speaker, the way a radio does it.
         //
         // It has to live here rather than in the demodulator, which already has a
@@ -216,6 +238,17 @@ namespace tonedetect {
             filterEnabled = enable;
             if (filterEnabled) { buildFilter(); }
             base_type::tempStart();
+        }
+
+        // Whether to act on the burst a radio sends to say it has finished, rather
+        // than waiting for the tone itself to stop. Cheap either way - the phase
+        // detector only runs while the gate is open on a CTCSS tone - so this is a
+        // switch for people whose radios do not send one, or whose channel is noisy
+        // enough that they would rather have the tail than risk a clipped word.
+        void setTailClose(bool enable) {
+            std::lock_guard<std::mutex> lck(resultMtx);
+            tailCloseEnabled = enable;
+            tailLockout = 0;
         }
 
         void setSquelch(bool enabled, const Target& target) {
@@ -252,6 +285,7 @@ namespace tonedetect {
 
                 feedDCS(s);
                 feedFast(s);
+                feedBurst(s);
                 feedCTCSS(s);
             }
 
@@ -274,6 +308,11 @@ namespace tonedetect {
             {
                 std::lock_guard<std::mutex> lck(resultMtx);
                 pass = !squelchEnabled || (gateArmed > 0 && fastPresent);
+                if (pass && openKeyValid) {
+                    lastOpenKey = openKey;
+                    lastOpenKeyValid = true;
+                    lastOpenAt = std::chrono::steady_clock::now();
+                }
             }
             if (!pass) {
                 memset(out, 0, count * sizeof(dsp::stereo_t));
@@ -326,7 +365,25 @@ namespace tonedetect {
                 fastPresent = false;
             }
             else if (openKey.kind == ToneKey::DCS) {
-                fastPresent = (sampleIndex - lastDcsMatchSample) < DCS_PRESENCE_SAMPLES;
+                bool dataThere = (sampleIndex - lastDcsMatchSample) < DCS_PRESENCE_SAMPLES;
+                // DCS says it has finished with a turn-off code: 134.4 Hz on its own
+                // for about 180 ms, sent in place of the data. Only looked for once the
+                // data has stopped arriving, because the data is itself a 134.4 bps
+                // waveform and carries energy of its own at that frequency; and judged
+                // against the same off-tone references the CTCSS check uses, so that
+                // the hiss after a carrier drop - which fills all three equally - does
+                // not read as a turn-off code.
+                if (tailCloseEnabled && !dataThere && fastTunedTo == DCS_TURNOFF_HZ) {
+                    float reference = (power[1] > power[2]) ? power[1] : power[2];
+                    if (power[0] > FAST_MIN_RATIO * reference) {
+                        closeOnTail();
+                        return;
+                    }
+                }
+                fastPresent = dataThere;
+                // Nothing else uses the Goertzels while a DCS code holds the gate, so
+                // they sit on the turn-off frequency for as long as it does.
+                retuneFast(DCS_TURNOFF_HZ);
             }
             else {
                 // This frame was accumulated with whatever the Goertzels were tuned to
@@ -362,6 +419,147 @@ namespace tonedetect {
                 fastS1[k] = 0.0f;
                 fastS2[k] = 0.0f;
             }
+        }
+
+        // Closes the moment the transmitter says it has finished, instead of waiting
+        // for the tone to stop and letting a sixth of a second of hiss out first.
+        //
+        // A radio ending a transmission does not simply cut the tone. It flips the
+        // tone's phase - 120 or 180 degrees depending on the make - and holds it there
+        // for a couple of hundred milliseconds before dropping the carrier. Handhelds
+        // watch for that flip and mute on it, and that is what makes the end of a
+        // transmission silent instead of a burst of noise.
+        //
+        // Mixing the audio down by the tone's own frequency leaves a phase that only
+        // creeps, at whatever the transmitter's frequency error happens to be, so the
+        // creep can be measured and taken back out. What is left is flat until the
+        // flip. Nothing else below 300 Hz produces a step that size - transmitters high
+        // pass their microphone audio at 300 Hz precisely so this band stays clear for
+        // signalling, which is what makes the phase readable at all.
+        void feedBurst(float s) {
+            burstI += s * cosf(burstPhase);
+            burstQ -= s * sinf(burstPhase);
+            burstPhase += burstStep;
+            if (burstPhase > TWO_PI) { burstPhase -= TWO_PI; }
+            if (++burstPos < BURST_BLOCK) { return; }
+            burstPos = 0;
+            evaluateBurst();
+            burstI = 0.0f;
+            burstQ = 0.0f;
+        }
+
+        void evaluateBurst() {
+            std::lock_guard<std::mutex> lck(resultMtx);
+
+            // Only ever run against the code the gate actually latched onto, and only
+            // while the gate is what is keeping the audio on. DCS has an ending of its
+            // own and is handled in the fast path.
+            float want = 0.0f;
+            if (tailCloseEnabled && squelchEnabled && openKeyValid && openKey.kind == ToneKey::CTCSS) {
+                want = openKey.ctcssFreq;
+            }
+            if (want != burstTunedTo) {
+                burstTunedTo = want;
+                burstStep = TWO_PI * want / (float)WORK_RATE;
+                resetBurst();
+                return;
+            }
+            if (want == 0.0f) { return; }
+
+            float mag = sqrtf(burstI * burstI + burstQ * burstQ);
+            float phase = atan2f(burstQ, burstI);
+            burstMag += BURST_MAG_ALPHA * (mag - burstMag);
+            if (!burstPrevValid) {
+                burstPrev = phase;
+                burstPrevValid = true;
+                return;
+            }
+            float step = wrapPi(phase - burstPrev);
+            burstPrev = phase;
+
+            // The phase of noise measures nothing, and the instant the carrier goes
+            // that is all there is - so a block the tone has dropped out of is thrown
+            // away rather than read.
+            if (mag < BURST_MIN_MAG_RATIO * burstMag) {
+                resetBurstHistory();
+                return;
+            }
+
+            float resid = step - burstDrift;
+            // A running mean while the estimate is still being formed, a slow EMA once
+            // it is. Going straight to the EMA from zero takes it a couple of seconds
+            // to catch up with a transmitter a few Hz off its nominal tone, and until
+            // it has, the creep it has not accounted for yet looks like the start of a
+            // flip - which at a poor signal to noise ratio is enough to close the gate
+            // in the middle of a transmission. Once formed it is slow on purpose: far
+            // too slow to follow a flip that is over in a fifth of a second.
+            float alpha = (burstSettle < BURST_SETTLE_BLOCKS) ? (1.0f / (float)(burstSettle + 1)) : BURST_DRIFT_ALPHA;
+            burstDrift += alpha * (step - burstDrift);
+            burstHist[burstHistPos] = resid;
+            burstHistPos = (burstHistPos + 1) % BURST_HISTORY;
+            if (burstSettle < BURST_SETTLE_BLOCKS) {
+                burstSettle++;
+                return;
+            }
+
+            // Summed over the history rather than taken a block at a time, so that a
+            // flip landing across a block boundary still counts for all of itself.
+            float sum = 0.0f;
+            for (int k = 0; k < BURST_HISTORY; k++) { sum += burstHist[k]; }
+            int sign = (sum > BURST_PHASE_STEP) ? 1 : ((sum < -BURST_PHASE_STEP) ? -1 : 0);
+            // Two blocks running, leaning the same way both times. One window over the
+            // line is what noise does now and again; a real flip holds the window over
+            // it for as long as the window is, and always with the same sign. The cost
+            // of the extra block is 31 ms of the couple of hundred the burst lasts, and
+            // the cost of getting it wrong is a muted word.
+            if (sign != 0 && sign == burstOverSign) {
+                closeOnTail();
+                return;
+            }
+            burstOverSign = sign;
+        }
+
+        // Shuts the gate on an end-of-transmission burst, from whichever detector saw
+        // it. Called with resultMtx held.
+        void closeOnTail() {
+            gateArmed = 0;
+            openKeyValid = false;
+            fastPresent = false;
+            // The tone is still on air while the burst is running, so the next analysis
+            // would find it and open the gate straight back up - which is precisely the
+            // tail this exists to remove. Counted in ticks rather than left to wait for
+            // the tone to go, so that a false reading costs a second or two of audio
+            // and not the rest of the transmission; and cleared early in tick() as soon
+            // as nothing is being heard, which is what normally happens first.
+            tailLockout = TAIL_LOCKOUT_TICKS;
+            resetBurst();
+            burstTunedTo = 0.0f;
+            burstStep = 0.0f;
+        }
+
+        void resetBurstHistory() {
+            for (int k = 0; k < BURST_HISTORY; k++) { burstHist[k] = 0.0f; }
+            burstHistPos = 0;
+            burstOverSign = 0;
+            burstPrevValid = false;
+            burstSettle = 0;
+        }
+
+        void resetBurst() {
+            resetBurstHistory();
+            burstI = 0.0f;
+            burstQ = 0.0f;
+            burstPos = 0;
+            burstPhase = 0.0f;
+            burstPrev = 0.0f;
+            burstDrift = 0.0f;
+            burstMag = 0.0f;
+        }
+
+        static float wrapPi(float a) {
+            while (a > PI_F) { a -= TWO_PI; }
+            while (a < -PI_F) { a += TWO_PI; }
+            return a;
         }
 
         void feedCTCSS(float s) {
@@ -404,24 +602,14 @@ namespace tonedetect {
             if (hi > bins - 2) { hi = bins - 2; }
             if (hi <= lo) { return 0; }
 
+            // A quick bail on a spectrum that is not one. The peel below skips non
+            // finite bins as it meets them; this catches a block that is garbage all
+            // the way through without walking it several times over to find that out.
             int peak = lo;
             for (int i = lo; i <= hi; i++) {
                 if (spectrum[i] > spectrum[peak]) { peak = i; }
             }
             if (!std::isfinite(spectrum[peak])) { return 0; }
-
-            // Median of the band with the peak's own skirt masked out. A median
-            // rather than a mean, so that a second tone or the bottom of speech
-            // leaking in cannot drag the floor up and hide a real detection.
-            floorBuf.clear();
-            for (int i = lo; i <= hi; i++) {
-                if (std::abs(i - peak) <= PEAK_GUARD_BINS) { continue; }
-                if (!std::isfinite(spectrum[i])) { continue; }
-                floorBuf.push_back(spectrum[i]);
-            }
-            if (floorBuf.size() < 16) { return 0; }
-            std::nth_element(floorBuf.begin(), floorBuf.begin() + floorBuf.size() / 2, floorBuf.end());
-            float noiseFloor = floorBuf[floorBuf.size() / 2];
 
             // Peel the peaks off in order of height, masking out the skirt of each one
             // taken so the next pass finds a separate tone rather than the side of the
@@ -447,9 +635,12 @@ namespace tonedetect {
                     if (masked) { continue; }
                     if (p < 0 || spectrum[i] > spectrum[p]) { p = i; }
                 }
+                if (p < 0) { break; }
+                float noiseFloor;
+                if (!localFloor(p, lo, hi, &noiseFloor)) { break; }
                 // Ordered by height, so the first peak too quiet to call is also the
                 // last: nothing further down the list can clear the threshold.
-                if (p < 0 || spectrum[p] - noiseFloor < CTCSS_MIN_SNR_DB) { break; }
+                if (spectrum[p] - noiseFloor < CTCSS_MIN_SNR_DB) { break; }
                 claimed[claimedCount++] = p;
 
                 // Parabolic interpolation over the dB peak. A one second window is far
@@ -482,6 +673,50 @@ namespace tonedetect {
                 count++;
             }
             return count;
+        }
+
+        // The noise a peak has to stand out from, measured beside that peak rather
+        // than across the whole search band.
+        //
+        // An FM discriminator's noise is not flat: its power rises as the square of
+        // frequency, so across 60 to 260 Hz the floor climbs by nearly 13 dB. A median
+        // taken over all of it therefore sits well below the real floor at the top of
+        // the band and well above it at the bottom - which cost sensitivity on the low
+        // tones and, far worse, handed the high ones several dB of free headroom. On a
+        // dead channel that turned noise into identifications, and they were not spread
+        // evenly: two thirds of them landed above 200 Hz, on 254.1, 250.3, 241.8 and
+        // their neighbours, because those are where the bias was largest.
+        //
+        // Measured over a window either side of the peak the slope is small, so what
+        // comes back is the floor the peak actually has to beat.
+        //
+        // Still a median rather than a mean, for the original reason: a second tone or
+        // the bottom of speech leaking in must not drag the floor up and hide a real
+        // detection.
+        bool localFloor(int p, int lo, int hi, float* out) {
+            int half = binOf(FLOOR_WINDOW_HZ);
+            int a = p - half;
+            int b = p + half;
+            // Slid rather than clipped at the edges of the search band, so that a tone
+            // at 67.0 or 254.1 is judged against as many bins as one in the middle.
+            if (a < lo) {
+                a = lo;
+                b = (hi < lo + 2 * half) ? hi : (lo + 2 * half);
+            }
+            if (b > hi) {
+                b = hi;
+                a = (lo > hi - 2 * half) ? lo : (hi - 2 * half);
+            }
+            floorBuf.clear();
+            for (int i = a; i <= b; i++) {
+                if (std::abs(i - p) <= PEAK_GUARD_BINS) { continue; }
+                if (!std::isfinite(spectrum[i])) { continue; }
+                floorBuf.push_back(spectrum[i]);
+            }
+            if (floorBuf.size() < 16) { return false; }
+            std::nth_element(floorBuf.begin(), floorBuf.begin() + floorBuf.size() / 2, floorBuf.end());
+            *out = floorBuf[floorBuf.size() / 2];
+            return true;
         }
 
         void feedDCS(float s) {
@@ -603,8 +838,32 @@ namespace tonedetect {
             // quick-opening squelch would let the neighbouring tone through. Slower
             // and right beats faster and wrong; the tail is short so speech is not
             // chopped once it is open.
-            bool dcsMatched = dcsSeenThisTick && dcsCount >= 1 && _target.matches(dcsCandidate);
+            // Two agreeing words rather than one. A locked decoder produces a valid
+            // word on every bit, so the second one costs about 7 ms; noise produces
+            // isolated ones, and asking for two in a row that carry the same code took
+            // the rate they arm the gate at on a dead channel from a few a minute to
+            // none in twenty minutes of it. Nothing like the half second the same
+            // requirement costs CTCSS below, which is why that one still opens on one.
+            bool dcsMatched = dcsSeenThisTick && dcsCount >= CONFIRMATIONS && _target.matches(dcsCandidate);
             bool ctcssMatched = ctcssCount >= 1 && _target.matches(ctcssCandidate);
+            bool matched = dcsMatched || ctcssMatched;
+
+            // An end-of-transmission burst is sent while the tone is still on air, so
+            // for a moment after one the analysis still finds the tone that was just
+            // said goodbye with. Ignore it for as long as that lasts. Normally the
+            // carrier goes within a couple of hundred milliseconds and the tone stops
+            // being heard well before the count runs out, which releases it early - the
+            // count is only there to bound what a false reading can cost.
+            bool tailHeld = false;
+            if (tailLockout > 0) {
+                if (matched) {
+                    tailLockout--;
+                    tailHeld = true;
+                }
+                else {
+                    tailLockout = 0;
+                }
+            }
             // Arms the gate; the fast presence check is what actually holds it
             // open, so this only has to remember that the right tone was identified
             // recently enough for a momentary dropout not to need re-deciding.
@@ -612,7 +871,7 @@ namespace tonedetect {
             // Latching which code did it is what makes the modes that accept several
             // codes work at all: the fast check needs one frequency to watch, and in
             // those modes the target does not name one.
-            if (dcsMatched || ctcssMatched) {
+            if (matched && !tailHeld) {
                 // DCS wins when both are present, for the same reason it wins the
                 // readout above.
                 const Result& src = dcsMatched ? dcsCandidate : ctcssCandidate;
@@ -653,7 +912,13 @@ namespace tonedetect {
         static constexpr float TWO_PI = 6.283185307179586f;
         static constexpr float SEARCH_LOW_HZ = 60.0f;
         static constexpr float SEARCH_HIGH_HZ = 260.0f;
-        static constexpr float CTCSS_MIN_SNR_DB = 10.0f;
+        // 10 dB was under what the loudest bin of pure noise reaches across a band
+        // this wide often enough to matter - the largest of a couple of hundred
+        // independent bins sits about 9 dB over their median on average, and swings
+        // several dB either side of that. 11 dB against a floor measured locally
+        // leaves the noise behind without giving up a tone anyone could hear.
+        static constexpr float CTCSS_MIN_SNR_DB = 11.0f;
+        static constexpr float FLOOR_WINDOW_HZ = 25.0f;
         static constexpr float SNAP_TOLERANCE_HZ = 0.6f; // < half the 1.4 Hz 150.0/151.4 gap
         static constexpr float DC_ALPHA = 0.002f;
         // References either side of the tone, far enough out to clear the mainlobe of
@@ -661,6 +926,17 @@ namespace tonedetect {
         // rather than the tone itself.
         static constexpr float FAST_REF_OFFSET_HZ = 20.0f;
         static constexpr float FAST_MIN_RATIO = 4.0f; // 6 dB over the noise beside it
+        static constexpr float PI_F = 3.14159265358979f;
+        // The flip is 120 degrees at its smallest, so this sits comfortably under the
+        // smallest real one and comfortably over what noise puts into the window.
+        static constexpr float BURST_PHASE_STEP = 1.57f; // 90 degrees
+        static constexpr float BURST_DRIFT_ALPHA = 0.02f;
+        static constexpr float BURST_MAG_ALPHA = 0.05f;
+        static constexpr float BURST_MIN_MAG_RATIO = 0.4f;
+        static const int BURST_SETTLE_BLOCKS = 16; // ~0.5 s for the drift estimate
+        static const int TAIL_LOCKOUT_TICKS = 4;   // ~2 s, the cap on a false reading
+        static constexpr float DCS_TURNOFF_HZ = 134.4f;
+        static const int OPEN_KEY_HOLD_MS = 2000;
         // A locked DCS decoder produces a match every bit, so a quarter second
         // without one means it has stopped.
         static const int DCS_PRESENCE_SAMPLES = 168;
@@ -717,6 +993,31 @@ namespace tonedetect {
         float fastTunedTo = 0.0f;
         bool fastPresent = false;
         long long lastDcsMatchSample = 0;
+
+        // End-of-transmission burst detector, and the lockout that keeps the gate shut
+        // over the rest of the burst once it has fired.
+        bool tailCloseEnabled = true;
+        int tailLockout = 0;
+        float burstI = 0.0f;
+        float burstQ = 0.0f;
+        float burstPhase = 0.0f;
+        float burstStep = 0.0f;
+        float burstTunedTo = 0.0f;
+        int burstPos = 0;
+        float burstPrev = 0.0f;
+        bool burstPrevValid = false;
+        float burstDrift = 0.0f;
+        float burstMag = 0.0f;
+        float burstHist[BURST_HISTORY] = { 0.0f };
+        int burstHistPos = 0;
+        int burstOverSign = 0;
+        int burstSettle = 0;
+
+        // What the gate was last open on, and when, for the readout to keep naming it
+        // for a moment after the audio stops.
+        ToneKey lastOpenKey;
+        bool lastOpenKeyValid = false;
+        std::chrono::steady_clock::time_point lastOpenAt;
 
         // The mono filter rather than FIR<stereo_t, float>, because NFM audio is mono
         // duplicated across both channels: filtering once and copying is half the

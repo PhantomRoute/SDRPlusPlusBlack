@@ -694,7 +694,16 @@ private:
                 // Which code let the audio through, not just that something did. On a
                 // channel set to accept several that is the whole point of watching it.
                 tonedetect::ToneKey openKey;
-                if (!_this->toneDetector.isGateOpen()) { ImGui::TextDisabled("muted"); }
+                if (!_this->toneDetector.isGateOpen()) {
+                    // Still named for a couple of seconds after it shuts. A short
+                    // transmission - and with the tail detector on, every transmission
+                    // is a little shorter - can easily be over before anyone has
+                    // looked up, and "muted" on its own does not say what just went
+                    // past. Not dimmed like the bare "muted", because the whole point
+                    // of it is to be read.
+                    if (_this->toneDetector.getLastOpenKey(&openKey)) { ImGui::Text("muted (was %s)", openKey.label().c_str()); }
+                    else { ImGui::TextDisabled("muted"); }
+                }
                 else if (_this->toneDetector.getOpenKey(&openKey)) { ImGui::Text("open (%s)", openKey.label().c_str()); }
                 else { ImGui::TextUnformatted("open"); }
 
@@ -746,6 +755,19 @@ private:
                         _this->toneTarget.ctcssFreq = tonedetect::CTCSS_TONES[toneId];
                         _this->updateToneBlock(true);
                     }
+                }
+
+                if (ImGui::Checkbox(("Close on end of transmission##_radio_tonetail_ena_" + _this->name).c_str(), &_this->toneTailCloseEnabled)) {
+                    _this->updateToneBlock(true);
+                }
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                    ImGui::SetTooltip("A radio finishing a transmission flips the phase of its CTCSS tone\n"
+                                      "for a moment before dropping the carrier, and sends a 134.4 Hz\n"
+                                      "turn-off code at the end of a DCS one. Watching for those closes\n"
+                                      "the squelch as the transmission ends rather than a sixth of a\n"
+                                      "second later, which is what the burst of hiss at the end is.\n"
+                                      "Turn it off if your radios do not send one, or if a noisy channel\n"
+                                      "is clipping the last word.");
                 }
                 if (!_this->enabled) { style::endDisabled(); }
             }
@@ -883,6 +905,7 @@ private:
         toneIdEnabled = false;
         toneFilterEnabled = false;
         toneSqEnabled = false;
+        toneTailCloseEnabled = true;
         toneTarget = tonedetect::Target();
         double ifSamplerate = selectedDemod->getIFSampleRate();
         config.acquire();
@@ -929,6 +952,7 @@ private:
             if (conf.contains("toneIdEnabled")) { toneIdEnabled = conf["toneIdEnabled"]; }
             if (conf.contains("toneFilterEnabled")) { toneFilterEnabled = conf["toneFilterEnabled"]; }
             if (conf.contains("toneSquelchEnabled")) { toneSqEnabled = conf["toneSquelchEnabled"]; }
+            if (conf.contains("toneSquelchTailClose")) { toneTailCloseEnabled = conf["toneSquelchTailClose"]; }
             if (conf.contains("toneSquelchMode")) {
                 int m = conf["toneSquelchMode"];
                 if (m >= 0 && m <= (int)tonedetect::Target::LIST) { toneTarget.mode = (tonedetect::Target::Mode)m; }
@@ -1251,6 +1275,7 @@ private:
     void updateToneBlock(bool save) {
         bool allowed = toneIdAllowed && selectedDemod != NULL;
         toneDetector.setSquelch(toneSqEnabled && allowed, toneTarget);
+        toneDetector.setTailClose(toneTailCloseEnabled);
         toneDetector.setToneFilter(toneFilterEnabled && allowed);
         afChain.setBlockEnabled(&toneDetector, allowed && (toneIdEnabled || toneSqEnabled || toneFilterEnabled),
                                 [=](dsp::stream<dsp::stereo_t>* out) { afsplitter.setInput(out); });
@@ -1261,6 +1286,7 @@ private:
         conf["toneIdEnabled"] = toneIdEnabled;
         conf["toneFilterEnabled"] = toneFilterEnabled;
         conf["toneSquelchEnabled"] = toneSqEnabled;
+        conf["toneSquelchTailClose"] = toneTailCloseEnabled;
         conf["toneSquelchMode"] = (int)toneTarget.mode;
         conf["toneSquelchCtcss"] = toneTarget.ctcssFreq;
         conf["toneSquelchDcsCode"] = toneTarget.dcsCode;
@@ -1500,6 +1526,7 @@ private:
             _out->dcsInverted = _this->toneTarget.dcsInverted;
             _out->filterEnabled = _this->toneFilterEnabled;
             _out->identifyEnabled = _this->toneIdEnabled;
+            _out->tailCloseEnabled = _this->toneTailCloseEnabled;
             _out->listCount = (std::min)(_this->toneTarget.keyCount, RADIO_TONE_LIST_MAX);
             for (int i = 0; i < _out->listCount; i++) {
                 const tonedetect::ToneKey& k = _this->toneTarget.keys[i];
@@ -1517,6 +1544,7 @@ private:
             _this->toneSqEnabled = _in->squelchEnabled;
             _this->toneFilterEnabled = _in->filterEnabled;
             _this->toneIdEnabled = _in->identifyEnabled;
+            _this->toneTailCloseEnabled = _in->tailCloseEnabled;
             if (_in->mode >= 0 && _in->mode <= (int)tonedetect::Target::LIST) {
                 _this->toneTarget.mode = (tonedetect::Target::Mode)_in->mode;
             }
@@ -1622,6 +1650,7 @@ private:
     bool toneIdAllowed = false;
     bool toneIdEnabled = false;
     bool toneFilterEnabled = false;
+    bool toneTailCloseEnabled = true;
     bool toneSqEnabled = false;
     tonedetect::Target toneTarget;
     // What the list editor's pickers are currently showing, which is not part of the

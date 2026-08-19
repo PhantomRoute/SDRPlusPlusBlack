@@ -1,6 +1,7 @@
 
 #include "small_waterfall.h"
 
+#include <algorithm>
 #include <vector>
 #include <mutex>
 #include <cstddef>
@@ -17,6 +18,7 @@ struct SubWaterfall::SubWaterfallPrivate {
     std::mutex inputBufferMutex;
     std::vector<dsp::stereo_t> resampledV;
     std::vector<std::pair<float, float>> minMaxQueue;
+    std::vector<float> levelScratch;
     ImGui::WaterFall waterfall;
     fftwf_complex* fft_in;
     fftwf_complex* fft_out;
@@ -77,18 +79,47 @@ struct SubWaterfall::SubWaterfallPrivate {
             }
             // bins are located
             // -hiFreq .. 0 ... hiFreq  // total fftSize
-            int startBin = fftSize/2 - fftSize/16; // 1/8th of the fftSize in the middle
-            int endBin = fftSize/2 + fftSize/16;
-            float minn = dest[startBin];
-            float maxx = dest[startBin];
-            for (int q = startBin; q < endBin; q++) {
-                if (dest[q] < minn) {
-                    minn = dest[q];
-                }
-                if (dest[q] > maxx) {
-                    maxx = dest[q];
+            //
+            // The levels come from the middle of the span, but not from the very
+            // middle. "Remove tone from audio" high passes the audio at 300 Hz, and
+            // that filter is a windowed sinc a couple of thousand taps long - it is
+            // 100 dB down by 150 Hz and bottoms out near -240 dB at DC. The window
+            // this used to measure was the middle 1/8th, +/-620 Hz, so with the tone
+            // filter on, half the bins it read sat inside that canyon. minn came back
+            // at the bottom of it, setWaterfallMin followed it down, and everything
+            // that was really there got painted at the top of the palette.
+            //
+            // So skip a guard either side of DC, wide enough to clear the filter's
+            // transition, and read across the speech band instead. And take the floor
+            // from a low percentile rather than the outright minimum, so that any
+            // other narrow notch - the IF notch filter landing in the audio, a
+            // carrier null - cannot drag the scale down the same way.
+            const float LEVEL_DC_GUARD_HZ = 450.0f; // clears the corner and its transition
+            const float LEVEL_BAND_HZ = 2500.0f;
+            const float binWidth = (2.0f * hiFreq) / (float)fftSize;
+            int guardBins = (int)ceilf(LEVEL_DC_GUARD_HZ / binWidth);
+            int bandBins = std::min((int)(LEVEL_BAND_HZ / binWidth), fftSize / 2);
+            levelScratch.clear();
+            if (bandBins - guardBins >= 4) {
+                for (int q = guardBins; q < bandBins; q++) {
+                    levelScratch.push_back(dest[fftSize / 2 - q]);
+                    levelScratch.push_back(dest[fftSize / 2 + q]);
                 }
             }
+            else {
+                // Too narrow a span to be picky - the middle 1/8th, as it was before,
+                // and at least the one bin in the middle however small fftSize is.
+                int half = std::max(fftSize / 16, 1);
+                int from = std::max(fftSize / 2 - half, 0);
+                int to = std::min(fftSize / 2 + half, fftSize);
+                for (int q = from; q < to; q++) {
+                    levelScratch.push_back(dest[q]);
+                }
+            }
+            float maxx = *std::max_element(levelScratch.begin(), levelScratch.end());
+            size_t floorAt = levelScratch.size() / 10;
+            std::nth_element(levelScratch.begin(), levelScratch.begin() + floorAt, levelScratch.end());
+            float minn = levelScratch[floorAt];
             // With squelch closed the samples are all zero, and the power spectrum of
             // silence comes out at -inf, or a nonsense value once volk is done with
             // it. Averaging that into the running levels drags the colour scale far

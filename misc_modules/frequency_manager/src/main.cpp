@@ -532,6 +532,13 @@ private:
         ImGui::TableSetColumnIndex(1);
         ImGui::SetNextItemWidth(200);
         ImGui::Checkbox(("##freq_manager_edit_toneid" + name).c_str(), &t.identifyEnabled);
+
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::LeftLabel("Close on end of TX");
+        ImGui::TableSetColumnIndex(1);
+        ImGui::SetNextItemWidth(200);
+        ImGui::Checkbox(("##freq_manager_edit_tonetail" + name).c_str(), &t.tailCloseEnabled);
     }
 
     bool bookmarkEditDialog() {
@@ -778,6 +785,7 @@ private:
         bm["tone"]["dcsInverted"] = t.dcsInverted;
         bm["tone"]["filter"] = t.filterEnabled;
         bm["tone"]["identify"] = t.identifyEnabled;
+        bm["tone"]["tailClose"] = t.tailCloseEnabled;
         // Written whatever the mode, so that a bookmark toggled to a single code and
         // back keeps the list of codes that was worked out on the channel.
         json list = json::array();
@@ -811,6 +819,9 @@ private:
         t.dcsInverted = j.value("dcsInverted", false);
         t.filterEnabled = j.value("filter", false);
         t.identifyEnabled = j.value("identify", false);
+        // Bookmarks written before this existed get the same default a fresh channel
+        // does, rather than silently having the behaviour turned off.
+        t.tailCloseEnabled = j.value("tailClose", true);
         if (j.contains("list") && j["list"].is_array()) {
             // Capped rather than assumed to fit: bookmark files get hand edited and
             // shared around, and the destination is a fixed size array.

@@ -700,10 +700,6 @@ int sdrpp_main(int argc, char* argv[]) {
     defConfig["moduleInstances"]["FT8/FT4 Decoder"]["enabled"] = true;
     defConfig["moduleInstances"]["Radiosonde"]["module"] = "radiosonde_decoder";
     defConfig["moduleInstances"]["Radiosonde"]["enabled"] = false;
-    // Off by default: it puts a VFO on the waterfall as soon as it is enabled, which
-    // is not something to do to someone who has never asked for PSK.
-    defConfig["moduleInstances"]["PSK Decoder"]["module"] = "psk_decoder";
-    defConfig["moduleInstances"]["PSK Decoder"]["enabled"] = false;
     defConfig["moduleInstances"]["VHF Digital Modes"]["module"] = "ch_extravhf_decoder";
     defConfig["moduleInstances"]["VHF Digital Modes"]["enabled"] = true;
     defConfig["moduleInstances"]["TETRA Demodulator"]["module"] = "ch_tetra_demodulator";
