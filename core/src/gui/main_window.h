@@ -31,6 +31,10 @@ public:
     // Millis at which play was last pressed, so the watchdog above does not count the
     // gap before the first sample as silence.
     long long playStartTime = 0;
+    // How many times the source has dropped out since the program started. Once it is
+    // more than the odd one, the message says something more useful than the first one
+    // did - see checkSourceAlive.
+    int sourceDropCount = 0;
 
     void performDetectedLLMAction(const std::string &whisperResult, std::string command);
 

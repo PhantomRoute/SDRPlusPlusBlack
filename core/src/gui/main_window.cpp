@@ -1018,6 +1018,8 @@ void MainWindow::checkSourceAlive() {
     // inside this, and a source that has genuinely gone quiet for five seconds has
     // stopped, whatever the reason.
     const long long TIMEOUT_MS = 5000;
+    // Two dropouts in a session is bad luck; the third is a pattern worth naming.
+    const int DROP_ADVICE_AFTER = 3;
 
     if (!playing) { return; }
 
@@ -1042,11 +1044,31 @@ void MainWindow::checkSourceAlive() {
     // matches flog's catch-all template instead. That template does (std::string)value
     // and fails to compile. Android has an explicit long long overload for this exact
     // reason; nothing else does.
-    flog::error("No samples for {0} ms, stopping. The source appears to have gone away.", (int64_t)silence);
+    sourceDropCount++;
+    flog::error("No samples for {0} ms, stopping. The source appears to have gone away. Drop {1} this session.",
+                (int64_t)silence, (int64_t)sourceDropCount);
     setPlayState(false);
-    ImGui::InsertNotification({ ImGuiToastType_Error, 8000,
-                                "The source stopped sending samples, so the radio has been stopped.\n"
-                                "If it was unplugged or the connection dropped, restore it and press play." });
+
+    // The first one or two are just a fact: something was unplugged, or a lead was
+    // knocked, and saying more than that would be guessing. By the third the pattern
+    // is the message - one device that keeps dropping out is a connection that is not
+    // holding, and the useful thing to say is which parts of it to suspect. A dropout
+    // often leaves the device still enumerated, so the only symptom the operator sees
+    // is having to press play again, and it is easy to put up with that for an hour
+    // without ever concluding the cable is at fault.
+    if (sourceDropCount < DROP_ADVICE_AFTER) {
+        ImGui::InsertNotification({ ImGuiToastType_Error, 8000,
+                                    "The source stopped sending samples, so the radio has been stopped.\n"
+                                    "If it was unplugged or the connection dropped, restore it and press play." });
+    }
+    else {
+        ImGui::InsertNotification({ ImGuiToastType_Error, 12000,
+                                    "The source stopped sending samples, so the radio has been stopped.\n"
+                                    "That is %d times since the program started. A link that keeps dropping\n"
+                                    "is usually the cable, the USB port, or the socket on the SDR itself -\n"
+                                    "worth trying a different port or lead rather than the same one.",
+                                    sourceDropCount });
+    }
 }
 
 
