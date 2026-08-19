@@ -20,6 +20,14 @@ namespace tonedetect {
 
         Kind kind = NONE;
         float ctcssFreq = 0.0f; // Hz, snapped to the standard tone
+        // Where the peak actually was, before it snapped. Within half a Hz of the
+        // standard tone by construction - a peak further off than that is not reported
+        // as a tone at all - but a transmitter is allowed to be 1% off, and the notches
+        // that clean the harmonics out of the audio are narrow enough to care which
+        // end of that tolerance it sits at. Deliberately not part of operator==: two
+        // readings of the same tone are the same reading, whatever the noise did to
+        // the third decimal place.
+        float measuredHz = 0.0f;
         int dcsNormal = 0;      // the code a radio set to normal polarity would send
         int dcsInverted = 0;    // the same waveform read as an inverted code
 

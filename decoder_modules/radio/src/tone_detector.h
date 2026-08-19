@@ -32,6 +32,40 @@
 namespace tonedetect {
 
 
+    // One RBJ notch, direct form 2 transposed. Used to take the harmonics of the
+    // signalling tone out of the audio - see retuneNotches for why they are there.
+    struct ToneNotch {
+        float b0 = 1.0f, b1 = 0.0f, b2 = 0.0f, a1 = 0.0f, a2 = 0.0f;
+        float z1 = 0.0f, z2 = 0.0f;
+        bool active = false;
+
+        void set(double f0, double q, double fs) {
+            double w0 = 2.0 * 3.14159265358979 * f0 / fs;
+            double alpha = sin(w0) / (2.0 * q);
+            double a0 = 1.0 + alpha;
+            double c = -2.0 * cos(w0);
+            b0 = (float)(1.0 / a0);
+            b1 = (float)(c / a0);
+            b2 = (float)(1.0 / a0);
+            a1 = (float)(c / a0);
+            a2 = (float)((1.0 - alpha) / a0);
+            active = true;
+        }
+
+        void clear() {
+            active = false;
+            z1 = 0.0f;
+            z2 = 0.0f;
+        }
+
+        inline float process(float x) {
+            float y = b0 * x + z1;
+            z1 = b1 * x - a1 * y + z2;
+            z2 = b2 * x - a2 * y;
+            return y;
+        }
+    };
+
     // Sits in the audio chain rather than tapping off it, because a squelch has to
     // gate the samples on their way through, and the detection that decides the gate
     // has to look at the audio before it is muted - a tap after the gate would hear
@@ -142,6 +176,33 @@ namespace tonedetect {
             dsp::taps::free(oldTaps);
         }
 
+        // The high pass alone does not silence the tone, only its fundamental.
+        //
+        // A CTCSS encoder in a handheld is not a clean sine, and the harmonics of what
+        // it sends land above the 300 Hz corner as soon as the tone itself is above
+        // 150 Hz: 210.7 Hz puts its second harmonic at 421.4 Hz, where the high pass
+        // does nothing at all, and what is left is plainly audible as a buzz. The low
+        // tones are quiet because their harmonics fall inside the stopband too - which
+        // is why this only shows up on the top half of the table.
+        //
+        // So notch out where those harmonics have to be. The frequency is known
+        // exactly, which is what makes a notch this narrow safe: constant Q rather
+        // than constant width, because a transmitter's frequency error is a percentage
+        // and so grows with the harmonic it is being measured on.
+        void retuneNotches(float fundamental) {
+            notchTunedTo = fundamental;
+            for (int n = 0; n < HARMONIC_NOTCHES; n++) {
+                double f = (double)fundamental * (double)(n + 2);
+                // Nothing to do for a tone whose harmonics the high pass already
+                // covers, and nothing sensible to do near Nyquist.
+                if (fundamental <= 0.0f || f < FILTER_CUTOFF_HZ || f > 0.45 * _inputSampleRate) {
+                    harmonicNotch[n].clear();
+                    continue;
+                }
+                harmonicNotch[n].set(f, NOTCH_Q, _inputSampleRate);
+            }
+        }
+
         void resetState() {
             std::lock_guard<std::mutex> lck(resultMtx);
             std::fill(window.begin(), window.end(), 0.0f);
@@ -173,6 +234,8 @@ namespace tonedetect {
             burstStep = 0.0f;
             resetBurst();
             lastOpenKeyValid = false;
+            notchTunedTo = 0.0f;
+            for (int n = 0; n < HARMONIC_NOTCHES; n++) { harmonicNotch[n].clear(); }
             lastDcsMatchSample = -DCS_PRESENCE_SAMPLES;
             for (int k = 0; k < 3; k++) { fastS1[k] = 0.0f; fastS2[k] = 0.0f; }
         }
@@ -295,6 +358,38 @@ namespace tonedetect {
             if (filterEnabled && filterReady) {
                 if ((int)filteredBuf.size() < count) { filteredBuf.resize(count); }
                 toneFilter.process(count, monoBuf.data(), filteredBuf.data());
+                // Retuned from whichever tone is currently known, once per buffer
+                // rather than per sample - it can only change every half second.
+                float wantNotch = 0.0f;
+                {
+                    std::lock_guard<std::mutex> lck(resultMtx);
+                    // The measured frequency in preference to the standard one it
+                    // snapped to. A transmitter is allowed to be 1% off, and 1% off is
+                    // 4 Hz out on a second harmonic - which turns a notch this narrow
+                    // from burying the harmonic into taking 11 dB off it. What the peak
+                    // interpolation reads is good to about a twentieth of a Hz, so the
+                    // notch can sit where the harmonic really is instead.
+                    if (published.kind == Result::CTCSS) {
+                        wantNotch = (published.measuredHz > 0.0f) ? published.measuredHz : published.ctcssFreq;
+                    }
+                    else if (openKeyValid && openKey.kind == ToneKey::CTCSS) {
+                        wantNotch = openKey.ctcssFreq;
+                    }
+                }
+                // Deadbanded: the reading moves a little every analysis, and rebuilding
+                // three biquads on every buffer to chase hundredths of a Hz is work for
+                // nothing.
+                bool notchChanged = (wantNotch == 0.0f) != (notchTunedTo == 0.0f);
+                if (!notchChanged && wantNotch != 0.0f) {
+                    notchChanged = std::fabs(wantNotch - notchTunedTo) > NOTCH_RETUNE_HZ;
+                }
+                if (notchChanged) { retuneNotches(wantNotch); }
+                for (int n = 0; n < HARMONIC_NOTCHES; n++) {
+                    if (!harmonicNotch[n].active) { continue; }
+                    for (int i = 0; i < count; i++) {
+                        filteredBuf[i] = harmonicNotch[n].process(filteredBuf[i]);
+                    }
+                }
                 for (int i = 0; i < count; i++) {
                     out[i].l = filteredBuf[i];
                     out[i].r = filteredBuf[i];
@@ -670,6 +765,7 @@ namespace tonedetect {
 
                 out[count].kind = Result::CTCSS;
                 out[count].ctcssFreq = CTCSS_TONES[best];
+                out[count].measuredHz = freq;
                 count++;
             }
             return count;
@@ -807,6 +903,15 @@ namespace tonedetect {
             }
             else if (ctcss == ctcssCandidate) {
                 if (ctcssCount < CONFIRMATIONS) { ctcssCount++; }
+                // Same tone, so the count stands - but take the new window's reading of
+                // where it actually is, smoothed, because each one is a fresh estimate
+                // and averaging them beats trusting whichever arrived first.
+                if (ctcssCandidate.measuredHz > 0.0f && ctcss.measuredHz > 0.0f) {
+                    ctcssCandidate.measuredHz += MEASURED_SMOOTHING * (ctcss.measuredHz - ctcssCandidate.measuredHz);
+                }
+                else {
+                    ctcssCandidate.measuredHz = ctcss.measuredHz;
+                }
             }
             else {
                 ctcssCandidate = ctcss;
@@ -940,6 +1045,12 @@ namespace tonedetect {
         // A locked DCS decoder produces a match every bit, so a quarter second
         // without one means it has stopped.
         static const int DCS_PRESENCE_SAMPLES = 168;
+        // The second, third and fourth harmonics. Past that a CTCSS encoder's
+        // distortion is far below anything the ear picks out of speech.
+        static const int HARMONIC_NOTCHES = 3;
+        static constexpr double NOTCH_Q = 15.0;
+        static constexpr float NOTCH_RETUNE_HZ = 0.02f;
+        static constexpr float MEASURED_SMOOTHING = 0.3f;
         static constexpr double FILTER_CUTOFF_HZ = 300.0;
         static constexpr double FILTER_TRANS_HZ = 100.0;
 
@@ -1024,6 +1135,8 @@ namespace tonedetect {
         // convolution for the same result. The stereo form is correct now, it is just
         // twice the work here.
         dsp::filter::FIR<float, float> toneFilter;
+        ToneNotch harmonicNotch[HARMONIC_NOTCHES];
+        float notchTunedTo = 0.0f;
         std::vector<float> filteredBuf;
         dsp::tap<float> filterTaps;
         bool filterEnabled = false;
