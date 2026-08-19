@@ -98,7 +98,11 @@ struct SubWaterfall::SubWaterfallPrivate {
             const float LEVEL_BAND_HZ = 2500.0f;
             const float binWidth = (2.0f * hiFreq) / (float)fftSize;
             int guardBins = (int)ceilf(LEVEL_DC_GUARD_HZ / binWidth);
-            int bandBins = std::min((int)(LEVEL_BAND_HZ / binWidth), fftSize / 2);
+            // Parenthesised, here and below: this file is compiled into core, which
+            // pulls in windows.h, where min and max are function-like macros - and
+            // std::min(a, b) then expands to std::(a, b). The extra brackets stop the
+            // macro matching. Same reason the tone detector spells its own out longhand.
+            int bandBins = (std::min)((int)(LEVEL_BAND_HZ / binWidth), fftSize / 2);
             levelScratch.clear();
             if (bandBins - guardBins >= 4) {
                 for (int q = guardBins; q < bandBins; q++) {
@@ -109,9 +113,9 @@ struct SubWaterfall::SubWaterfallPrivate {
             else {
                 // Too narrow a span to be picky - the middle 1/8th, as it was before,
                 // and at least the one bin in the middle however small fftSize is.
-                int half = std::max(fftSize / 16, 1);
-                int from = std::max(fftSize / 2 - half, 0);
-                int to = std::min(fftSize / 2 + half, fftSize);
+                int half = (std::max)(fftSize / 16, 1);
+                int from = (std::max)(fftSize / 2 - half, 0);
+                int to = (std::min)(fftSize / 2 + half, fftSize);
                 for (int q = from; q < to; q++) {
                     levelScratch.push_back(dest[q]);
                 }
