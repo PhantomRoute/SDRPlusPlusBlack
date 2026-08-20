@@ -618,7 +618,7 @@ private:
             // forty characters of room, which is not enough to be worth typing into.
             ImGui::LeftLabel("Notes");
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Anything worth remembering about the channel. Kept with the\n"
+                style::tooltip("Anything worth remembering about the channel. Kept with the\n"
                                   "bookmark, shown when you hover it in the list, and carried\n"
                                   "through export and import.");
             }
@@ -638,7 +638,10 @@ private:
 
             bool applyDisabled = (strlen(nameBuf) == 0) || (bookmarks.find(editedBookmarkName) != bookmarks.end() && editedBookmarkName != firstEditedBookmarkName);
             if (applyDisabled) { style::beginDisabled(); }
-            if (ImGui::Button("Apply")) {
+            // Named for what it does. There used to be three buttons called "Apply" in
+            // this module doing three unrelated things, and the one on the menu behind
+            // this dialog tunes the radio.
+            if (ImGui::Button(editOpen ? "Save" : "Create")) {
                 open = false;
 
                 // If editing, delete the original one
@@ -681,7 +684,7 @@ private:
             bool alreadyExists = (std::find(listNames.begin(), listNames.end(), editedListName) != listNames.end());
 
             if (strlen(nameBuf) == 0 || alreadyExists) { style::beginDisabled(); }
-            if (ImGui::Button("Apply")) {
+            if (ImGui::Button(renameListOpen ? "Rename" : "Create")) {
                 open = false;
 
                 config.acquire();
@@ -950,6 +953,11 @@ private:
             config.conf["selectedList"] = _this->selectedListName;
             config.release(true);
         }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            style::tooltip("Which list of bookmarks to work on. Lists are separate sets of\n"
+                           "channels - one for the local repeaters, one for airband, one for\n"
+                           "a rally weekend - and each can be shown on the waterfall or not.");
+        }
         ImGui::SameLine();
         if (_this->listNames.size() == 0) { style::beginDisabled(); }
         if (ImGui::Button(("Rename##_freq_mgr_ren_lst_" + _this->name).c_str(), ImVec2(btnSize, 0))) {
@@ -957,6 +965,7 @@ private:
             _this->editedListName = _this->firstEditedListName;
             _this->renameListOpen = true;
         }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) { style::tooltip("Rename the selected list."); }
         if (_this->listNames.size() == 0) { style::endDisabled(); }
         ImGui::SameLine();
         if (ImGui::Button(("+##_freq_mgr_add_lst_" + _this->name).c_str(), ImVec2(lineHeight, 0))) {
@@ -974,11 +983,13 @@ private:
             }
             _this->newListOpen = true;
         }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) { style::tooltip("Start a new, empty list."); }
         ImGui::SameLine();
         if (_this->selectedListName == "") { style::beginDisabled(); }
         if (ImGui::Button(("-##_freq_mgr_del_lst_" + _this->name).c_str(), ImVec2(lineHeight, 0))) {
             _this->deleteListOpen = true;
         }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) { style::tooltip("Delete the selected list and every bookmark in it."); }
         if (_this->selectedListName == "") { style::endDisabled(); }
 
         // Render only - the scanner is fed its channels and ticked from
@@ -1055,11 +1066,16 @@ private:
             }
         }
 
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            style::tooltip("Save what the radio is tuned to now as a new bookmark - frequency,\n"
+                           "mode, bandwidth and the tone settings it is using.");
+        }
         ImGui::TableSetColumnIndex(1);
         if (selectedNames.size() == 0 && _this->selectedListName != "") { style::beginDisabled(); }
         if (ImGui::Button(("Remove##_freq_mgr_rem_" + _this->name).c_str(), ImVec2(ImGui::GetContentRegionAvail().x, 0))) {
             _this->deleteBookmarksOpen = true;
         }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) { style::tooltip("Delete the selected bookmarks."); }
         if (selectedNames.size() == 0 && _this->selectedListName != "") { style::endDisabled(); }
         ImGui::TableSetColumnIndex(2);
         if (selectedNames.size() != 1 && _this->selectedListName != "") { style::beginDisabled(); }
@@ -1070,6 +1086,10 @@ private:
             _this->editedBookmark = _this->bookmarks[selectedNames[0]];
             _this->editedBookmarkName = selectedNames[0];
             _this->firstEditedBookmarkName = selectedNames[0];
+        }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            style::tooltip("Change the selected bookmark - including its notes.\n"
+                           "Select exactly one to use this.");
         }
         if (selectedNames.size() != 1 && _this->selectedListName != "") { style::endDisabled(); }
 
@@ -1090,6 +1110,12 @@ private:
             ImGui::TableSetupColumn("Bookmark");
             ImGui::TableSetupScrollFreeze(2, 1);
             ImGui::TableHeadersRow();
+            // Said once at the top of the list rather than on every row, where it
+            // would fight with the notes tooltip for the same hover.
+            if (ImGui::IsItemHovered()) {
+                style::tooltip("Double click a bookmark to tune to it. Click to select, shift or\n"
+                               "ctrl click for several. A * means it has notes - hover to read them.");
+            }
             for (auto& [name, bm] : _this->bookmarks) {
                 bool vfoMissing = !bm.vfoName.empty() && !sigpath::vfoManager.vfoExists(bm.vfoName);
                 ImGui::TableNextRow();
@@ -1117,19 +1143,20 @@ private:
                 // One tooltip for the row, so a bookmark that is both missing its radio
                 // and carries notes says both rather than whichever was checked first.
                 if (ImGui::IsItemHovered() && (vfoMissing || !bm.notes.empty())) {
-                    ImGui::BeginTooltip();
-                    if (vfoMissing) {
-                        ImGui::Text("Radio \"%s\" is not available", bm.vfoName.c_str());
-                        if (!bm.notes.empty()) { ImGui::Separator(); }
+                    if (style::beginTooltip()) {
+                        if (vfoMissing) {
+                            ImGui::Text("Radio \"%s\" is not available", bm.vfoName.c_str());
+                            if (!bm.notes.empty()) { ImGui::Separator(); }
+                        }
+                        if (!bm.notes.empty()) {
+                            // Wrapped rather than left to run off the screen: notes are
+                            // free text and some of them are paragraphs.
+                            ImGui::PushTextWrapPos(400.0f * style::uiScale);
+                            ImGui::TextUnformatted(bm.notes.c_str());
+                            ImGui::PopTextWrapPos();
+                        }
+                        style::endTooltip();
                     }
-                    if (!bm.notes.empty()) {
-                        // Wrapped rather than left to run off the screen: notes are
-                        // free text and some of them are paragraphs.
-                        ImGui::PushTextWrapPos(400.0f * style::uiScale);
-                        ImGui::TextUnformatted(bm.notes.c_str());
-                        ImGui::PopTextWrapPos();
-                    }
-                    ImGui::EndTooltip();
                 }
                 if (ImGui::TableGetHoveredColumn() >= 0 && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
                     applyBookmark(bm, gui::waterfall.selectedVFO);
@@ -1159,10 +1186,14 @@ private:
 
 
         if (selectedNames.size() != 1 && _this->selectedListName != "") { style::beginDisabled(); }
-        if (ImGui::Button(("Apply##_freq_mgr_apply_" + _this->name).c_str(), ImVec2(menuWidth, 0))) {
+        if (ImGui::Button(("Tune to bookmark##_freq_mgr_apply_" + _this->name).c_str(), ImVec2(menuWidth, 0))) {
             FrequencyBookmark& bm = _this->bookmarks[selectedNames[0]];
             applyBookmark(bm, gui::waterfall.selectedVFO);
             bm.selected = false;
+        }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            style::tooltip("Puts the radio on the selected bookmark - frequency, mode, bandwidth\n"
+                           "and its tone settings. Double clicking a row in the list does the same.");
         }
         if (selectedNames.size() != 1 && _this->selectedListName != "") { style::endDisabled(); }
 
@@ -1174,6 +1205,11 @@ private:
         if (ImGui::Button(("Import##_freq_mgr_imp_" + _this->name).c_str(), ImVec2(ImGui::GetContentRegionAvail().x, 0)) && !_this->importOpen) {
             _this->importOpen = true;
             _this->importDialog = new pfd::open_file("Import bookmarks", "", { "JSON Files (*.json)", "*.json", "All Files", "*" }, pfd::opt::multiselect);
+        }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            style::tooltip("Read a list exported from another copy of this program. Bookmarks\n"
+                           "whose names are already in the list are left alone.\n"
+                           "For a spreadsheet, use Import CSV below.");
         }
 
         ImGui::TableSetColumnIndex(1);
@@ -1188,6 +1224,11 @@ private:
             _this->exportOpen = true;
             _this->exportDialog = new pfd::save_file("Export bookmarks", "", { "JSON Files (*.json)", "*.json", "All Files", "*" });
         }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            style::tooltip("Write the selected bookmarks in this program's own format, which\n"
+                           "keeps everything exactly. Select some first.\n"
+                           "For something a spreadsheet can open, use Export CSV below.");
+        }
         if (selectedNames.size() == 0 && _this->selectedListName != "") { style::endDisabled(); }
 
         // Second row: the same two things in the format a spreadsheet can open.
@@ -1198,7 +1239,7 @@ private:
             _this->importCsvDialog = new pfd::open_file("Import bookmarks from CSV", "", { "CSV Files (*.csv)", "*.csv", "All Files", "*" });
         }
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-            ImGui::SetTooltip("Reads a spreadsheet into the selected list. Needs at least a\n"
+            style::tooltip("Reads a spreadsheet into the selected list. Needs at least a\n"
                               "'name' and a 'frequency' column; every other column is optional\n"
                               "and the order does not matter. Bookmarks already in the list are\n"
                               "updated, new ones are added, and nothing is deleted.");
@@ -1217,7 +1258,7 @@ private:
             _this->exportCsvDialog = new pfd::save_file("Export bookmarks to CSV", "", { "CSV Files (*.csv)", "*.csv", "All Files", "*" });
         }
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-            ImGui::SetTooltip("Writes the selected bookmarks, or the whole list if none are\n"
+            style::tooltip("Writes the selected bookmarks, or the whole list if none are\n"
                               "selected, as a spreadsheet - frequency, mode, tone settings and\n"
                               "notes, one channel per row.");
         }
@@ -1225,6 +1266,10 @@ private:
 
         if (ImGui::Button(("Select displayed lists##_freq_mgr_exp_" + _this->name).c_str(), ImVec2(menuWidth, 0))) {
             _this->selectListsOpen = true;
+        }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            style::tooltip("Choose which lists draw their bookmarks on the waterfall. A list can\n"
+                           "be kept without having it marked up on the spectrum.");
         }
 
         ImGui::LeftLabel("Bookmark display mode");
@@ -1470,18 +1515,19 @@ private:
             applyBookmark(hoveredBookmark.bookmark, gui::waterfall.selectedVFO);
         }
 
-        ImGui::BeginTooltip();
-        ImGui::TextUnformatted(hoveredBookmarkName.c_str());
-        ImGui::Separator();
-        ImGui::Text("List: %s", hoveredBookmark.listName.c_str());
-        ImGui::Text("Frequency: %s", utils::formatFreq(hoveredBookmark.bookmark.frequency).c_str());
-        ImGui::Text("Bandwidth: %s", utils::formatFreq(hoveredBookmark.bookmark.bandwidth).c_str());
-        if (!hoveredBookmark.bookmark.vfoName.empty() && !sigpath::vfoManager.vfoExists(hoveredBookmark.bookmark.vfoName)) {
-            ImGui::TextColored(ImVec4(1.0f, 0.25f, 0.25f, 1.0f), "Radio \"%s\" is not available", hoveredBookmark.bookmark.vfoName.c_str());
-        } else {
-            ImGui::Text("Mode: %s", (radio != nullptr) ? demodModeName(radio->getDemodByIndex(hoveredBookmark.bookmark.modeIndex)).c_str() : "");
+        if (style::beginTooltip()) {
+            ImGui::TextUnformatted(hoveredBookmarkName.c_str());
+            ImGui::Separator();
+            ImGui::Text("List: %s", hoveredBookmark.listName.c_str());
+            ImGui::Text("Frequency: %s", utils::formatFreq(hoveredBookmark.bookmark.frequency).c_str());
+            ImGui::Text("Bandwidth: %s", utils::formatFreq(hoveredBookmark.bookmark.bandwidth).c_str());
+            if (!hoveredBookmark.bookmark.vfoName.empty() && !sigpath::vfoManager.vfoExists(hoveredBookmark.bookmark.vfoName)) {
+                ImGui::TextColored(ImVec4(1.0f, 0.25f, 0.25f, 1.0f), "Radio \"%s\" is not available", hoveredBookmark.bookmark.vfoName.c_str());
+            } else {
+                ImGui::Text("Mode: %s", (radio != nullptr) ? demodModeName(radio->getDemodByIndex(hoveredBookmark.bookmark.modeIndex)).c_str() : "");
+            }
+            style::endTooltip();
         }
-        ImGui::EndTooltip();
     }
 
     json exportedBookmarks;

@@ -105,7 +105,7 @@ namespace demod {
         ImGui::ProgressBar(smoothed, ImVec2(ImGui::GetContentRegionAvail().x, 0), overlay);
         ImGui::PopStyleColor();
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("mbelib: %s\n'=' corrected bit error, E erasure, T tone, R repeat, M muted",
+            style::tooltip("mbelib: %s\n'=' corrected bit error, E erasure, T tone, R repeat, M muted",
                               errorbar.empty() ? "(none)" : errorbar.c_str());
         }
         (void)idSuffix;

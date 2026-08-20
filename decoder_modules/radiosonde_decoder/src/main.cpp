@@ -333,7 +333,7 @@ void RadiosondeDecoderModule::menuHandler(void* ctx) {
         ImGui::EndCombo();
     }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-        ImGui::SetTooltip("Which family of sonde to decode. They are not interchangeable, and there is\n"
+        style::tooltip("Which family of sonde to decode. They are not interchangeable, and there is\n"
                           "no auto detection: if you do not know, RS41 is the most widely flown, and\n"
                           "the channel width changes with the choice so a wrong pick usually looks\n"
                           "obviously wrong on the waterfall.\n"
@@ -377,14 +377,14 @@ void RadiosondeDecoderModule::drawTelemetry() {
         if (types[selectedType].decoder == &imet54decoder) {
             ImGui::Separator();
             ImGui::TextDisabled("Framed    %d", imet54_stat_framed);
-            if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Times the sync word was found. Zero means it is not seeing the signal at\nall - check the frequency, and that the channel covers the whole of it."); }
+            if (ImGui::IsItemHovered()) { style::tooltip("Times the sync word was found. Zero means it is not seeing the signal at\nall - check the frequency, and that the channel covers the whole of it."); }
             ImGui::TextDisabled("FEC fail  %d", imet54_stat_ecc_fail);
-            if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Framed, but the payload did not survive error correction. If this tracks\nFramed one for one, the payload is being read from the wrong offset."); }
+            if (ImGui::IsItemHovered()) { style::tooltip("Framed, but the payload did not survive error correction. If this tracks\nFramed one for one, the payload is being read from the wrong offset."); }
             ImGui::TextDisabled("CRC fail  %d", imet54_stat_crc_fail);
-            if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Error correction succeeded and the checksum still disagreed."); }
+            if (ImGui::IsItemHovered()) { style::tooltip("Error correction succeeded and the checksum still disagreed."); }
             ImGui::TextDisabled("Bad words %d / 216", imet54_stat_last_bad);
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Codewords in the last frame that error correction could not repair.\n"
+                style::tooltip("Codewords in the last frame that error correction could not repair.\n"
                                   "A handful is a weak signal and the checksum will sort it out.\n"
                                   "A hundred or more means the payload is being read from the wrong\n"
                                   "place - random bytes almost never land on a valid codeword.");
@@ -394,10 +394,10 @@ void RadiosondeDecoderModule::drawTelemetry() {
     }
 
     ImGui::Text("Serial    %s", d.serial.empty() ? "-" : d.serial.c_str());
-    if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Printed on the sonde. This is what identifies the flight on tracking sites."); }
+    if (ImGui::IsItemHovered()) { style::tooltip("Printed on the sonde. This is what identifies the flight on tracking sites."); }
 
     ImGui::Text("Frame     %d", d.seq);
-    if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Sequence number from the sonde, and %d frames decoded since it was tuned", frames); }
+    if (ImGui::IsItemHovered()) { style::tooltip("Sequence number from the sonde, and %d frames decoded since it was tuned", frames); }
 
     if (d.time > 0) {
         char when[64] = "-";
@@ -414,7 +414,7 @@ void RadiosondeDecoderModule::drawTelemetry() {
     // age of that frame has to be visible or the panel looks live when it is not.
     if (age > 10.0) {
         ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.3f, 1.0f), "Last      %.0f s ago", age);
-        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Nothing has decoded recently. Everything above and below is from that frame."); }
+        if (ImGui::IsItemHovered()) { style::tooltip("Nothing has decoded recently. Everything above and below is from that frame."); }
     }
     else {
         ImGui::TextDisabled("Last      %.0f s ago", age);
@@ -423,7 +423,7 @@ void RadiosondeDecoderModule::drawTelemetry() {
     if (!d.calibrated) {
         ImGui::TextColored(ImVec4(1.0f, 0.9f, 0.0f, 1.0f), "Calibrat. %.0f%%", d.calib_percent);
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("The sonde sends its calibration a piece at a time, over a minute or two.\n"
+            style::tooltip("The sonde sends its calibration a piece at a time, over a minute or two.\n"
                               "Until it is complete the temperature and humidity below are approximate.");
         }
     }
@@ -433,7 +433,7 @@ void RadiosondeDecoderModule::drawTelemetry() {
 
     if (d.burstkill > 0) {
         ImGui::Text("Shutdown  in %d s", d.burstkill);
-        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("The sonde is on a timer and will switch itself off"); }
+        if (ImGui::IsItemHovered()) { style::tooltip("The sonde is on a timer and will switch itself off"); }
     }
 
     ImGui::SectionHeader("POSITION");
@@ -456,12 +456,12 @@ void RadiosondeDecoderModule::drawTelemetry() {
     else if (d.climb > 0.0f) { ImGui::Text("Climb     up %.1f m/s", d.climb); }
     else { ImGui::Text("Climb     down %.1f m/s", -d.climb); }
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Around 5 m/s up is a normal ascent. A sharp change to a fast descent is the\n"
+        style::tooltip("Around 5 m/s up is a normal ascent. A sharp change to a fast descent is the\n"
                           "balloon bursting, usually somewhere above 25 km.");
     }
 
     ImGui::Text("Ground    %.0f km/h, %s", d.spd * 3.6f, compassPoint(d.hdg));
-    if (ImGui::IsItemHovered()) { ImGui::SetTooltip("How fast the wind is carrying it, and which way it is going"); }
+    if (ImGui::IsItemHovered()) { style::tooltip("How fast the wind is carrying it, and which way it is going"); }
 
     // Where to point, from the grid square in the Source menu.
     utils::BearingDistance bd;
@@ -469,14 +469,14 @@ void RadiosondeDecoderModule::drawTelemetry() {
     if (bearingFromOperator(d, bd, elevation)) {
         ImGui::Text("From you  %s %s", fmtDistance(bd.distance).c_str(), compassPoint(bd.bearing));
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Distance and direction from your grid square, and %.0f degrees above the\n"
+            style::tooltip("Distance and direction from your grid square, and %.0f degrees above the\n"
                               "horizon. Set the grid square in the Source menu.", elevation);
         }
         ImGui::Text("Elevation %.0f deg", elevation);
     }
     else {
         ImGui::Text("From you  -");
-        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Set your grid square in the Source menu and this shows the distance,\nthe direction and how far above the horizon it is."); }
+        if (ImGui::IsItemHovered()) { style::tooltip("Set your grid square in the Source menu and this shows the distance,\nthe direction and how far above the horizon it is."); }
         ImGui::Text("Elevation -");
     }
 
@@ -487,13 +487,13 @@ void RadiosondeDecoderModule::drawTelemetry() {
     ImGui::Text("Dew point %.1f C", d.dewpt);
     ImGui::Text("Pressure  %.1f hPa", d.pressure);
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Measured on the way up. This is the actual point of the flight: these are\n"
+        style::tooltip("Measured on the way up. This is the actual point of the flight: these are\n"
                           "the readings that go into weather forecasting models.");
     }
 
     if (!d.auxData.empty()) {
         ImGui::Text("Aux       %s", d.auxData.c_str());
-        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Extra instrument data, most often an ozone sonde"); }
+        if (ImGui::IsItemHovered()) { style::tooltip("Extra instrument data, most often an ozone sonde"); }
     }
 }
 
@@ -571,7 +571,7 @@ void RadiosondeDecoderModule::drawTrack() {
         ImGui::TextDisabled("%s to %s over %.0f min", fmtAltitude(lowest).c_str(),
                             fmtAltitude(highest).c_str(), (double)(lastTime - firstTime) / 60000.0);
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Altitude against time since this sonde was tuned. The peak is the burst;\n"
+            style::tooltip("Altitude against time since this sonde was tuned. The peak is the burst;\n"
                               "after it the descent is much steeper than the climb.");
         }
     }
@@ -601,7 +601,7 @@ void RadiosondeDecoderModule::drawLogging() {
         config.conf[name]["logPath"] = std::string(logPath);
         config.release(true);
     }
-    if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Reopened when the tick box above is turned off and on again"); }
+    if (ImGui::IsItemHovered()) { style::tooltip("Reopened when the tick box above is turned off and on again"); }
 
     if (!logStatus.empty()) {
         ImGui::PushTextWrapPos(0.0f);

@@ -444,7 +444,9 @@ namespace ImGui {
         mouseInFFT = hasMouse && IS_IN_AREA(dragOrigin, fftAreaMin, fftAreaMax);
         mouseInWaterfall = hasMouse && IS_IN_AREA(dragOrigin, wfMin, wfMax);
 
-        int mouseWheel = ImGui::GetIO().MouseWheel;
+        // Not an int. Truncating threw away every movement smaller than one notch,
+        // which is what a trackpad and a high resolution wheel produce.
+        float mouseWheel = ImGui::GetIO().MouseWheel;
 
         bool mouseMoved = false;
         if (mousePos.x != lastMousePos.x || mousePos.y != lastMousePos.y) { mouseMoved = true; }
@@ -521,7 +523,7 @@ namespace ImGui {
 
             // Now, check frequency scale
             if (!targetFound && mouseInFreq) {
-                freqScaleSelect = true;
+                if (freqScaleInteractive) { freqScaleSelect = true; }
             }
         }
 
@@ -587,7 +589,7 @@ namespace ImGui {
         }
 
         // If the mouse wheel is moved on the frequency scale
-        if (mouseWheel != 0 && mouseInFreq) {
+        if (mouseWheel != 0 && mouseInFreq && freqScaleInteractive) {
             viewOffset -= (double)mouseWheel * viewBandwidth / 20.0;
 
             if (viewOffset + (viewBandwidth / 2.0) > wholeBandwidth / 2.0) {
@@ -659,30 +661,31 @@ namespace ImGui {
             for (auto const& [name, _vfo] : vfos) {
                 if (ImGui::IsMouseHoveringRect(_vfo->rectMin, _vfo->rectMax) || ImGui::IsMouseHoveringRect(_vfo->wfRectMin, _vfo->wfRectMax)) {
                     char buf[128];
-                    ImGui::BeginTooltip();
+                    if (style::beginTooltip()) {
 
-                    ImGui::TextUnformatted(name.c_str());
+                        ImGui::TextUnformatted(name.c_str());
 
-                    if (ImGui::GetIO().KeyCtrl) {
-                        ImGui::Separator();
-                        printAndScale(_vfo->generalOffset + centerFreq, buf);
-                        ImGui::Text("Frequency: %sHz", buf);
-                        printAndScale(_vfo->bandwidth, buf);
-                        ImGui::Text("Bandwidth: %sHz", buf);
-                        ImGui::Text("Bandwidth Locked: %s", _vfo->bandwidthLocked ? "Yes" : "No");
+                        if (ImGui::GetIO().KeyCtrl) {
+                            ImGui::Separator();
+                            printAndScale(_vfo->generalOffset + centerFreq, buf);
+                            ImGui::Text("Frequency: %sHz", buf);
+                            printAndScale(_vfo->bandwidth, buf);
+                            ImGui::Text("Bandwidth: %sHz", buf);
+                            ImGui::Text("Bandwidth Locked: %s", _vfo->bandwidthLocked ? "Yes" : "No");
 
-                        float strength, snr;
-                        if (calculateVFOSignalInfo(waterfallVisible ? &rawFFTs[currentFFTLine * rawFFTSize] : rawFFTs, _vfo, strength, snr)) {
-                            ImGui::Text("Strength: %0.1fdBFS", strength);
-                            ImGui::Text("SNR: %0.1fdB", snr);
+                            float strength, snr;
+                            if (calculateVFOSignalInfo(waterfallVisible ? &rawFFTs[currentFFTLine * rawFFTSize] : rawFFTs, _vfo, strength, snr)) {
+                                ImGui::Text("Strength: %0.1fdBFS", strength);
+                                ImGui::Text("SNR: %0.1fdB", snr);
+                            }
+                            else {
+                                ImGui::TextUnformatted("Strength: ---.-dBFS");
+                                ImGui::TextUnformatted("SNR: ---.-dB");
+                            }
                         }
-                        else {
-                            ImGui::TextUnformatted("Strength: ---.-dBFS");
-                            ImGui::TextUnformatted("SNR: ---.-dB");
-                        }
+
+                        style::endTooltip();
                     }
-
-                    ImGui::EndTooltip();
                     break;
                 }
             }
@@ -695,7 +698,7 @@ namespace ImGui {
             double mouseFreq = lowerFreq + (mouseXRel / (double)dataWidth) * freqRange;
             char buf[128];
             printAndScale(mouseFreq, buf);
-            ImGui::SetTooltip("Frequency: %sHz", buf);
+            style::tooltip("Frequency: %sHz", buf);
         }
 
         // Handle Page Up to cycle through VFOs

@@ -27,6 +27,15 @@ namespace displaymenu {
     extern bool showBattery;
     extern bool detectSignals;
     extern bool showFFT;
+    // The height of the strip below the waterfall - the audio waterfall and anything
+    // else that lives down there - as a fraction of the window. Adjustable because
+    // one fixed value cannot suit both a laptop panel and a desktop monitor.
+    extern float bottomWindowFrac;
+    // Small enough to be a sliver, not small enough to lose the grip that resizes it;
+    // large enough to read a waterfall in, not large enough to squeeze the spectrum
+    // out of existence.
+    static const float BOTTOM_WINDOW_MIN_FRAC = 0.06f;
+    static const float BOTTOM_WINDOW_MAX_FRAC = 0.60f;
     // The FFT shadow became the Theme menu's "Fill style", which does the same thing
     // with a choice of solid or gradient and an adjustable strength.
     extern bool showMicHistogram;

@@ -567,7 +567,7 @@ private:
                 _this->setBandwidth(_this->bandwidth);
             }
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Width of the channel, in Hz. The slider stops at what is sensible for\nthis mode; the box on the left takes anything up to %.0f Hz.", _this->maxBandwidth);
+                style::tooltip("Width of the channel, in Hz. The slider stops at what is sensible for\nthis mode; the box on the left takes anything up to %.0f Hz.", _this->maxBandwidth);
             }
         }
 
@@ -584,7 +584,7 @@ private:
             }
         }
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Tuning snaps to a multiple of this many Hz, so the VFO lands on channel\nspacing rather than between channels. It is also the step the arrow keys\nand the mouse wheel tune by.");
+            style::tooltip("Tuning snaps to a multiple of this many Hz, so the VFO lands on channel\nspacing rather than between channels. It is also the step the arrow keys\nand the mouse wheel tune by.");
         }
 
         // Everything from here down is about keeping unwanted audio out: the blanker,
@@ -608,7 +608,7 @@ private:
             }
             if (!_this->nbEnabled && _this->enabled) { style::endDisabled(); }
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-                ImGui::SetTooltip("Squashes samples louder than this many times the running average, which\nflattens ignition and power line clicks. Lower catches more, and starts\neating the signal too.");
+                style::tooltip("Squashes samples louder than this many times the running average, which\nflattens ignition and power line clicks. Lower catches more, and starts\neating the signal too.");
             }
         }
         
@@ -625,7 +625,7 @@ private:
         }
         if (!_this->squelchEnabled && _this->enabled) { style::endDisabled(); }
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-            ImGui::SetTooltip("Mutes the audio until the channel is louder than this. While it is on, the\nlevel is drawn as a line across the spectrum, so set it just above where\nthe noise sits.");
+            style::tooltip("Mutes the audio until the channel is louder than this. While it is on, the\nlevel is drawn as a line across the spectrum, so set it just above where\nthe noise sits.");
         }
 
         // CTCSS / DCS identification and tone squelch
@@ -660,13 +660,13 @@ private:
                 if (!canUse) { style::endDisabled(); }
                 if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
                     if (listFull) {
-                        ImGui::SetTooltip("The list is full.");
+                        style::tooltip("The list is full.");
                     }
                     else if (listMode) {
-                        ImGui::SetTooltip("Adds the tone shown above to the list of codes this channel\nopens for, and leaves the rest of the list alone.");
+                        style::tooltip("Adds the tone shown above to the list of codes this channel\nopens for, and leaves the rest of the list alone.");
                     }
                     else {
-                        ImGui::SetTooltip("Switches the tone squelch on and sets it to the tone shown above,\nwithout having to find it in the picker.");
+                        style::tooltip("Switches the tone squelch on and sets it to the tone shown above,\nwithout having to find it in the picker.");
                     }
                 }
             }
@@ -675,7 +675,7 @@ private:
                 _this->updateToneBlock(true);
             }
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("High passes the audio at 300 Hz so the sub-audible tone is\n"
+                style::tooltip("High passes the audio at 300 Hz so the sub-audible tone is\n"
                                   "not heard, the way a handheld does. Use this rather than the\n"
                                   "demodulator's own High Pass, which strips the tone before it\n"
                                   "can be identified.");
@@ -716,7 +716,7 @@ private:
                     _this->updateToneBlock(true);
                 }
                 if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-                    ImGui::SetTooltip("CTCSS or DCS opens for one code, the way a radio does.\n"
+                    style::tooltip("CTCSS or DCS opens for one code, the way a radio does.\n"
                                       "Any tone opens for whatever code it can decode, for a channel\n"
                                       "whose users you do not know yet.\n"
                                       "Custom list opens for the handful of codes you name and keeps\n"
@@ -761,7 +761,7 @@ private:
                     _this->updateToneBlock(true);
                 }
                 if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-                    ImGui::SetTooltip("A radio finishing a transmission flips the phase of its CTCSS tone\n"
+                    style::tooltip("A radio finishing a transmission flips the phase of its CTCSS tone\n"
                                       "for a moment before dropping the carrier, and sends a 134.4 Hz\n"
                                       "turn-off code at the end of a DCS one. Watching for those closes\n"
                                       "the squelch as the transmission ends rather than a sixth of a\n"

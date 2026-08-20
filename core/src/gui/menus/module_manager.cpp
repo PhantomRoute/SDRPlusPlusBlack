@@ -56,7 +56,7 @@ namespace module_manager_menu {
 
         ImGui::TextDisabled("Running module instances");
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("One row per copy of a module that is loaded: a radio, a recorder, a\n"
+            style::tooltip("One row per copy of a module that is loaded: a radio, a recorder, a\n"
                               "decoder, a source. Unticking one shuts it down and takes its section\n"
                               "out of the menu without deleting its settings. Changes here are kept\n"
                               "across restarts.");
@@ -110,7 +110,7 @@ namespace module_manager_menu {
                     toBeRemoved = name;
                     confirmOpened = true;
                 }
-                if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Delete \"%s\" and its settings", name.c_str()); }
+                if (ImGui::IsItemHovered()) { style::tooltip("Delete \"%s\" and its settings", name.c_str()); }
             }
             ImGui::EndTable();
         }
@@ -157,7 +157,7 @@ namespace module_manager_menu {
                 }
             }
             if (!addBlocked.empty()) { style::endDisabled(); }
-            if (addBlocked.empty() && ImGui::IsItemHovered()) { ImGui::SetTooltip("Add this instance"); }
+            if (addBlocked.empty() && ImGui::IsItemHovered()) { style::tooltip("Add this instance"); }
             ImGui::EndTable();
         }
 

@@ -1005,7 +1005,7 @@ public:
             }
         }
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Meteor scatter, on 6m and 2m. Not yet confirmed against a real signal -\n"
+            style::tooltip("Meteor scatter, on 6m and 2m. Not yet confirmed against a real signal -\n"
                               "the decoder behind it is the same proven MSHV engine FT8 uses, but this\n"
                               "is the first thing to point it at MSK144. Off by default.");
         }
@@ -1173,17 +1173,18 @@ void FT8DrawableDecodedResult::draw(const ImVec2& _origin, ImGuiWindow* window) 
 
     if (ImGui::IsMouseHoveringRect(origin, maxCorner) && !gui::mainWindow.showMenu) {
         char buf[128];
-        ImGui::BeginTooltip();
+        if (style::beginTooltip()) {
 
-        ImGui::Text("Distance: %0.0f km", result->distance);
-        ImGui::Separator();
-        ImGui::Text("Strength: %0.0f dB", result->strengthRaw);
-        ImGui::Separator();
-        ImGui::Text("QTH: %s", result->qth.c_str());
-        ImGui::Separator();
-        ImGui::Text("Message: %s", result->detailedString.c_str());
+            ImGui::Text("Distance: %0.0f km", result->distance);
+            ImGui::Separator();
+            ImGui::Text("Strength: %0.0f dB", result->strengthRaw);
+            ImGui::Separator();
+            ImGui::Text("QTH: %s", result->qth.c_str());
+            ImGui::Separator();
+            ImGui::Text("Message: %s", result->detailedString.c_str());
 
-        ImGui::EndTooltip();
+            style::endTooltip();
+        }
     }
 
 

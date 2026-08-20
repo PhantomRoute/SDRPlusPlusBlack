@@ -2630,7 +2630,7 @@ void MobileMainWindow::init() {
             core::configManager.release(true);
         }
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("The spectrum of your microphone, in a panel along the bottom next to\n"
+            style::tooltip("The spectrum of your microphone, in a panel along the bottom next to\n"
                               "the audio waterfall. Opens the microphone and runs the transmit audio\n"
                               "chain for as long as it is on.");
         }

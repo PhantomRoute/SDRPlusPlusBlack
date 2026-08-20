@@ -141,7 +141,7 @@ public:
             config.release(true);
         }
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-            ImGui::SetTooltip("Address and port for the audio. What they mean depends on the protocol\n"
+            style::tooltip("Address and port for the audio. What they mean depends on the protocol\n"
                               "below: with UDP the audio is sent to them, with TCP the sink listens on\n"
                               "them and waits for something to connect.");
         }

@@ -514,7 +514,7 @@ void Scanner::drawTransport() {
     if (ImGui::Button("Stop##scanner_stop", ImVec2(btnWidth, 0))) { stop(); }
     ImGui::SameLine();
     if (ImGui::Button("<##scanner_prev", ImVec2(btnWidth, 0))) { step(-1); }
-    if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Back to the previous channel"); }
+    if (ImGui::IsItemHovered()) { style::tooltip("Back to the previous channel"); }
     ImGui::SameLine();
     if (state == SCAN_HELD) {
         if (ImGui::Button("Resume##scanner_hold", ImVec2(btnWidth, 0))) {
@@ -527,10 +527,10 @@ void Scanner::drawTransport() {
             enterState(SCAN_HELD);
         }
     }
-    if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Stay on this channel until you resume"); }
+    if (ImGui::IsItemHovered()) { style::tooltip("Stay on this channel until you resume"); }
     ImGui::SameLine();
     if (ImGui::Button(">##scanner_next", ImVec2(btnWidth, 0))) { step(1); }
-    if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Move on to the next channel"); }
+    if (ImGui::IsItemHovered()) { style::tooltip("Move on to the next channel"); }
 
     if (ImGui::Button("Skip this channel##scanner_skip", ImVec2(width, 0))) {
         if (!currentStation.empty()) {
@@ -541,7 +541,7 @@ void Scanner::drawTransport() {
             step(1);
         }
     }
-    if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Leave this channel out of the scan from now on"); }
+    if (ImGui::IsItemHovered()) { style::tooltip("Leave this channel out of the scan from now on"); }
 }
 
 void Scanner::drawStatus() {
@@ -615,7 +615,7 @@ void Scanner::drawMeter() {
         trigger = getTriggerLevel();
     }
     if (ImGui::IsItemDeactivated()) { saveSetting("noiseFloor", noiseFloor); }
-    if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Signal on the current channel, in dB over the noise around it.\nDrag to set the level a channel has to beat."); }
+    if (ImGui::IsItemHovered()) { style::tooltip("Signal on the current channel, in dB over the noise around it.\nDrag to set the level a channel has to beat."); }
 
     ImDrawList* draw = ImGui::GetWindowDrawList();
     ImVec2 boxMin = pos;
@@ -682,7 +682,7 @@ void Scanner::drawActivity() {
                 applyBookmark(it->second, gui::waterfall.selectedVFO);
             }
         }
-        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Stop the scan and go back to this channel"); }
+        if (ImGui::IsItemHovered()) { style::tooltip("Stop the scan and go back to this channel"); }
     }
     ImGui::TreePop();
 }
@@ -721,7 +721,7 @@ void Scanner::drawSettings() {
             saveSetting("noiseFloor", noiseFloor);
         }
     }
-    if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Take the last half second of the current channel as the noise floor.\nTune to an empty channel first."); }
+    if (ImGui::IsItemHovered()) { style::tooltip("Take the last half second of the current channel as the noise floor.\nTune to an empty channel first."); }
 
     ImGui::SectionHeader("TIMING");
 

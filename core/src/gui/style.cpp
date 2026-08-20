@@ -1,4 +1,5 @@
 #include <gui/style.h>
+#include <cstdarg>
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <config.h>
@@ -90,6 +91,26 @@ namespace style {
         ImGui::PushStyleColor(ImGuiCol_Text, textCol);
     }
 
+    bool showTooltips = true;
+
+    void tooltip(const char* fmt, ...) {
+        if (!showTooltips) { return; }
+        va_list args;
+        va_start(args, fmt);
+        ImGui::SetTooltipV(fmt, args);
+        va_end(args);
+    }
+
+    bool beginTooltip() {
+        if (!showTooltips) { return false; }
+        ImGui::BeginTooltip();
+        return true;
+    }
+
+    void endTooltip() {
+        ImGui::EndTooltip();
+    }
+
     void endDisabled() {
         ImGui::PopItemFlag();
         ImGui::PopStyleColor(3);
@@ -116,6 +137,9 @@ namespace ImGui {
     }
 
     void HelpMarker(const char* text) {
+        // The whole marker goes when tooltips are off, rather than leaving a (?) that
+        // does nothing when you point at it.
+        if (!style::showTooltips) { return; }
         ImGui::SameLine();
         ImGui::TextDisabled("(?)");
         // AllowWhenDisabled: a control that is greyed out is exactly the one whose

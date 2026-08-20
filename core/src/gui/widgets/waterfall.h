@@ -185,6 +185,16 @@ namespace ImGui {
         bool mouseInWaterfall = false;
         bool horizontalScaleVisible = true;
 
+    // Whether dragging or scrolling the frequency scale does anything.
+    //
+    // False for the audio waterfall, whose span is fixed: the view already covers the
+    // whole of it, so there is nothing to pan to, and the code that handles a scroll
+    // at full zoom falls through to moving the centre frequency instead. On the main
+    // waterfall that is right - it retunes the radio. On an audio spectrum there is no
+    // radio to retune, so all it did was renumber the scale underneath a picture that
+    // had not moved.
+    bool freqScaleInteractive = true;
+
         float selectedVFOSNR = 0.0f;
 
         bool centerFrequencyLocked = false;
