@@ -18,6 +18,10 @@ struct FrequencyBookmark {
     // clearing them.
     bool hasTone = false;
     RadioToneSettings tone;
+    // Free text about the channel - who is on it, when it is worth listening to, the
+    // things that otherwise end up in a spreadsheet beside the program. Empty on every
+    // bookmark saved before this existed, which reads the same as having no notes.
+    std::string notes;
 };
 
 struct WaterfallBookmark {

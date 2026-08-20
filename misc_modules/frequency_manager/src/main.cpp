@@ -16,10 +16,14 @@
 #include "utils/wstr.h"
 #include "frequency_manager.h"
 #include "scanner.h"
+#include "bookmark_csv.h"
 #include "../../radio/src/radio_module_interface.h"
 #include "../../radio/src/tone_tables.h"
 #include <algorithm>
 #include <cmath>
+#include <iterator>
+#include <sstream>
+#include "gui/brown/imgui-notify/imgui_notify.h"
 
 SDRPP_MOD_INFO{
     /* Name:            */ "frequency_manager",
@@ -30,6 +34,11 @@ SDRPP_MOD_INFO{
 };
 
 ConfigManager config;
+
+// How much free text a bookmark's notes can hold. Generous rather than tight: this is
+// the field someone copies a repeater's whole entry from a printed list into, and a
+// note that gets cut off halfway is worse than no note at all.
+static const size_t NOTES_MAX = 8192;
 
 std::unordered_map<int, std::string> demodModeList;
 std::unordered_map<std::string, int> demodModeListRev;
@@ -43,6 +52,22 @@ std::string demodModeListTxt;
 static std::string demodModeName(int demodId) {
     auto it = demodModeList.find(demodId);
     return (it != demodModeList.end()) ? it->second : "Unknown";
+}
+
+// The reverse, for reading a mode back out of a file. Matched without regard to case
+// or spacing, because a list someone typed up themselves is as likely to say "nfm" as
+// "NFM", and quietly substituting the default mode over a difference in spelling would
+// put the radio on the wrong demodulator without saying so.
+static bool demodIdByName(const std::string& wanted, int* out) {
+    std::string w = csv::normaliseHeader(wanted);
+    if (w.empty()) { return false; }
+    for (const auto& [nm, id] : demodModeListRev) {
+        if (csv::normaliseHeader(nm) == w) {
+            *out = id;
+            return true;
+        }
+    }
+    return false;
 }
 
 enum {
@@ -589,6 +614,28 @@ private:
 
             ImGui::EndTable();
 
+            // Outside the table and full width: a two column layout gives a note about
+            // forty characters of room, which is not enough to be worth typing into.
+            ImGui::LeftLabel("Notes");
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("Anything worth remembering about the channel. Kept with the\n"
+                                  "bookmark, shown when you hover it in the list, and carried\n"
+                                  "through export and import.");
+            }
+            {
+                // ImGui edits a fixed buffer, so the text has to be copied in and back
+                // out again - the name field above works the same way.
+                char notesBuf[NOTES_MAX];
+                size_t n = editedBookmark.notes.size();
+                if (n >= sizeof(notesBuf)) { n = sizeof(notesBuf) - 1; }
+                memcpy(notesBuf, editedBookmark.notes.c_str(), n);
+                notesBuf[n] = 0;
+                if (ImGui::InputTextMultiline(("##freq_manager_edit_notes" + name).c_str(), notesBuf, sizeof(notesBuf),
+                                              ImVec2(-1.0f, ImGui::GetTextLineHeight() * 4.0f))) {
+                    editedBookmark.notes = notesBuf;
+                }
+            }
+
             bool applyDisabled = (strlen(nameBuf) == 0) || (bookmarks.find(editedBookmarkName) != bookmarks.end() && editedBookmarkName != firstEditedBookmarkName);
             if (applyDisabled) { style::beginDisabled(); }
             if (ImGui::Button("Apply")) {
@@ -766,6 +813,7 @@ private:
             fbm.vfoName = bm.value("vfo", "");
             fbm.hasTone = hasTone(bm);
             fbm.tone = loadTone(bm);
+            fbm.notes = bm.value("notes", "");
             fbm.selected = false;
             bookmarks[bmName] = fbm;
         }
@@ -862,6 +910,7 @@ private:
             flog::info("bm.modeIndex={}, demodId={}", (int)bm.modeIndex, (int)demodId);
             config.conf["lists"][listName]["bookmarks"][bmName]["mode"] = demodId;
             config.conf["lists"][listName]["bookmarks"][bmName]["vfo"] = bm.vfoName;
+            config.conf["lists"][listName]["bookmarks"][bmName]["notes"] = bm.notes;
             if (demodId == RADIO_DEMOD_NFM) {
                 saveTone(config.conf["lists"][listName]["bookmarks"][bmName], bm.tone);
             }
@@ -1064,11 +1113,23 @@ private:
                         }
                     }
                 }
-                if (vfoMissing) {
-                    style::endDisabled();
-                    if (ImGui::IsItemHovered()) {
-                        ImGui::SetTooltip("Radio \"%s\" is not available", bm.vfoName.c_str());
+                if (vfoMissing) { style::endDisabled(); }
+                // One tooltip for the row, so a bookmark that is both missing its radio
+                // and carries notes says both rather than whichever was checked first.
+                if (ImGui::IsItemHovered() && (vfoMissing || !bm.notes.empty())) {
+                    ImGui::BeginTooltip();
+                    if (vfoMissing) {
+                        ImGui::Text("Radio \"%s\" is not available", bm.vfoName.c_str());
+                        if (!bm.notes.empty()) { ImGui::Separator(); }
                     }
+                    if (!bm.notes.empty()) {
+                        // Wrapped rather than left to run off the screen: notes are
+                        // free text and some of them are paragraphs.
+                        ImGui::PushTextWrapPos(400.0f * style::uiScale);
+                        ImGui::TextUnformatted(bm.notes.c_str());
+                        ImGui::PopTextWrapPos();
+                    }
+                    ImGui::EndTooltip();
                 }
                 if (ImGui::TableGetHoveredColumn() >= 0 && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
                     applyBookmark(bm, gui::waterfall.selectedVFO);
@@ -1081,6 +1142,12 @@ private:
                     ImGui::TextColored(ImVec4(1.0f, 0.25f, 0.25f, 1.0f), "X");
                 } else {
                     ImGui::Text("%s %s", utils::formatFreq(bm.frequency).c_str(), (radio != nullptr) ? demodModeName(radio->getDemodByIndex(bm.modeIndex)).c_str() : "");
+                }
+                // A quiet marker, so that notes can be found without hovering every row
+                // in the list to look for them.
+                if (!bm.notes.empty()) {
+                    ImGui::SameLine();
+                    ImGui::TextDisabled("*");
                 }
 //		std::string modeStr = (radio != nullptr && bm.modeIndex >= 0) ? demodModeList[radio->getDemodByIndex(bm.modeIndex)] : "DIGITAL";
 //		ImGui::Text("%s %s", utils::formatFreq(bm.frequency).c_str(), modeStr.c_str());
@@ -1122,6 +1189,38 @@ private:
             _this->exportDialog = new pfd::save_file("Export bookmarks", "", { "JSON Files (*.json)", "*.json", "All Files", "*" });
         }
         if (selectedNames.size() == 0 && _this->selectedListName != "") { style::endDisabled(); }
+
+        // Second row: the same two things in the format a spreadsheet can open.
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        if (ImGui::Button(("Import CSV##_freq_mgr_impcsv_" + _this->name).c_str(), ImVec2(ImGui::GetContentRegionAvail().x, 0)) && !_this->importCsvOpen) {
+            _this->importCsvOpen = true;
+            _this->importCsvDialog = new pfd::open_file("Import bookmarks from CSV", "", { "CSV Files (*.csv)", "*.csv", "All Files", "*" });
+        }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            ImGui::SetTooltip("Reads a spreadsheet into the selected list. Needs at least a\n"
+                              "'name' and a 'frequency' column; every other column is optional\n"
+                              "and the order does not matter. Bookmarks already in the list are\n"
+                              "updated, new ones are added, and nothing is deleted.");
+        }
+
+        ImGui::TableSetColumnIndex(1);
+        if (ImGui::Button(("Export CSV##_freq_mgr_expcsv_" + _this->name).c_str(), ImVec2(ImGui::GetContentRegionAvail().x, 0)) && !_this->exportCsvOpen) {
+            // The selection if there is one, the whole list otherwise - exporting a
+            // frequency list usually means all of it, and having to select every row
+            // first would be a chore.
+            _this->exportCsvNames = selectedNames;
+            if (_this->exportCsvNames.empty()) {
+                for (auto& [bmName, bm] : _this->bookmarks) { _this->exportCsvNames.push_back(bmName); }
+            }
+            _this->exportCsvOpen = true;
+            _this->exportCsvDialog = new pfd::save_file("Export bookmarks to CSV", "", { "CSV Files (*.csv)", "*.csv", "All Files", "*" });
+        }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            ImGui::SetTooltip("Writes the selected bookmarks, or the whole list if none are\n"
+                              "selected, as a spreadsheet - frequency, mode, tone settings and\n"
+                              "notes, one channel per row.");
+        }
         ImGui::EndTable();
 
         if (ImGui::Button(("Select displayed lists##_freq_mgr_exp_" + _this->name).c_str(), ImVec2(menuWidth, 0))) {
@@ -1174,6 +1273,37 @@ private:
                 _this->exportBookmarks(path);
             }
             delete _this->exportDialog;
+        }
+
+        if (_this->importCsvOpen && _this->importCsvDialog->ready()) {
+            _this->importCsvOpen = false;
+            std::vector<std::string> paths = _this->importCsvDialog->result();
+            if (paths.size() > 0 && _this->listNames.size() > 0) {
+                _this->reportCsvImport(_this->importBookmarksCsv(paths[0]));
+            }
+            delete _this->importCsvDialog;
+            _this->importCsvDialog = NULL;
+        }
+        if (_this->exportCsvOpen && _this->exportCsvDialog->ready()) {
+            _this->exportCsvOpen = false;
+            std::string path = _this->exportCsvDialog->result();
+            if (path != "") {
+                // The file chooser does not always put the extension on, and a
+                // frequency list saved without one will not open in a spreadsheet by
+                // double clicking it.
+                if (path.size() < 4 || csv::normaliseHeader(path.substr(path.size() - 4)) != ".csv") {
+                    path += ".csv";
+                }
+                if (_this->exportBookmarksCsv(path, _this->exportCsvNames)) {
+                    ImGui::InsertNotification({ ImGuiToastType_Success, 5000,
+                                                "Exported %d bookmark(s).", (int)_this->exportCsvNames.size() });
+                }
+                else {
+                    ImGui::InsertNotification({ ImGuiToastType_Error, 6000, "Could not write that file." });
+                }
+            }
+            delete _this->exportCsvDialog;
+            _this->exportCsvDialog = NULL;
         }
     }
 
@@ -1360,6 +1490,15 @@ private:
     pfd::open_file* importDialog;
     pfd::save_file* exportDialog;
 
+    bool importCsvOpen = false;
+    bool exportCsvOpen = false;
+    pfd::open_file* importCsvDialog = NULL;
+    pfd::save_file* exportCsvDialog = NULL;
+    // Which bookmarks the export was asked for, taken when the button was pressed
+    // rather than when the dialog comes back - the selection can change while a modal
+    // file chooser is up.
+    std::vector<std::string> exportCsvNames;
+
     void importBookmarks(std::string path) {
         std::ifstream fs(wstr::str2wstr(path));
         json importBookmarks;
@@ -1388,6 +1527,7 @@ private:
             fbm.bandwidth = bm["bandwidth"];
             fbm.modeIndex = (radio != nullptr) ? radio->getDemodIndex(bm["mode"]) : -1;
             fbm.vfoName = bm.value("vfo", "");
+            fbm.notes = bm.value("notes", "");
             fbm.selected = false;
             bookmarks[_name] = fbm;
         }
@@ -1400,6 +1540,190 @@ private:
         std::ofstream fs(wstr::str2wstr(path));
         fs << exportedBookmarks;
         fs.close();
+    }
+
+    // ---- CSV ----
+    //
+    // The JSON above is for passing a list to another copy of this program. CSV is for
+    // the operator's own list: it opens in a spreadsheet, so the frequencies someone
+    // has already typed up over the years can come in, and the ones in here can go out
+    // and be sorted, filtered and printed like any other table.
+
+    static std::string csvModeName(RadioModuleInterface* radio, int modeIndex) {
+        if (radio == nullptr || modeIndex < 0) { return ""; }
+        return demodModeName(radio->getDemodByIndex(modeIndex));
+    }
+
+    bool exportBookmarksCsv(const std::string& path, const std::vector<std::string>& names) {
+        auto radio = (RadioModuleInterface*)core::moduleManager.getInterface(gui::waterfall.selectedVFO, "RadioModuleInterface");
+        // Binary, because the rows already end in CRLF as the format requires, and a
+        // text mode stream on Windows would turn each of those into CRCRLF.
+        std::ofstream fs(wstr::str2wstr(path), std::ios::binary);
+        if (!fs.is_open()) {
+            flog::error("Could not open '{0}' for writing", path);
+            return false;
+        }
+
+        fs << csv::row(bmcsv::columns());
+        for (const auto& n : names) {
+            auto it = bookmarks.find(n);
+            if (it == bookmarks.end()) { continue; }
+            const FrequencyBookmark& bm = it->second;
+            const RadioToneSettings& t = bm.tone;
+            std::vector<std::string> f = {
+                n,
+                bmcsv::fmtNumber(bm.frequency),
+                bmcsv::fmtNumber(bm.bandwidth),
+                csvModeName(radio, bm.modeIndex),
+                bm.vfoName,
+                bmcsv::fmtToneMode(t.mode),
+                bmcsv::fmtNumber(t.ctcssFreq),
+                std::to_string(t.dcsCode),
+                bmcsv::fmtBool(t.dcsInverted),
+                bmcsv::fmtBool(t.squelchEnabled),
+                bmcsv::fmtBool(t.filterEnabled),
+                bmcsv::fmtBool(t.identifyEnabled),
+                bmcsv::fmtBool(t.tailCloseEnabled),
+                bmcsv::encodeToneList(t),
+                bm.notes
+            };
+            fs << csv::row(f);
+        }
+        fs.close();
+        return true;
+    }
+
+    struct CsvImportResult {
+        bool opened = false;
+        bool headerFound = false;
+        int added = 0;
+        int updated = 0;
+        int skipped = 0; // rows that carried no usable name or frequency
+    };
+
+    // Adds what is new and updates what is already there, matching on the bookmark
+    // name. Updating rather than skipping is the point of the round trip: export the
+    // list, fix it in a spreadsheet, bring it back. Nothing is ever deleted - a
+    // bookmark the file does not mention is left exactly as it was - so the worst a
+    // wrong file can do is add entries and change ones that share a name.
+    CsvImportResult importBookmarksCsv(const std::string& path) {
+        CsvImportResult res;
+        std::ifstream fs(wstr::str2wstr(path), std::ios::binary);
+        if (!fs.is_open()) {
+            flog::error("Could not open '{0}'", path);
+            return res;
+        }
+        res.opened = true;
+        std::string text((std::istreambuf_iterator<char>(fs)), std::istreambuf_iterator<char>());
+        fs.close();
+
+        std::vector<std::vector<std::string>> rows = csv::parse(text);
+
+        // The first row that has anything on it is the heading. Columns are matched by
+        // name, so a file with its columns in another order, or with only some of
+        // them, still works - which matters because the most useful file to import is
+        // usually one this program did not write.
+        size_t headerRow = 0;
+        while (headerRow < rows.size() && csv::rowIsBlank(rows[headerRow])) { headerRow++; }
+        if (headerRow >= rows.size()) { return res; }
+
+        std::map<std::string, int> col;
+        for (size_t i = 0; i < rows[headerRow].size(); i++) {
+            col[csv::normaliseHeader(rows[headerRow][i])] = (int)i;
+        }
+        // Without these two there is no bookmark to make, and treating the first data
+        // row as a heading would silently swallow it.
+        if (!col.count("name") || !col.count("frequency")) { return res; }
+        res.headerFound = true;
+
+        auto field = [&](const std::vector<std::string>& row, const char* key) -> std::string {
+            auto it = col.find(key);
+            if (it == col.end() || it->second >= (int)row.size()) { return std::string(); }
+            return row[it->second];
+        };
+
+        auto radio = (RadioModuleInterface*)core::moduleManager.getInterface(gui::waterfall.selectedVFO, "RadioModuleInterface");
+        int defaultModeIndex = (radio != nullptr) ? radio->getDemodIndex(radio->getSelectedDemodId()) : -1;
+        bool fileHasTone = col.count("tonemode") || col.count("ctcss") || col.count("dcscode");
+
+        for (size_t r = headerRow + 1; r < rows.size(); r++) {
+            const std::vector<std::string>& row = rows[r];
+            if (csv::rowIsBlank(row)) { continue; }
+
+            std::string bmName = field(row, "name");
+            double freq = 0.0;
+            if (bmName.empty() || !bmcsv::parseNumber(field(row, "frequency"), &freq)) {
+                res.skipped++;
+                continue;
+            }
+
+            FrequencyBookmark fbm;
+            fbm.frequency = freq;
+            fbm.bandwidth = 0.0;
+            bmcsv::parseNumber(field(row, "bandwidth"), &fbm.bandwidth);
+            fbm.vfoName = field(row, "vfo");
+            fbm.notes = field(row, "notes");
+            fbm.selected = false;
+
+            int demodId = 0;
+            fbm.modeIndex = (radio != nullptr && demodIdByName(field(row, "mode"), &demodId))
+                                ? radio->getDemodIndex((DemodID)demodId)
+                                : defaultModeIndex;
+
+            // Only claim the file said something about tones if it actually had a
+            // column for them. Otherwise the flag stays false and recalling the
+            // bookmark leaves the radio's tone settings alone, which is what a file
+            // from somewhere else means.
+            fbm.hasTone = fileHasTone;
+            RadioToneSettings& t = fbm.tone;
+            t.mode = bmcsv::parseToneMode(field(row, "tonemode"));
+            double ctcss = 100.0;
+            if (bmcsv::parseNumber(field(row, "ctcss"), &ctcss)) { t.ctcssFreq = (float)ctcss; }
+            double dcs = 23.0;
+            if (bmcsv::parseNumber(field(row, "dcscode"), &dcs)) { t.dcsCode = (int)dcs; }
+            t.dcsInverted = bmcsv::parseBool(field(row, "dcsinvert"), false);
+            t.squelchEnabled = bmcsv::parseBool(field(row, "tonesquelch"), false);
+            t.filterEnabled = bmcsv::parseBool(field(row, "tonefilter"), false);
+            t.identifyEnabled = bmcsv::parseBool(field(row, "toneidentify"), false);
+            t.tailCloseEnabled = bmcsv::parseBool(field(row, "tonetailclose"), true);
+            bmcsv::decodeToneList(field(row, "tonelist"), t);
+
+            if (bookmarks.find(bmName) != bookmarks.end()) { res.updated++; }
+            else { res.added++; }
+            bookmarks[bmName] = fbm;
+        }
+
+        if (res.added || res.updated) { saveByName(selectedListName); }
+        return res;
+    }
+
+    void reportCsvImport(const CsvImportResult& res) {
+        if (!res.opened) {
+            ImGui::InsertNotification({ ImGuiToastType_Error, 6000, "Could not open that file." });
+            return;
+        }
+        if (!res.headerFound) {
+            ImGui::InsertNotification({ ImGuiToastType_Error, 8000,
+                                        "That file has no usable heading row.\n"
+                                        "A CSV needs at least a 'name' and a 'frequency' column." });
+            return;
+        }
+        if (!res.added && !res.updated) {
+            ImGui::InsertNotification({ ImGuiToastType_Warning, 6000,
+                                        "Nothing imported - %d row(s) had no name or no frequency.", res.skipped });
+            return;
+        }
+        // Skipped rows are worth a mention even on success: a file that half imported
+        // is exactly the case where silence would be mistaken for everything working.
+        if (res.skipped) {
+            ImGui::InsertNotification({ ImGuiToastType_Warning, 8000,
+                                        "Imported %d new and updated %d.\n%d row(s) skipped for having no name or no frequency.",
+                                        res.added, res.updated, res.skipped });
+        }
+        else {
+            ImGui::InsertNotification({ ImGuiToastType_Success, 5000,
+                                        "Imported %d new and updated %d.", res.added, res.updated });
+        }
     }
 
     std::string name;
