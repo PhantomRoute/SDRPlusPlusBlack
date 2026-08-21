@@ -560,6 +560,11 @@ private:
                 limit = 1000;
                 break;
             }
+            // These are deliberately short of the maximum so that the useful part of
+            // the range gets the whole slider. With the limits unlocked that reasoning
+            // no longer applies - the point is to reach the top - so the slider covers
+            // the whole of what is now allowed.
+            if (_this->unlockBandwidth) { limit = (int)_this->maxBandwidth; }
             ImGui::SameLine();
             ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());
             if (ImGui::SliderFloat(("##_radio_bw_slider_" + _this->name).c_str(), &_this->bandwidth, 50, limit, "")) {
@@ -568,6 +573,40 @@ private:
             }
             if (ImGui::IsItemHovered()) {
                 style::tooltip("Width of the channel, in Hz. The slider stops at what is sensible for\nthis mode; the box on the left takes anything up to %.0f Hz.", _this->maxBandwidth);
+            }
+
+            if (ImGui::Checkbox(("Any bandwidth##_radio_bwunlock_" + _this->name).c_str(), &_this->unlockBandwidth)) {
+                _this->applyBandwidthLimits();
+                // Re-clamp what is set now. Turning the switch off with a bandwidth
+                // wider than the mode allows has to bring it back in, or the control
+                // would be showing a figure the mode is no longer set to.
+                _this->setBandwidth(_this->bandwidth);
+                config.acquire();
+                config.conf[_this->name]["unlockBandwidth"] = _this->unlockBandwidth;
+                config.release(true);
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                // What it would open to, whether or not it is open now, so the tooltip
+                // answers "what do I get" rather than only describing the state it is
+                // already in.
+                double ifRate = _this->selectedDemod ? _this->selectedDemod->getIFSampleRate() : 0.0;
+                double wideLimit = ifRate;
+                if (_this->selectedDemod && _this->selectedDemod->getMaxBandwidth() > wideLimit) {
+                    wideLimit = _this->selectedDemod->getMaxBandwidth();
+                }
+                double narrowLimit = (ifRate > 0.0) ? (BW_TAPS_PER_RATIO * ifRate) / UNLOCKED_MAX_TAPS : 0.0;
+                if (_this->selectedDemod && _this->selectedDemod->getMinBandwidth() < narrowLimit) {
+                    narrowLimit = _this->selectedDemod->getMinBandwidth();
+                }
+                style::tooltip("Off, the bandwidth stops where the mode normally stops - which is what\n"
+                               "keeps you from opening a 12.5 kHz channel out to 50 and taking in the\n"
+                               "neighbours with it.\n"
+                               "On, it opens out to what this mode can actually carry, %.0f Hz, and\n"
+                               "down to %.0f Hz. Both are real limits rather than conventions: the wide\n"
+                               "end is how much spectrum the channel delivers, and the narrow end is\n"
+                               "where the channel filter would grow long enough to bog the audio down.\n"
+                               "Worth most on CW and SSB, whose usual limits are the tightest.",
+                               wideLimit, narrowLimit);
             }
         }
 
@@ -884,9 +923,10 @@ private:
 
         // Load config
         bandwidth = selectedDemod->getDefaultBandwidth();
-        minBandwidth = selectedDemod->getMinBandwidth();
-        maxBandwidth = selectedDemod->getMaxBandwidth();
         bandwidthLocked = selectedDemod->getBandwidthLocked();
+        // Before the config is read below, because the value that comes back out of it
+        // is clamped to these.
+        applyBandwidthLimits();
         snapInterval = selectedDemod->getDefaultSnapInterval();
         squelchLevel = MIN_SQUELCH;
         deempAllowed = selectedDemod->getDeempAllowed();
@@ -907,6 +947,14 @@ private:
         toneSqEnabled = false;
         toneTailCloseEnabled = true;
         toneTarget = tonedetect::Target();
+        // Read before applyBandwidthLimits below decides the range. Kept against the
+        // module rather than the demodulator, because it is a statement about how the
+        // operator wants the program to behave and not about any one mode.
+        {
+            config.acquire();
+            if (config.conf[name].contains("unlockBandwidth")) { unlockBandwidth = config.conf[name]["unlockBandwidth"]; }
+            config.release();
+        }
         double ifSamplerate = selectedDemod->getIFSampleRate();
         config.acquire();
         if (config.conf[name][selectedDemod->getName()].contains("bandwidth")) {
@@ -1036,6 +1084,52 @@ private:
     }
 
 
+    // The bandwidth range the controls will allow.
+    //
+    // Normally the demodulator's own, which are what the mode is actually for: 500 Hz
+    // on CW, 12.5 kHz on NFM. Unlocked, they open up to what the signal path can
+    // physically carry - the demodulator's IF sample rate, since that is how much
+    // spectrum the channel actually delivers, and nothing wider than it exists to be
+    // filtered. So this is not "no limit", it is "the limit that is real rather than
+    // the one that is convention".
+    //
+    // What that buys differs by mode, because some are already at the physical
+    // ceiling: CW goes from 500 Hz to 3 kHz and SSB from 12 to 24 kHz, while AM, NFM
+    // and WFM already sit at their IF rate and only gain at the narrow end.
+    void applyBandwidthLimits() {
+        if (!selectedDemod) { return; }
+        if (unlockBandwidth) {
+            maxBandwidth = selectedDemod->getIFSampleRate();
+            // A mode whose own maximum is already wider than its IF rate keeps it -
+            // unlocking must never narrow anything.
+            if (selectedDemod->getMaxBandwidth() > maxBandwidth) { maxBandwidth = selectedDemod->getMaxBandwidth(); }
+
+            // The narrow end is not a matter of taste, which is why it does not simply
+            // open to nothing.
+            //
+            // The channel filter in rx_vfo builds its transition band as a tenth of
+            // half the bandwidth, so its length works out at 76 * IF rate / bandwidth.
+            // Halving the bandwidth doubles the filter. The per mode minimums all land
+            // near four thousand taps, which is what they are really for - 50 Hz on
+            // WFM would ask for a filter of seven hundred and sixty thousand taps at
+            // half a megasample a second, and the program would stop responding rather
+            // than sound narrow.
+            //
+            // So the floor comes from a tap budget instead: loosen every mode by the
+            // same honest measure, and let the modes with a low IF rate go narrower
+            // because for them it genuinely costs less.
+            minBandwidth = (BW_TAPS_PER_RATIO * selectedDemod->getIFSampleRate()) / UNLOCKED_MAX_TAPS;
+            if (selectedDemod->getMinBandwidth() < minBandwidth) { minBandwidth = selectedDemod->getMinBandwidth(); }
+        }
+        else {
+            minBandwidth = selectedDemod->getMinBandwidth();
+            maxBandwidth = selectedDemod->getMaxBandwidth();
+        }
+        // The waterfall enforces its own copy when the VFO is dragged, so it has to be
+        // told as well or the box and the drag would disagree.
+        if (vfo) { vfo->setBandwidthLimits(minBandwidth, maxBandwidth, selectedDemod->getBandwidthLocked()); }
+    }
+
     void setBandwidth(double bw) {
         bw = std::clamp<double>(bw, minBandwidth, maxBandwidth);
         bandwidth = bw;
@@ -1055,10 +1149,8 @@ private:
         selectedDemod->AFSampRateChanged(audioSampleRate);
         if (!postProcEnabled && vfo) {
             // If postproc is disabled, IF SR = AF SR
-            minBandwidth = selectedDemod->getMinBandwidth();
-            maxBandwidth = selectedDemod->getMaxBandwidth();
+            applyBandwidthLimits();
             bandwidth = selectedDemod->getIFSampleRate();
-            vfo->setBandwidthLimits(minBandwidth, maxBandwidth, selectedDemod->getBandwidthLocked());
             vfo->setSampleRate(selectedDemod->getIFSampleRate(), bandwidth);
             return;
         }
@@ -1668,6 +1760,15 @@ private:
     float maxBandwidth;
     float bandwidth;
     bool bandwidthLocked;
+    // Whether the bandwidth controls are held to what the mode is for, or opened up to
+    // what the signal path can carry. See applyBandwidthLimits.
+    bool unlockBandwidth = false;
+    // taps = 3.8 * rate / transition, and transition = bandwidth / 20, so a channel
+    // filter is 76 * rate / bandwidth taps long. See applyBandwidthLimits.
+    static constexpr double BW_TAPS_PER_RATIO = 76.0;
+    // Roughly twice what the stock minimums come out at, so unlocking is a real
+    // loosening, and still bounded so that no setting can wedge the audio thread.
+    static constexpr double UNLOCKED_MAX_TAPS = 8192.0;
     int snapInterval;
     int selectedDemodID = 1;
     bool postProcEnabled;
