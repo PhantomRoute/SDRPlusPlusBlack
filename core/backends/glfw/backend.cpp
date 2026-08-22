@@ -338,8 +338,29 @@ namespace backend {
 
                 httpdebug::procfs::processQueue();
 
+                // A drag has to be spread over frames: ImGui decides an item is
+                // being dragged by seeing the button still down on the frame after it
+                // went down, so pressing and releasing within one frame is a click no
+                // matter how far the pointer moved. This walks one step per frame and
+                // holds the button for all of them.
+                static bool dragActive = false;
+                static float dragX1 = 0, dragY1 = 0, dragX2 = 0, dragY2 = 0;
+                static int dragStep = 0, dragSteps = 0;
+
+                if (dragActive) {
+                    float t = (float)dragStep / (float)(dragSteps - 1);
+                    if (t > 1.0f) { t = 1.0f; }
+                    ImGui::GetIO().MousePos.x = dragX1 + (dragX2 - dragX1) * t;
+                    ImGui::GetIO().MousePos.y = dragY1 + (dragY2 - dragY1) * t;
+                    // Held down for every step including the last; the frame after
+                    // releases, which is what ImGui reads as the end of the drag.
+                    ImGui::GetIO().MouseDown[0] = (dragStep < dragSteps);
+                    if (dragStep >= dragSteps) { dragActive = false; }
+                    dragStep++;
+                }
+
                 httpdebug::ImGuiAction action;
-                while (httpdebug::popAction(action)) {
+                while (!dragActive && httpdebug::popAction(action)) {
                     switch (action.type) {
                     case httpdebug::ImGuiAction::Click:
                         ImGui::GetIO().MousePos.x = action.x;
@@ -349,6 +370,20 @@ namespace backend {
                     case httpdebug::ImGuiAction::MouseMove:
                         ImGui::GetIO().MousePos.x = action.x;
                         ImGui::GetIO().MousePos.y = action.y;
+                        break;
+                    case httpdebug::ImGuiAction::Drag:
+                        dragActive = true;
+                        dragX1 = action.x;
+                        dragY1 = action.y;
+                        dragX2 = action.x2;
+                        dragY2 = action.y2;
+                        dragSteps = action.steps;
+                        dragStep = 0;
+                        // Start where the press lands, so the first frame of the drag
+                        // is a press at the right place rather than a jump from
+                        // wherever the pointer happened to be.
+                        ImGui::GetIO().MousePos.x = dragX1;
+                        ImGui::GetIO().MousePos.y = dragY1;
                         break;
                     case httpdebug::ImGuiAction::KeyPress:
                         ImGui::GetIO().KeysDown[action.key] = true;

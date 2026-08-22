@@ -91,8 +91,16 @@ namespace httpdebug {
                     KeyPress,
                     TypeText,
                     Focus,
-                    ClickById } type;
+                    ClickById,
+                    // Press at (x, y), move to (x2, y2) over `steps` frames, release.
+                    // A click cannot stand in for this: everything that is dragged
+                    // rather than clicked - the splitters, a VFO edge, a slider - only
+                    // responds to the button being held down across frames, so without
+                    // it none of those can be tested from outside.
+                    Drag } type;
         float x, y;
+        float x2, y2;
+        int steps;
         int key;
         std::string text;
         ImGuiID targetId;
@@ -102,6 +110,7 @@ namespace httpdebug {
     inline std::mutex actionsMutex;
 
     void queueClick(float x, float y);
+    void queueDrag(float x1, float y1, float x2, float y2, int steps);
     void queueKeyPress(int key);
     void queueTypeText(const std::string& text);
     void queueMouseMove(float x, float y);

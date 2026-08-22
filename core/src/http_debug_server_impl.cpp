@@ -136,27 +136,34 @@ namespace httpdebug {
 
     void queueClick(float x, float y) {
         std::lock_guard<std::mutex> lock(actionsMutex);
-        pendingActions.push_back({ ImGuiAction::Click, x, y, 0, "", 0 });
+        pendingActions.push_back({ ImGuiAction::Click, x, y, 0, 0, 0, 0, "", 0 });
+    }
+
+    void queueDrag(float x1, float y1, float x2, float y2, int steps) {
+        if (steps < 2) { steps = 2; }
+        if (steps > 240) { steps = 240; }
+        std::lock_guard<std::mutex> lock(actionsMutex);
+        pendingActions.push_back({ ImGuiAction::Drag, x1, y1, x2, y2, steps, 0, "", 0 });
     }
 
     void queueKeyPress(int key) {
         std::lock_guard<std::mutex> lock(actionsMutex);
-        pendingActions.push_back({ ImGuiAction::KeyPress, 0, 0, key, "", 0 });
+        pendingActions.push_back({ ImGuiAction::KeyPress, 0, 0, 0, 0, 0, key, "", 0 });
     }
 
     void queueTypeText(const std::string& text) {
         std::lock_guard<std::mutex> lock(actionsMutex);
-        pendingActions.push_back({ ImGuiAction::TypeText, 0, 0, 0, text, 0 });
+        pendingActions.push_back({ ImGuiAction::TypeText, 0, 0, 0, 0, 0, 0, text, 0 });
     }
 
     void queueMouseMove(float x, float y) {
         std::lock_guard<std::mutex> lock(actionsMutex);
-        pendingActions.push_back({ ImGuiAction::MouseMove, x, y, 0, "", 0 });
+        pendingActions.push_back({ ImGuiAction::MouseMove, x, y, 0, 0, 0, 0, "", 0 });
     }
 
     void queueFocus(ImGuiID id) {
         std::lock_guard<std::mutex> lock(actionsMutex);
-        pendingActions.push_back({ ImGuiAction::Focus, 0, 0, 0, "", id });
+        pendingActions.push_back({ ImGuiAction::Focus, 0, 0, 0, 0, 0, 0, "", id });
     }
 
     bool popAction(ImGuiAction& out) {
@@ -281,7 +288,7 @@ namespace httpdebug {
 
     void queueClickById(ImGuiID id) {
         std::lock_guard<std::mutex> lock(actionsMutex);
-        pendingActions.push_back({ ImGuiAction::ClickById, 0, 0, 0, "", id });
+        pendingActions.push_back({ ImGuiAction::ClickById, 0, 0, 0, 0, 0, 0, "", id });
     }
 
 #endif // __cplusplus
@@ -388,9 +395,25 @@ namespace httpdebug {
     } // namespace procfs
 } // namespace httpdebug
 
+// Does the request name this endpoint?
+//
+// Not strcmp against request->path, which is what this used to do. The web server
+// documents that field as holding the query string too - its own comment gives
+// "/index.html?name=Forrest%20Heller" as an example - so an exact comparison matches
+// only when there are no parameters at all. Every endpoint that takes any therefore
+// answered 404: /click, /mouse, /key, /type, /drag, /vfo/set_offset and the module
+// commands. The whole GUI automation surface was unreachable, which is easy to miss
+// because the endpoints that take nothing - /status, /layout, /windows - worked fine.
+static bool pathIs(const struct Request* request, const char* want) {
+    size_t n = strlen(want);
+    if (strncmp(request->path, want, n) != 0) { return false; }
+    char c = request->path[n];
+    return c == '\0' || c == '?';
+}
+
 // Implement createResponseForRequest here
 struct Response* createResponseForRequest(const struct Request* request, struct Connection* connection) {
-    if (strcmp(request->path, "/log") != 0) {
+    if (!pathIs(request, "/log")) {
         std::string reqLine = std::string(request->method) + " " + request->pathDecoded;
         if (request->body.length > 0 && request->body.contents) {
             reqLine += " body=";
@@ -399,7 +422,7 @@ struct Response* createResponseForRequest(const struct Request* request, struct 
         flog::info("HTTP debug: {}", reqLine);
     }
 
-    if (strcmp(request->path, "/status") == 0 || strcmp(request->path, "/") == 0) {
+    if (pathIs(request, "/status") || pathIs(request, "/")) {
         return responseAllocJSONWithFormat(
             "{\"ready\": %s, \"httpListening\": %s, \"mainLoopStarted\": %s}",
             httpdebug::serverReady.load() ? "true" : "false",
@@ -408,11 +431,11 @@ struct Response* createResponseForRequest(const struct Request* request, struct 
     }
 
 #ifdef __cplusplus
-    if (strcmp(request->path, "/windows") == 0) {
+    if (pathIs(request, "/windows")) {
         return responseAllocJSON(httpdebug::getAllWindowsJson().c_str());
     }
 
-    if (strcmp(request->path, "/click") == 0) {
+    if (pathIs(request, "/click")) {
         char* xParam = strdupDecodeGETParam("x=", request, "0");
         char* yParam = strdupDecodeGETParam("y=", request, "0");
         float x = (float)atof(xParam);
@@ -423,7 +446,23 @@ struct Response* createResponseForRequest(const struct Request* request, struct 
         return responseAllocJSON("{\"action\": \"click\"}");
     }
 
-    if (strcmp(request->path, "/mouse") == 0) {
+    if (pathIs(request, "/drag")) {
+        char* x1Param = strdupDecodeGETParam("x1=", request, "0");
+        char* y1Param = strdupDecodeGETParam("y1=", request, "0");
+        char* x2Param = strdupDecodeGETParam("x2=", request, "0");
+        char* y2Param = strdupDecodeGETParam("y2=", request, "0");
+        char* stepsParam = strdupDecodeGETParam("steps=", request, "12");
+        httpdebug::queueDrag((float)atof(x1Param), (float)atof(y1Param),
+                             (float)atof(x2Param), (float)atof(y2Param), atoi(stepsParam));
+        free(x1Param);
+        free(y1Param);
+        free(x2Param);
+        free(y2Param);
+        free(stepsParam);
+        return responseAllocJSON("{\"action\": \"drag\"}");
+    }
+
+    if (pathIs(request, "/mouse")) {
         char* xParam = strdupDecodeGETParam("x=", request, "0");
         char* yParam = strdupDecodeGETParam("y=", request, "0");
         float x = (float)atof(xParam);
@@ -434,7 +473,7 @@ struct Response* createResponseForRequest(const struct Request* request, struct 
         return responseAllocJSON("{\"action\": \"mouse_move\"}");
     }
 
-    if (strcmp(request->path, "/key") == 0) {
+    if (pathIs(request, "/key")) {
         char* keyParam = strdupDecodeGETParam("key=", request, "0");
         int key = atoi(keyParam);
         httpdebug::queueKeyPress(key);
@@ -442,23 +481,23 @@ struct Response* createResponseForRequest(const struct Request* request, struct 
         return responseAllocJSON("{\"action\": \"key_press\"}");
     }
 
-    if (strcmp(request->path, "/type") == 0) {
+    if (pathIs(request, "/type")) {
         char* textParam = strdupDecodeGETParam("text=", request, "");
         httpdebug::queueTypeText(std::string(textParam));
         free(textParam);
         return responseAllocJSON("{\"action\": \"type\"}");
     }
 
-    if (strcmp(request->path, "/stop") == 0 || strcmp(request->path, "/exit") == 0) {
+    if (pathIs(request, "/stop") || pathIs(request, "/exit")) {
         httpdebug::stopApp();
         return responseAllocJSON("{\"status\": \"exiting\"}");
     }
 
-    if (strcmp(request->path, "/layout") == 0) {
+    if (pathIs(request, "/layout")) {
         return responseAllocJSON(httpdebug::getSimpleLayoutJson().c_str());
     }
 
-    if (strcmp(request->path, "/clickid") == 0) {
+    if (pathIs(request, "/clickid")) {
         char* idParam = strdupDecodeGETParam("id=", request, "0");
         ImGuiID id = (ImGuiID)atoi(idParam);
         httpdebug::queueClickById(id);
@@ -466,24 +505,24 @@ struct Response* createResponseForRequest(const struct Request* request, struct 
         return responseAllocJSON("{\"action\": \"click_id\"}");
     }
 
-    if (strcmp(request->path, "/sdr/start") == 0) {
+    if (pathIs(request, "/sdr/start")) {
         httpdebug::requestSdrStart();
         return responseAllocJSON("{\"action\": \"sdr_start\"}");
     }
 
-    if (strcmp(request->path, "/sdr/stop") == 0) {
+    if (pathIs(request, "/sdr/stop")) {
         httpdebug::requestSdrStop();
         return responseAllocJSON("{\"action\": \"sdr_stop\"}");
     }
 
-    if (strcmp(request->path, "/sdr/status") == 0) {
+    if (pathIs(request, "/sdr/status")) {
         return responseAllocJSONWithFormat(
             "{\"playing\": %s}",
             httpdebug::isSdrPlaying() ? "true" : "false");
     }
 
     // List available sink providers: GET /sinks
-    if (strcmp(request->path, "/sinks") == 0) {
+    if (pathIs(request, "/sinks")) {
         std::string json = "{\"sinks\": [";
         auto names = sigpath::sinkManager.getSinkProviderNames();
         for (size_t i = 0; i < names.size(); i++) {
@@ -495,7 +534,7 @@ struct Response* createResponseForRequest(const struct Request* request, struct 
     }
 
     // List streams and their current sinks: GET /streams
-    if (strcmp(request->path, "/streams") == 0) {
+    if (pathIs(request, "/streams")) {
         std::string json = "{\"streams\": [";
         bool first = true;
         for (auto& [name, stream] : sigpath::sinkManager.streams) {
@@ -510,7 +549,7 @@ struct Response* createResponseForRequest(const struct Request* request, struct 
     }
 
     // Set sink for a specific stream: POST /sink/select with body {"stream":"Radio","sink":"NullAudioSink"}
-    if (strcmp(request->path, "/sink/select") == 0) {
+    if (pathIs(request, "/sink/select")) {
         std::string streamName = "Radio";
         std::string sinkName = "None";
         if (request->body.length > 0 && request->body.contents) {
@@ -552,7 +591,7 @@ struct Response* createResponseForRequest(const struct Request* request, struct 
             name.c_str(), offset);
     }
 
-    if (strcmp(request->path, "/modules") == 0) {
+    if (pathIs(request, "/modules")) {
         std::string json = "{";
         bool first = true;
         for (auto& [name, inst] : core::moduleManager.instances) {
@@ -810,7 +849,7 @@ struct Response* createResponseForRequest(const struct Request* request, struct 
     }
 #endif
 
-    if (strcmp(request->path, "/log") == 0) {
+    if (pathIs(request, "/log")) {
         if (!flog::isMemoryLogEnabled()) {
             return responseAllocJSON("{\"error\":\"memory log buffer disabled\"}");
         }
