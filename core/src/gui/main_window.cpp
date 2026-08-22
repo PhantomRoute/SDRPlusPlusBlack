@@ -1345,7 +1345,10 @@ void MainWindow::drawBottomWindows(int dy) {
 // along its top edge, dragged upwards to make it taller - the same gesture as the
 // splitter between the spectrum and the waterfall, so it needs no explaining.
 void MainWindow::drawBottomWindowGrip() {
-    const float h = 5.0f * style::uiScale;
+    // Taller than it looks: the line is drawn thin, but a splitter wants a target
+    // that can be hit without aiming, and this one shares an edge with the
+    // spectrum/waterfall splitter just above it.
+    const float h = 8.0f * style::uiScale;
     ImGui::InvisibleButton("##bottom_window_grip", ImVec2(-1.0f, h));
 
     bool hovered = ImGui::IsItemHovered();

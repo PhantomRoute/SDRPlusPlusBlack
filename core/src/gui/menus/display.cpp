@@ -319,6 +319,31 @@ namespace displaymenu {
         }
         ImGui::HelpMarker("Stops the sections of this menu being dragged into a different order.");
 
+        {
+            // The strip below the spectrum can also be resized by dragging its top
+            // edge, but that handle sits next to the spectrum/waterfall splitter and
+            // the two are easy to confuse - and if either is dragged somewhere awkward
+            // the other becomes hard to reach. This one is always here and always
+            // works, which is what a layout control has to be.
+            int pct = (int)(bottomWindowFrac * 100.0f + 0.5f);
+            ImGui::LeftLabel("Bottom panel height");
+            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+            if (ImGui::SliderInt("##_sdrpp_bottomwin_h", &pct,
+                                 (int)(BOTTOM_WINDOW_MIN_FRAC * 100.0f),
+                                 (int)(BOTTOM_WINDOW_MAX_FRAC * 100.0f), "%d%%")) {
+                bottomWindowFrac = (float)pct / 100.0f;
+                if (bottomWindowFrac < BOTTOM_WINDOW_MIN_FRAC) { bottomWindowFrac = BOTTOM_WINDOW_MIN_FRAC; }
+                if (bottomWindowFrac > BOTTOM_WINDOW_MAX_FRAC) { bottomWindowFrac = BOTTOM_WINDOW_MAX_FRAC; }
+                gui::mainWindow.updateBottomWindowLayout();
+                core::configManager.acquire();
+                core::configManager.conf["bottomWindowHeight"] = bottomWindowFrac;
+                core::configManager.release(true);
+            }
+            ImGui::HelpMarker("How much of the window the audio waterfall and anything else along the\n"
+                              "bottom gets. The same edge can be dragged directly; this is here so the\n"
+                              "layout can always be put back whatever state it has got into.");
+        }
+
         if (ImGui::Checkbox("Show tooltips##_sdrpp", &style::showTooltips)) {
             core::configManager.acquire();
             core::configManager.conf["showTooltips"] = style::showTooltips;

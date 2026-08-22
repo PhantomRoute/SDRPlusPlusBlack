@@ -439,7 +439,11 @@ namespace ImGui {
         bool dragInProgress = fftResizeSelect || freqScaleSelect || vfoSelect || vfoBorderSelect;
         bool hasMouse = mouseOverWaterfallWindow || dragInProgress;
 
-        mouseInFFTResize = hasMouse && (dragOrigin.x > widgetPos.x && dragOrigin.x < widgetPos.x + widgetSize.x && dragOrigin.y >= widgetPos.y + newFFTAreaHeight - (2.0f * style::uiScale) && dragOrigin.y <= widgetPos.y + newFFTAreaHeight + (2.0f * style::uiScale));
+        // Widened from two pixels either side. Two is a hard target with any pointer,
+        // and this is the control someone reaches for precisely when the layout has
+        // got away from them.
+        const float FFT_RESIZE_GRAB = 4.0f * style::uiScale;
+        mouseInFFTResize = hasMouse && (dragOrigin.x > widgetPos.x && dragOrigin.x < widgetPos.x + widgetSize.x && dragOrigin.y >= widgetPos.y + newFFTAreaHeight - FFT_RESIZE_GRAB && dragOrigin.y <= widgetPos.y + newFFTAreaHeight + FFT_RESIZE_GRAB);
         mouseInFreq = hasMouse && IS_IN_AREA(dragOrigin, freqAreaMin, freqAreaMax);
         mouseInFFT = hasMouse && IS_IN_AREA(dragOrigin, fftAreaMin, fftAreaMax);
         mouseInWaterfall = hasMouse && IS_IN_AREA(dragOrigin, wfMin, wfMax);
@@ -1098,6 +1102,21 @@ namespace ImGui {
         // return if widget is too small. The horizontal margin scales with the
         // UI scale and overtakes the 100px floor past 1.6x, which left dataWidth
         // negative and turned every allocation below into a huge new[].
+        // Clamped before the size check below bails out, not after. The split is
+        // remembered across resizes, so a widget that shrank - the strip along the
+        // bottom growing will do it - can leave the split line below the bottom of
+        // the widget, and the four pixel band that grabs it with it. There is then no
+        // way to drag the spectrum back up, because the handle is off the end of the
+        // thing it belongs to.
+        if (waterfallVisible && widgetSize.y > (100.0f * style::uiScale)) {
+            float splitMax = widgetSize.y - (50.0f * style::uiScale);
+            float splitMin = 150.0f * style::uiScale;
+            if (splitMax < splitMin) { splitMax = splitMin; }
+            if (FFTAreaHeight > splitMax) { FFTAreaHeight = splitMax; }
+            if (FFTAreaHeight < splitMin) { FFTAreaHeight = splitMin; }
+            newFFTAreaHeight = FFTAreaHeight;
+        }
+
         if (widgetSize.x < 100 || widgetSize.y < 100 || widgetSize.x - (60.0f * style::uiScale) < 1.0f) {
             return;
         }
