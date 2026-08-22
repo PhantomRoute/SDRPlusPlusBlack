@@ -166,6 +166,16 @@ namespace httpdebug {
         pendingActions.push_back({ ImGuiAction::Focus, 0, 0, 0, 0, 0, 0, "", id });
     }
 
+    bool popPointerAction(ImGuiAction& out) {
+        std::lock_guard<std::mutex> lock(actionsMutex);
+        if (pendingActions.empty()) return false;
+        ImGuiAction::Type t = pendingActions.front().type;
+        if (t != ImGuiAction::Click && t != ImGuiAction::MouseMove && t != ImGuiAction::Drag) return false;
+        out = pendingActions.front();
+        pendingActions.erase(pendingActions.begin());
+        return true;
+    }
+
     bool popAction(ImGuiAction& out) {
         std::lock_guard<std::mutex> lock(actionsMutex);
         if (pendingActions.empty()) return false;
@@ -491,6 +501,29 @@ struct Response* createResponseForRequest(const struct Request* request, struct 
     if (pathIs(request, "/stop") || pathIs(request, "/exit")) {
         httpdebug::stopApp();
         return responseAllocJSON("{\"status\": \"exiting\"}");
+    }
+
+    // The waterfall's own geometry. /layout gives the ImGui window it sits in, which
+    // is not the same thing: the widget starts wherever the cursor was when it was
+    // drawn, so the split handle is at widgetPos.y + fftHeight and not at the window's
+    // top plus fftHeight. Guessing that origin from the outside is what made every
+    // attempt to drag the splitter land in the wrong place.
+    if (pathIs(request, "/waterfall")) {
+        char buf[512];
+        snprintf(buf, sizeof buf,
+                 "{\"widgetPos\": {\"x\": %.1f, \"y\": %.1f},"
+                 " \"fftAreaMin\": {\"x\": %.1f, \"y\": %.1f},"
+                 " \"wfMin\": {\"x\": %.1f, \"y\": %.1f},"
+                 " \"wfMax\": {\"x\": %.1f, \"y\": %.1f},"
+                 " \"fftHeight\": %d,"
+                 " \"splitLineY\": %.1f}",
+                 gui::waterfall.widgetPos.x, gui::waterfall.widgetPos.y,
+                 gui::waterfall.fftAreaMin.x, gui::waterfall.fftAreaMin.y,
+                 gui::waterfall.wfMin.x, gui::waterfall.wfMin.y,
+                 gui::waterfall.wfMax.x, gui::waterfall.wfMax.y,
+                 gui::waterfall.getFFTHeight(),
+                 gui::waterfall.widgetPos.y + (float)gui::waterfall.getFFTHeight());
+        return responseAllocJSON(buf);
     }
 
     if (pathIs(request, "/layout")) {

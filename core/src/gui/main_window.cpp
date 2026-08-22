@@ -1349,6 +1349,12 @@ void MainWindow::drawBottomWindowGrip() {
     // that can be hit without aiming, and this one shares an edge with the
     // spectrum/waterfall splitter just above it.
     const float h = 8.0f * style::uiScale;
+
+    // Sits where the window's own padding puts it, a few pixels in from the top edge.
+    // Two attempts to move it flush with that edge - zeroing the window padding, and
+    // setting the cursor to the window origin - both left it impossible to hit at all,
+    // so it stays where it demonstrably works. The slider in the display menu is there
+    // for anyone who cannot find it.
     ImGui::InvisibleButton("##bottom_window_grip", ImVec2(-1.0f, h));
 
     bool hovered = ImGui::IsItemHovered();

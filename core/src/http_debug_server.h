@@ -117,6 +117,9 @@ namespace httpdebug {
     void queueFocus(ImGuiID id);
     void queueClickById(ImGuiID id);
     bool popAction(ImGuiAction& out);
+    // Pops only if the next action is a pointer one, so the rest of the queue
+    // stays in order for the pass that runs inside the frame.
+    bool popPointerAction(ImGuiAction& out);
     std::string getAllWindowsJson();
     std::string getSimpleLayoutJson();
 
