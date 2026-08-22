@@ -550,29 +550,53 @@ private:
                 _this->bandwidth = std::clamp<float>(_this->bandwidth, _this->minBandwidth, _this->maxBandwidth);
                 _this->setBandwidth(_this->bandwidth);
             }
-            int limit = 12000;
-            switch(_this->selectedDemodID) {        // convenience to fully utilize slider, edit with above field for outside values
+            // Where the slider ends. Short of the mode's maximum on purpose, so that
+            // the part of the range anyone actually uses gets the whole width of the
+            // slider and the box on the left is there for the rest.
+            float limit = 12000.0f;
+            switch(_this->selectedDemodID) {
             case RADIO_DEMOD_LSB:
             case RADIO_DEMOD_USB:
-                limit = 3500;
+                limit = 3500.0f;
                 break;
             case RADIO_DEMOD_CW:
-                limit = 1000;
+                limit = 1000.0f;
+                break;
+            case RADIO_DEMOD_NFM:
+                // 12000 sat just below the 12.5 kHz this mode defaults to, so the
+                // slider started hard against its own end.
+                limit = 25000.0f;
+                break;
+            case RADIO_DEMOD_WFM:
+                limit = 200000.0f;
                 break;
             }
-            // These are deliberately short of the maximum so that the useful part of
-            // the range gets the whole slider. With the limits unlocked that reasoning
-            // no longer applies - the point is to reach the top - so the slider covers
-            // the whole of what is now allowed.
-            if (_this->unlockBandwidth) { limit = (int)_this->maxBandwidth; }
+            // Unlocked, the point is to be able to reach the top, so the convenience
+            // limit stops applying.
+            if (_this->unlockBandwidth) { limit = _this->maxBandwidth; }
+
+            // The slider has to span the mode's own range, and this is where it went
+            // wrong: it ran from a flat 50 Hz to a convenience limit that took no
+            // account of the mode's minimum. On WFM that meant a slider from 50 to
+            // 12000 against a minimum of 50000 - every position on it clamped to
+            // 50000, so the control did nothing at all and the widest the mode would
+            // go was its own narrowest.
+            float sliderMin = _this->minBandwidth;
+            float sliderMax = limit;
+            if (sliderMax > _this->maxBandwidth) { sliderMax = _this->maxBandwidth; }
+            // A convenience limit at or below the minimum is not a range. Fall back to
+            // the mode's real maximum rather than leaving a slider that cannot move.
+            if (sliderMax <= sliderMin) { sliderMax = _this->maxBandwidth; }
+
             ImGui::SameLine();
             ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());
-            if (ImGui::SliderFloat(("##_radio_bw_slider_" + _this->name).c_str(), &_this->bandwidth, 50, limit, "")) {
+            if (ImGui::SliderFloat(("##_radio_bw_slider_" + _this->name).c_str(), &_this->bandwidth, sliderMin, sliderMax, "")) {
                 _this->bandwidth = std::clamp<float>(_this->bandwidth, _this->minBandwidth, _this->maxBandwidth);
                 _this->setBandwidth(_this->bandwidth);
             }
             if (ImGui::IsItemHovered()) {
-                style::tooltip("Width of the channel, in Hz. The slider stops at what is sensible for\nthis mode; the box on the left takes anything up to %.0f Hz.", _this->maxBandwidth);
+                style::tooltip("Width of the channel, in Hz. The slider covers %.0f to %.0f, which is\nthe part of this mode's range in normal use; the box on the left takes\nanything from %.0f up to %.0f Hz.",
+                               sliderMin, sliderMax, _this->minBandwidth, _this->maxBandwidth);
             }
 
             if (ImGui::Checkbox(("Any bandwidth##_radio_bwunlock_" + _this->name).c_str(), &_this->unlockBandwidth)) {
