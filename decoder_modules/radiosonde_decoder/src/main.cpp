@@ -744,6 +744,10 @@ void RadiosondeDecoderModule::drawTrack() {
     long long firstTime = 0, lastTime = 0;   // milliseconds, see SondeFix::time
     float lowest = 0.0f, highest = 0.0f;
     size_t count = 0;
+    double span = 0.0;                       // milliseconds covered by the plot
+    long long burstTime = 0;                 // when the highest point was reached
+    float lastAlt = 0.0f;
+    bool haveBurst = false;
 
     // Snapshot under the lock, draw outside it. A two hour flight is thousands of
     // points and there are only a few hundred pixels to put them in, so it is taken
@@ -760,12 +764,22 @@ void RadiosondeDecoderModule::drawTrack() {
             firstTime = track.front().time;
             lastTime = track.back().time;
             lowest = highest = track.front().alt;
+            burstTime = track.front().time;
+            lastAlt = track.back().alt;
             for (const auto& p : track) {
                 if (p.alt < lowest) { lowest = p.alt; }
-                if (p.alt > highest) { highest = p.alt; }
+                if (p.alt > highest) { highest = p.alt; burstTime = p.time; }
             }
 
-            double span = (double)(lastTime - firstTime);   // milliseconds
+            // The highest point is only the burst once the sonde has come down from
+            // it. On the way up the highest point is simply the most recent one, and
+            // marking that would park the label on the balloon for the whole ascent.
+            // A couple of hundred metres is past anything GPS noise or a pocket of
+            // lift accounts for.
+            const float BURST_CONFIRM_DROP_M = 250.0f;
+            haveBurst = (lastAlt < highest - BURST_CONFIRM_DROP_M);
+
+            span = (double)(lastTime - firstTime);   // milliseconds
             float range = highest - lowest;
             // A second of track and a metre of climb before there is anything worth
             // drawing a line between.
@@ -782,9 +796,44 @@ void RadiosondeDecoderModule::drawTrack() {
         }
     }
 
+    // Amber for the fall, so the two halves of the flight read apart at a glance
+    // instead of having to be inferred from the slope.
+    const ImU32 descentCol = IM_COL32(255, 170, 60, 255);
+
     if (points.size() >= 2) {
-        draw->AddPolyline(points.data(), (int)points.size(), ImGui::GetColorU32(ImGuiCol_PlotLines),
-                          0, 1.5f * style::uiScale);
+        const ImU32 ascentCol = ImGui::GetColorU32(ImGuiCol_PlotLines);
+        float burstX = 0.0f;
+        int splitCol = -1;
+        if (haveBurst && span > 0.0) {
+            burstX = boxMin.x + (float)(((double)(burstTime - firstTime) / span) * width);
+            for (size_t i = 0; i < points.size(); i++) {
+                if (points[i].x >= burstX) { splitCol = (int)i; break; }
+            }
+        }
+
+        if (splitCol > 0 && splitCol < (int)points.size() - 1) {
+            // The two runs share a point, so they meet instead of leaving a gap.
+            draw->AddPolyline(points.data(), splitCol + 1, ascentCol, 0, 1.5f * style::uiScale);
+            draw->AddPolyline(points.data() + splitCol, (int)points.size() - splitCol,
+                              descentCol, 0, 1.5f * style::uiScale);
+        }
+        else {
+            draw->AddPolyline(points.data(), (int)points.size(), ascentCol, 0, 1.5f * style::uiScale);
+        }
+
+        if (haveBurst && splitCol >= 0) {
+            // A hairline the full height, so the moment can be read off the time axis
+            // and not only off the curve.
+            draw->AddLine(ImVec2(burstX, boxMin.y), ImVec2(burstX, boxMax.y),
+                          IM_COL32(255, 170, 60, 90), style::uiScale);
+            // At the top of the box, not at a computed y: the plot is scaled to
+            // lowest..highest, and the burst IS the highest point, so it always lands
+            // exactly on the top edge. Working it out from the altitude would be the
+            // same number with more arithmetic to get wrong.
+            draw->AddCircle(ImVec2(burstX, boxMin.y), 4.0f * style::uiScale, descentCol, 0,
+                            2.0f * style::uiScale);
+        }
+
         // Where it is now.
         draw->AddCircleFilled(points.back(), 3.0f * style::uiScale, ImGui::GetColorU32(ImGuiCol_Text));
     }
@@ -795,12 +844,26 @@ void RadiosondeDecoderModule::drawTrack() {
     if (count < 2) {
         ImGui::TextDisabled("Altitude will plot here once it has a fix");
     }
+    else if (haveBurst) {
+        ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(descentCol), "Burst %s",
+                           fmtAltitude(highest).c_str());
+        if (ImGui::IsItemHovered()) {
+            style::tooltip("The balloon burst at %s, %.0f min after this sonde was tuned.\n"
+                              "It has fallen %s since.",
+                              fmtAltitude(highest).c_str(),
+                              (double)(burstTime - firstTime) / 60000.0,
+                              fmtAltitude(highest - lastAlt).c_str());
+        }
+        ImGui::SameLine();
+        ImGui::TextDisabled("- now %s", fmtAltitude(lastAlt).c_str());
+    }
     else {
         ImGui::TextDisabled("%s to %s over %.0f min", fmtAltitude(lowest).c_str(),
                             fmtAltitude(highest).c_str(), (double)(lastTime - firstTime) / 60000.0);
         if (ImGui::IsItemHovered()) {
             style::tooltip("Altitude against time since this sonde was tuned. The peak is the burst;\n"
-                              "after it the descent is much steeper than the climb.");
+                              "after it the descent is much steeper than the climb, and the plot\n"
+                              "turns amber from that point on.");
         }
     }
 }
