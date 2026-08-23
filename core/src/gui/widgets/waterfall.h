@@ -150,6 +150,12 @@ namespace ImGui {
 
         void setFFTHeight(int height);
         int getFFTHeight();
+        float getWidgetHeight() const { return widgetSize.y; }
+
+        // Set when a drag of the spectrum/waterfall handle finishes. Lets the owner
+        // tell a share the user chose from one the clamp imposed, so remembering the
+        // former does not get overwritten by the latter.
+        bool splitMovedByUser = false;
 
         void setRawFFTSize(int size);
 
@@ -282,6 +288,8 @@ namespace ImGui {
         void processInputs();
         void onPositionChange();
         void onResize();
+        // How far the spectrum/waterfall split is allowed to travel, in widget pixels.
+        void getSplitRange(float& lo, float& hi) const;
         void updateAreaRects();
         void updateWaterfallTexture();
 

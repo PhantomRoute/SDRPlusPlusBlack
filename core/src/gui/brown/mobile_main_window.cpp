@@ -1714,6 +1714,25 @@ void MobileMainWindow::draw() {
     if (drawAudioWaterfall && !hasBottomWindow("audio_waterfall")) {
         addBottomWindow("audio_waterfall", [&]() {
             audioWaterfall->draw();
+            // Remember where the handle under the frequency scale was left, as a share
+            // of the widget. Only a finished drag updates it: the split is also moved
+            // by the clamp whenever the strip is resized, and taking that as the user's
+            // choice meant squashing the strip quietly destroyed the setting.
+            int wh = audioWaterfall->getWidgetHeight();
+            if (wh > 0) {
+                if (audioWaterfall->takeSplitMoved()) {
+                    lastAudioWaterfallHeight = wh;
+                    audioWaterfallSplitFrac = (float)audioWaterfall->getSplit() / (float)wh;
+                    setConfig("audioWaterfallSplitFrac", audioWaterfallSplitFrac);
+                }
+                else if (wh != lastAudioWaterfallHeight) {
+                    lastAudioWaterfallHeight = wh;
+                    if (audioWaterfallSplitFrac > 0.0f) {
+                        int want = (int)(audioWaterfallSplitFrac * (float)wh);
+                        if (want != audioWaterfall->getSplit()) { audioWaterfall->setSplit(want); }
+                    }
+                }
+            }
         });
     }
     if (!drawAudioWaterfall && hasBottomWindow("audio_waterfall")) {
@@ -2612,6 +2631,9 @@ void MobileMainWindow::init() {
 
 
     getConfig("showAudioWaterfall", drawAudioWaterfall);
+    // Applied on the first frame that gives the widget a size, by the height change
+    // branch above - there is nothing to take a share of until then.
+    getConfig("audioWaterfallSplitFrac", audioWaterfallSplitFrac);
     getConfig("logbookPopupPosition_x", logbookPopupPosition.x);
     getConfig("logbookPopupPosition_y", logbookPopupPosition.y);
     getConfig("scanSWRPosition_x", scanSWRPopupPosition.x);

@@ -222,6 +222,25 @@ void SubWaterfall::init() {
     pvt->res.init(nullptr, pvt->sampleRate, 2 * pvt->hiFreq);
 }
 
+int SubWaterfall::getSplit() const {
+    return pvt->waterfall.getFFTHeight();
+}
+
+void SubWaterfall::setSplit(int height) {
+    if (height <= 0) { return; }
+    pvt->waterfall.setFFTHeight(height);
+}
+
+int SubWaterfall::getWidgetHeight() const {
+    return (int)pvt->waterfall.getWidgetHeight();
+}
+
+bool SubWaterfall::takeSplitMoved() {
+    bool moved = pvt->waterfall.splitMovedByUser;
+    pvt->waterfall.splitMovedByUser = false;
+    return moved;
+}
+
 void SubWaterfall::draw() {
     pvt->waterfall.draw();
     pvt->flushDrawUpdates();

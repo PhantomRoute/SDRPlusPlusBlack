@@ -103,6 +103,11 @@ public:
     // left it reading a stream that was about to be freed.
     std::thread audioWaterfallThread;
     bool drawAudioWaterfall = false;
+    // The strip's spectrum/waterfall split, kept as a share of the widget rather than
+    // a pixel count so resizing the strip keeps the proportions instead of letting the
+    // clamp eat the setting. Written only when the user drags the handle.
+    float audioWaterfallSplitFrac = 0.0f;
+    int lastAudioWaterfallHeight = 0;
     EventHandler<ImGuiContext*> displayDrawHandler;
     int cwAudioFrequency = 600;
     int cwWPM = 18;

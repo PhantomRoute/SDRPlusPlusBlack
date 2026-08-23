@@ -468,6 +468,7 @@ namespace ImGui {
         if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
             if (fftResizeSelect) {
                 FFTAreaHeight = newFFTAreaHeight;
+                splitMovedByUser = true;
                 onResize();
             }
 
@@ -535,7 +536,12 @@ namespace ImGui {
         if (fftResizeSelect) {
             ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
             newFFTAreaHeight = mousePos.y - widgetPos.y;
-            newFFTAreaHeight = std::clamp<float>(newFFTAreaHeight, 150, widgetSize.y - 50);
+            // Was a bare 150 and widgetSize.y - 50, unscaled, so at any UI scale other
+            // than 1 the drag and the clamp in onResize disagreed about where the ends
+            // were. Both ask the same question now.
+            float splitMin, splitMax;
+            getSplitRange(splitMin, splitMax);
+            newFFTAreaHeight = std::clamp<float>(newFFTAreaHeight, splitMin, splitMax);
             ImGui::GetForegroundDrawList()->AddLine(ImVec2(widgetPos.x, newFFTAreaHeight + widgetPos.y), ImVec2(widgetEndPos.x, newFFTAreaHeight + widgetPos.y),
                                                     ImGui::GetColorU32(ImGuiCol_SeparatorActive), style::uiScale);
             return;
@@ -1096,6 +1102,26 @@ namespace ImGui {
         updateAllVFOs();
     }
 
+    // The floor used to be a flat 150px of spectrum area, which is right for the main
+    // waterfall but taller than the whole of the audio strip along the bottom. A floor
+    // bigger than the widget pins the split against one end, so that strip's spectrum
+    // and waterfall were stuck at whatever share the clamp landed on and the handle
+    // under the frequency scale did nothing at all. Give way on a short widget: keep
+    // 150px where there is room for it, otherwise a third of the widget, and never
+    // less than the frequency scale plus a few pixels of trace to draw into.
+    void WaterFall::getSplitRange(float& lo, float& hi) const {
+        const float scaleH = 50.0f * style::uiScale;
+        lo = 150.0f * style::uiScale;
+        // Not named "small": windows.h defines that as a macro for char, the same
+        // trap as its min/max, and core is compiled with it in scope.
+        float shortWidget = widgetSize.y / 3.0f;
+        const float hardFloor = scaleH + (12.0f * style::uiScale);
+        if (shortWidget < hardFloor) { shortWidget = hardFloor; }
+        if (shortWidget < lo) { lo = shortWidget; }
+        hi = widgetSize.y - scaleH;
+        if (hi < lo) { hi = lo; }
+    }
+
     void WaterFall::onResize() {
         MEASURE_LOCK_GUARD(latestFFTMtx);
         MEASURE_LOCK_GUARD1(smoothingBufMtx);
@@ -1109,9 +1135,8 @@ namespace ImGui {
         // way to drag the spectrum back up, because the handle is off the end of the
         // thing it belongs to.
         if (waterfallVisible && widgetSize.y > (100.0f * style::uiScale)) {
-            float splitMax = widgetSize.y - (50.0f * style::uiScale);
-            float splitMin = 150.0f * style::uiScale;
-            if (splitMax < splitMin) { splitMax = splitMin; }
+            float splitMin, splitMax;
+            getSplitRange(splitMin, splitMax);
             if (FFTAreaHeight > splitMax) { FFTAreaHeight = splitMax; }
             if (FFTAreaHeight < splitMin) { FFTAreaHeight = splitMin; }
             newFFTAreaHeight = FFTAreaHeight;
