@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <ctime>
 
 #include "main.h"
@@ -383,6 +384,10 @@ bool RadiosondeDecoderModule::timeIsBelievable(time_t t) {
 // through writeLogPoint, so they take the same lock that guards the data. Neither is
 // ever called with it already held, and writeLogPoint does not take it - it is only
 // reached from the callback, which does.
+// The closing tags, in one place: openLog winds back over them to continue a track,
+// writeLogPoint rewrites them after every point, and closeLog leaves them behind.
+static const char* GPX_TRAILER = "    </trkseg>\n  </trk>\n</gpx>\n";
+
 bool RadiosondeDecoderModule::openLog() {
     closeLog();
     if (logPath[0] == 0) {
@@ -390,25 +395,72 @@ bool RadiosondeDecoderModule::openLog() {
         return false;
     }
     std::lock_guard<std::mutex> lck(dataMtx);
-    logFile = fopen(logPath, "wb");
-    if (!logFile) {
-        logStatus = std::string("Could not open ") + logPath;
-        flog::error("Radiosonde: could not open {0}", logPath);
-        return false;
+
+    // Continue an existing track rather than destroying it.
+    //
+    // This used to open "wb", which truncates. Restarting the program - or just
+    // switching this checkbox off and on - therefore threw away everything recorded
+    // so far and wrote the header straight back, so the file kept its name and held
+    // nothing. It cost a real flight before it was noticed; the only reason that
+    // flight survived is that the frame log beside it opens "ab" and had every point.
+    //
+    // So: never truncate a file that already has something in it. writeLogPoint
+    // leaves the closing tags at the end after every frame, so the usual case is to
+    // find them and wind back over them. Anything else, append at the end and let the
+    // next point put a fresh trailer on.
+    bool appending = false;
+    logFile = fopen(logPath, "r+b");
+    if (logFile) {
+        fseek(logFile, 0, SEEK_END);
+        long size = ftell(logFile);
+        if (size > 0) {
+            appending = true;
+            const long trailerLen = (long)strlen(GPX_TRAILER);
+            fseek(logFile, 0, SEEK_END);
+            if (size > trailerLen) {
+                char tail[64];
+                fseek(logFile, size - trailerLen, SEEK_SET);
+                if (fread(tail, 1, (size_t)trailerLen, logFile) == (size_t)trailerLen &&
+                    memcmp(tail, GPX_TRAILER, (size_t)trailerLen) == 0) {
+                    fseek(logFile, size - trailerLen, SEEK_SET);
+                }
+                else {
+                    fseek(logFile, 0, SEEK_END);
+                }
+            }
+        }
+        else {
+            // Existed but empty, so there is nothing to keep.
+            fclose(logFile);
+            logFile = NULL;
+        }
     }
+
+    if (!logFile) {
+        logFile = fopen(logPath, "wb");
+        if (!logFile) {
+            logStatus = std::string("Could not open ") + logPath;
+            flog::error("Radiosonde: could not open {0}", logPath);
+            return false;
+        }
+    }
+
+    if (!appending) {
     fprintf(logFile,
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
             "<gpx version=\"1.1\" creator=\"SDR++ radiosonde decoder\" xmlns=\"http://www.topografix.com/GPX/1/1\">\n"
             "  <trk>\n    <name>Radiosonde</name>\n    <trkseg>\n");
     fflush(logFile);
-    logStatus = std::string("Writing ") + logPath;
+    }
+
+    logStatus = std::string(appending ? "Appending to " : "Writing ") + logPath;
     return true;
 }
 
 void RadiosondeDecoderModule::closeLog() {
     std::lock_guard<std::mutex> lck(dataMtx);
     if (!logFile) { return; }
-    fprintf(logFile, "    </trkseg>\n  </trk>\n</gpx>\n");
+    fputs(GPX_TRAILER, logFile);
     fclose(logFile);
     logFile = NULL;
 }
@@ -435,7 +487,7 @@ void RadiosondeDecoderModule::writeLogPoint(const SondeFullData& d, bool timeAcc
     // point overwrites them. The file on disk is therefore valid GPX after every
     // single frame - pull the power out mid flight and what was written still opens.
     long resume = ftell(logFile);
-    fprintf(logFile, "    </trkseg>\n  </trk>\n</gpx>\n");
+    fputs(GPX_TRAILER, logFile);
     fflush(logFile);
     if (resume >= 0) { fseek(logFile, resume, SEEK_SET); }
 }
