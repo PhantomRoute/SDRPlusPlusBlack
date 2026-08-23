@@ -2640,11 +2640,17 @@ void MobileMainWindow::init() {
     getConfig("scanSWRPosition_y", scanSWRPopupPosition.y);
     getConfig("buttonsWidthScale", buttonsWidthScale);
     getConfig("encoderWidth", encoderWidth);
+    getConfig("glSleepTime", glSleepTime);
 
 
     displaymenu::onDisplayDraw.bindHandler(&displayDrawHandler);
     mwedit = menuWidth;
     displayDrawHandler.handler = [](ImGuiContext *ctx, void *data) {
+
+        // These are emitted at the very end of the display menu, so without a header
+        // of their own they fell under whichever section happened to be last - which
+        // is "KEYBOARD AND MOUSE", and none of them is a keyboard or a mouse setting.
+        ImGui::SectionHeader("PANELS");
 
         if (ImGui::Checkbox("Show mic spectrum##_sdrpp", &displaymenu::showMicHistogram)) {
             core::configManager.acquire();
@@ -2661,25 +2667,61 @@ void MobileMainWindow::init() {
         if (ImGui::Checkbox("Show Audio Waterfall##_sdrpp", &_this->drawAudioWaterfall)) {
             setConfig("showAudioWaterfall", _this->drawAudioWaterfall);
         }
-        ImGui::LeftLabel("GL frame sleep ms");
-        ImGui::FillWidth();
-        ImGui::SliderInt("##_gl_frame_sleep_", &glSleepTime, 0, 200);
-        ImGui::LeftLabel("Wheel Width");
+        if (ImGui::IsItemHovered()) {
+            style::tooltip("A spectrum and waterfall of the demodulated audio, in a strip along the\n"
+                           "bottom. Useful for seeing CTCSS tones, hum and where a filter is\n"
+                           "cutting. Drag its top edge to resize it, and the line under its\n"
+                           "frequency scale to trade spectrum against waterfall.");
+        }
+        // Was "Wheel Width", which under a keyboard and mouse heading read as a
+        // setting for the scroll wheel. It is the tuning knob in the transceiver
+        // layout.
+        ImGui::LeftLabel("Tuning knob width");
         ImGui::FillWidth();
         if (ImGui::SliderInt("##mmw_wheel_width", &_this->encoderWidth, 15, 200)) {
             setConfig("encoderWidth", _this->encoderWidth);
         }
-        ImGui::LeftLabel("TX Panel Width");
+        if (ImGui::IsItemHovered()) {
+            style::tooltip("How wide the tuning knob is drawn in the transceiver layout, in pixels.");
+        }
+
+        // Was "TX Panel Width" showing "1.000". It is not a width, it is a multiplier
+        // on the default, which is why the number never looked like one.
+        ImGui::LeftLabel("Transmit panel scale");
         ImGui::FillWidth();
         if (ImGui::SliderFloat("##txpanelw", &_this->buttonsWidthScale, 0.3, 3)) {
             setConfig("buttonsWidthScale", _this->buttonsWidthScale);
         }
+        if (ImGui::IsItemHovered()) {
+            style::tooltip("Size of the transmit buttons, as a multiple of the default. 1.0 leaves\n"
+                           "them as they come; raise it for a touchscreen.");
+        }
 
-        ImGui::LeftLabel("Menu Width");
+        ImGui::LeftLabel("Menu width");
         ImGui::FillWidth();
 
         if (ImGui::SliderInt("##menuw", &mwedit, 10, 500)) {
             lastMwEdit = currentTimeMillis();
+        }
+        if (ImGui::IsItemHovered()) {
+            style::tooltip("Width of this menu panel, in pixels. Applies a couple of seconds after\n"
+                           "you stop dragging - relaying the whole window on every frame of the\n"
+                           "drag is what it costs to do it live.");
+        }
+
+        ImGui::SectionHeader("PERFORMANCE");
+
+        // Was "GL frame sleep ms", and was the one slider here that never saved, so it
+        // went back to zero on every launch while its neighbours persisted.
+        ImGui::LeftLabel("Frame delay (ms)");
+        ImGui::FillWidth();
+        if (ImGui::SliderInt("##_gl_frame_sleep_", &glSleepTime, 0, 200)) {
+            setConfig("glSleepTime", glSleepTime);
+        }
+        if (ImGui::IsItemHovered()) {
+            style::tooltip("Pause after drawing each frame. 0 draws as fast as the machine allows;\n"
+                           "raising it hands time back to the CPU and to the decoders at the cost\n"
+                           "of a less smooth waterfall. Worth a few ms on a laptop on battery.");
         }
 
         if (lastMwEdit != 0 && currentTimeMillis() - lastMwEdit > 2000) {
