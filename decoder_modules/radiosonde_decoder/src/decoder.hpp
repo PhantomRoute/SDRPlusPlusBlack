@@ -88,6 +88,7 @@ namespace radiosonde {
 						m_data.temp = fragment.temp;
 						m_data.rh = fragment.rh;
 						m_data.pressure = fragment.pressure;
+						m_data.pressureMeasured = fragment.pressure > 0;
 						m_data.dewpt = dewpt(m_data.temp, m_data.rh);
 					}
 
@@ -108,7 +109,14 @@ namespace radiosonde {
 
 					if (m_data.pressure <= 0) {
 						m_data.pressure = altitude_to_pressure(m_data.alt);
+						m_data.pressureMeasured = false;
 					}
+
+					/* Remember what has ever arrived, not just what this frame held.
+					 * The struct above is cumulative, so a consumer looking at it has
+					 * no other way to tell a field the sonde has never sent from one
+					 * that happens to read zero. */
+					m_data.seenFields = m_data.seenFields | (unsigned)fragment.fields;
 
 					if (fragment.fields) {
 						m_callback(&m_data, m_ctx);

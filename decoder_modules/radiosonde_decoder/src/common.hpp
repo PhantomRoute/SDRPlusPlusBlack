@@ -14,6 +14,9 @@ public:
 		temp = rh = dewpt = pressure = 0;
 		calibrated = false;
 		auxData = "";
+		seenFields = 0;
+		pressureMeasured = false;
+		velocityDerived = false;
 	};
 
 	std::string serial;         /* Serial number */
@@ -27,4 +30,20 @@ public:
 	bool calibrated;            /* Whether all the calibration data has been received */
 	float calib_percent;        /* Calibration status (0-100) */
 	std::string auxData;        /* Auxiliary freeform data */
+
+	/* Which groups a parser has actually supplied, as a DataBitmask, accumulated over
+	 * the flight. The struct is reused for every frame and a parser only writes what
+	 * its sonde carries, so without this there is no way to tell a real reading of
+	 * zero from a field nothing has ever filled in. */
+	unsigned seenFields;
+
+	/* False when pressure was worked out from altitude rather than read off a
+	 * barometer. Only set for the derivation done in Decoder::run - several of the
+	 * vendored parsers derive it themselves and hand it back indistinguishable from a
+	 * measurement, so false is reliable and true is only "not derived here". */
+	bool pressureMeasured;
+
+	/* Set when spd/hdg/climb came from differencing the GPS track rather than from the
+	 * sonde. The iMet-54 sends no velocity at all. */
+	bool velocityDerived;
 };

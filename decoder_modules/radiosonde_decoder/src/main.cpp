@@ -248,6 +248,7 @@ void RadiosondeDecoderModule::deriveVelocity(SondeFullData& d) {
                 if (h < 0.0) { h += 360.0; }
                 d.hdg = (float)h;
             }
+            d.velocityDerived = true;
         }
     }
     prevLat = d.lat;
@@ -411,6 +412,14 @@ static int countTrackPoints(const char* path) {
 // writeLogPoint rewrites them after every point, and closeLog leaves them behind.
 static const char* GPX_TRAILER = "    </trkseg>\n  </trk>\n</gpx>\n";
 
+// GPX 1.1 has nowhere to put a temperature, so everything past position, altitude and
+// time goes in <extensions>. Garmin's is the one schema mapping software actually
+// reads, and it has an air temperature; the rest of what a sonde sends has no agreed
+// home anywhere, so it goes in a namespace of this project's rather than being
+// invented into someone else's and read as something it is not.
+#define GPXTPX_NS "http://www.garmin.com/xmlschemas/TrackPointExtension/v1"
+#define SONDE_NS "https://github.com/sannysanoff/SDRPlusPlusBrown/radiosonde/v1"
+
 bool RadiosondeDecoderModule::openLog(bool startFresh) {
     closeLog();
     if (logPath[0] == 0) {
@@ -459,6 +468,22 @@ bool RadiosondeDecoderModule::openLog(bool startFresh) {
         }
     }
 
+    // A file written before the extensions existed has no declaration for their
+    // prefixes, and a prefix with nothing declaring it is not well formed XML - the
+    // whole track would stop parsing at the first point this session appended. So
+    // look, and if it is an older file, carry the declarations on every element
+    // instead. Verbose, but it keeps a continued track readable.
+    logInlineNs = false;
+    if (logFile && appending) {
+        long resume = ftell(logFile);
+        char head[2048];
+        fseek(logFile, 0, SEEK_SET);
+        size_t got = fread(head, 1, (sizeof head) - 1, logFile);
+        head[got] = 0;
+        logInlineNs = (strstr(head, "xmlns:sonde=") == NULL);
+        if (resume >= 0) { fseek(logFile, resume, SEEK_SET); }
+    }
+
     if (!logFile) {
         logFile = fopen(logPath, "wb");
         if (!logFile) {
@@ -471,7 +496,13 @@ bool RadiosondeDecoderModule::openLog(bool startFresh) {
     if (!appending) {
     fprintf(logFile,
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-            "<gpx version=\"1.1\" creator=\"SDR++ radiosonde decoder\" xmlns=\"http://www.topografix.com/GPX/1/1\">\n"
+            "<gpx version=\"1.1\" creator=\"SDR++ radiosonde decoder\"\n"
+            "     xmlns=\"http://www.topografix.com/GPX/1/1\"\n"
+            "     xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"\n"
+            "     xmlns:gpxtpx=\"" GPXTPX_NS "\"\n"
+            "     xmlns:sonde=\"" SONDE_NS "\"\n"
+            "     xsi:schemaLocation=\"http://www.topografix.com/GPX/1/1"
+            " http://www.topografix.com/GPX/1/1/gpx.xsd\">\n"
             "  <trk>\n    <name>Radiosonde</name>\n    <trkseg>\n");
     fflush(logFile);
     }
@@ -525,9 +556,85 @@ void RadiosondeDecoderModule::writeLogPoint(const SondeFullData& d, bool timeAcc
         if (utc) { strftime(when, sizeof when, "%Y-%m-%dT%H:%M:%SZ", utc); }
     }
 
+    // Only what a parser has actually handed over.
+    //
+    // The frame struct is cumulative and a parser writes only the groups its sonde
+    // carries, so an untouched temperature reads as 0.0 - or as the -273.15 the
+    // iMet-54 parser writes to mean "this frame missed it". Either one written to the
+    // file is a plausible looking reading that nothing measured, which is worse than
+    // leaving the point without a temperature at all.
+    const bool havePTU = (d.seenFields & DATA_PTU) != 0 && d.temp > -273.0f;
+    const bool haveVel = (d.seenFields & DATA_SPEED) != 0 || d.velocityDerived;
+    const bool haveAny = havePTU || haveVel || d.pressure > 0.0f;
+
     fprintf(logFile, "      <trkpt lat=\"%.6f\" lon=\"%.6f\">\n        <ele>%.1f</ele>\n",
             d.lat, d.lon, d.alt);
     if (when[0]) { fprintf(logFile, "        <time>%s</time>\n", when); }
+
+    // The same numbers twice, because GPX readers fall into two camps. <desc> is free
+    // text that every viewer shows when a point is clicked, so it is the one a person
+    // reads; the extensions after it are the one a program reads. Element order here
+    // is fixed by the GPX schema - ele, time, desc, then extensions last.
+    if (haveAny) {
+        std::string desc;
+        char part[160];
+        if (havePTU) {
+            snprintf(part, sizeof part, "%.1f C, %.0f%% RH, dew point %.1f C",
+                     (double)d.temp, (double)d.rh, (double)d.dewpt);
+            desc += part;
+        }
+        if (d.pressure > 0.0f) {
+            snprintf(part, sizeof part, "%s%.1f hPa%s", desc.empty() ? "" : ", ",
+                     (double)d.pressure, d.pressureMeasured ? "" : " (from altitude)");
+            desc += part;
+        }
+        if (haveVel) {
+            snprintf(part, sizeof part, "%s%.1f m/s at %.0f deg, climb %+.1f m/s%s",
+                     desc.empty() ? "" : ", ", (double)d.spd, (double)d.hdg,
+                     (double)d.climb, d.velocityDerived ? " (from GPS)" : "");
+            desc += part;
+        }
+        // Every value in it is a number this module formatted, so there is nothing in
+        // here that needs escaping. The free text fields the sonde sends - serial and
+        // aux - deliberately stay out of the track for that reason; they are in the
+        // frame CSV beside it.
+        fprintf(logFile, "        <desc>%s</desc>\n", desc.c_str());
+
+        const char* ns = logInlineNs
+                             ? " xmlns:gpxtpx=\"" GPXTPX_NS "\" xmlns:sonde=\"" SONDE_NS "\""
+                             : "";
+        fprintf(logFile, "        <extensions%s>\n", ns);
+        if (havePTU) {
+            fprintf(logFile,
+                    "          <gpxtpx:TrackPointExtension>"
+                    "<gpxtpx:atemp>%.2f</gpxtpx:atemp>"
+                    "</gpxtpx:TrackPointExtension>\n"
+                    "          <sonde:rh>%.1f</sonde:rh>\n"
+                    "          <sonde:dewpt>%.2f</sonde:dewpt>\n",
+                    (double)d.temp, (double)d.rh, (double)d.dewpt);
+        }
+        if (d.pressure > 0.0f) {
+            // Only the derivation this module does is flagged. Several of the vendored
+            // parsers work pressure out from altitude inside themselves and return it
+            // indistinguishable from a barometer reading, so the attribute being
+            // absent is not a promise that anything measured it.
+            fprintf(logFile, "          <sonde:pressure%s>%.2f</sonde:pressure>\n",
+                    d.pressureMeasured ? "" : " derived=\"altitude\"", (double)d.pressure);
+        }
+        if (haveVel) {
+            fprintf(logFile,
+                    "          <sonde:speed%s>%.2f</sonde:speed>\n"
+                    "          <sonde:heading>%.1f</sonde:heading>\n"
+                    "          <sonde:climb>%.2f</sonde:climb>\n",
+                    d.velocityDerived ? " derived=\"gps\"" : "",
+                    (double)d.spd, (double)d.hdg, (double)d.climb);
+        }
+        if (d.burstkill > 0) {
+            fprintf(logFile, "          <sonde:burstkill>%d</sonde:burstkill>\n", d.burstkill);
+        }
+        fprintf(logFile, "        </extensions>\n");
+    }
+
     fprintf(logFile, "      </trkpt>\n");
 
     // Close the document, flush, then wind back over the closing tags so the next

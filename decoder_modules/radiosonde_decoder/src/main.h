@@ -169,4 +169,9 @@ private:
     char logPath[1024] = { 0 };
     FILE* logFile = NULL;
     std::string logStatus;
+    // Set when continuing a track written before the per-point telemetry existed, so
+    // its header has no namespace declarations to hang the extensions off. Those
+    // points then carry their own, which is the only way to append to one of those
+    // files and have the result still parse.
+    bool logInlineNs = false;
 };
