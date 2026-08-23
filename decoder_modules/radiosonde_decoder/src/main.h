@@ -116,6 +116,10 @@ private:
     bool everDecoded = false;
     long long lastFrameTime = 0;   // currentTimeMillis(), see SondeFix::time
     int framesDecoded = 0;
+    // Whether this sonde has ever sent a non-zero sequence number. The iMet-54 has no
+    // packet counter at all, so its sequence field sits at zero for the whole flight
+    // and reporting that as "Frame 0" is a number that looks like data and is not.
+    bool sondeSendsSeq = false;
 
     // The onboard clock, as far as it has been believed. A sonde sends its own GPS
     // time and now and then sends a wrong one: a single frame arrived in a recorded

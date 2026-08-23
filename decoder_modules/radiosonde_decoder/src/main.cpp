@@ -264,6 +264,7 @@ void RadiosondeDecoderModule::sondeDataHandler(SondeFullData* data, void* ctx) {
     std::lock_guard<std::mutex> lck(_this->dataMtx);
     _this->everDecoded = true;
     _this->framesDecoded++;
+    if (data->seq != 0) { _this->sondeSendsSeq = true; }
     _this->lastFrameTime = currentTimeMillis();
 
     // Derive into our own copy, never into *data.
@@ -585,11 +586,13 @@ void RadiosondeDecoderModule::drawTelemetry() {
     bool have;
     int frames;
     double age;
+    bool hasSeq;
     {
         std::lock_guard<std::mutex> lck(dataMtx);
         d = lastData;
         have = everDecoded;
         frames = framesDecoded;
+        hasSeq = sondeSendsSeq;
         age = have ? ((double)(currentTimeMillis() - lastFrameTime) / 1000.0) : 0.0;
     }
 
@@ -624,8 +627,20 @@ void RadiosondeDecoderModule::drawTelemetry() {
     ImGui::Text("Serial    %s", d.serial.empty() ? "-" : d.serial.c_str());
     if (ImGui::IsItemHovered()) { style::tooltip("Printed on the sonde. This is what identifies the flight on tracking sites."); }
 
-    ImGui::Text("Frame     %d", d.seq);
-    if (ImGui::IsItemHovered()) { style::tooltip("Sequence number from the sonde, and %d frames decoded since it was tuned", frames); }
+    // Only the sonde's own counter when there is one. Sondes that send none - the
+    // iMet-54 among them - would otherwise show "Frame 0" for the whole flight, which
+    // reads as a measurement rather than as an absence.
+    if (hasSeq) {
+        ImGui::Text("Frame     %d", d.seq);
+        if (ImGui::IsItemHovered()) { style::tooltip("Sequence number from the sonde, and %d frames decoded since it was tuned", frames); }
+    }
+    else {
+        ImGui::Text("Frames    %d", frames);
+        if (ImGui::IsItemHovered()) {
+            style::tooltip("Frames decoded since this sonde was tuned. This type sends no sequence\n"
+                           "number of its own, so there is nothing to count gaps against.");
+        }
+    }
 
     if (d.time > 0) {
         char when[64] = "-";
