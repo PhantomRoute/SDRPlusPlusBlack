@@ -504,8 +504,16 @@ bool RadiosondeDecoderModule::openLog(bool startFresh) {
             "     xsi:schemaLocation=\"http://www.topografix.com/GPX/1/1"
             " http://www.topografix.com/GPX/1/1/gpx.xsd\">\n"
             "  <trk>\n    <name>Radiosonde</name>\n    <trkseg>\n");
-    fflush(logFile);
     }
+
+    // Leave the closing tags on disk straight away, and wind back over them, the same
+    // way every point does. Without this a file that is created and then never written
+    // to - the program stopped before anything decoded - is a document that was opened
+    // and never closed, which no reader will parse.
+    long start = ftell(logFile);
+    fputs(GPX_TRAILER, logFile);
+    fflush(logFile);
+    if (start >= 0) { fseek(logFile, start, SEEK_SET); }
 
     logStatus = std::string(appending ? "Appending to " : "Writing ") + logPath;
     return true;
