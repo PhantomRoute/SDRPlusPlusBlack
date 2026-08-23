@@ -306,7 +306,7 @@ namespace thememenu {
             }
             ImGui::SameLine();
             ImGui::TextUnformatted(col.name.c_str());
-            if (ImGui::IsItemHovered()) { ImGui::SetTooltip("%s", col.key.c_str()); }
+            if (ImGui::IsItemHovered()) { style::tooltip("%s", col.key.c_str()); }
         }
         return changed;
     }
@@ -437,7 +437,7 @@ namespace thememenu {
             ImGui::LeftLabel(choice.name.c_str());
             ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());
             changed |= ImGui::Combo(("##theme_choice_" + choice.key).c_str(), choice.value, items.c_str());
-            if (!choice.desc.empty() && ImGui::IsItemHovered()) { ImGui::SetTooltip("%s", choice.desc.c_str()); }
+            if (!choice.desc.empty() && ImGui::IsItemHovered()) { style::tooltip("%s", choice.desc.c_str()); }
         }
 
         for (const auto& slider : gui::themeManager.getSliders()) {
@@ -445,7 +445,7 @@ namespace thememenu {
             ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());
             changed |= ImGui::SliderFloat(("##theme_slider_" + slider.key).c_str(), slider.value,
                                           slider.min, slider.max, "%.2f");
-            if (!slider.desc.empty() && ImGui::IsItemHovered()) { ImGui::SetTooltip("%s", slider.desc.c_str()); }
+            if (!slider.desc.empty() && ImGui::IsItemHovered()) { style::tooltip("%s", slider.desc.c_str()); }
         }
 
         if (changed) { saveSpectrumStyle(); }

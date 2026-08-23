@@ -63,6 +63,7 @@ public:
     void removeBottomWindow(std::string name);
     void updateBottomWindowLayout();
     void drawBottomWindows(int dy);
+    void drawBottomWindowGrip();
     bool hasBottomWindow(std::string name);
 
     bool logWindow = false;

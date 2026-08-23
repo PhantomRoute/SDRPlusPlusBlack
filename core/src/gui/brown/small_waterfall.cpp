@@ -200,6 +200,9 @@ SubWaterfall::SubWaterfall(int sampleRate, int wfrange, const std::string & lbl)
     pvt->waterfall.setWaterfallMin(-150);
     pvt->waterfall.setWaterfallMax(0);
     pvt->waterfall.setFullWaterfallUpdate(false);
+    // The whole span is always in view, so there is nothing for a drag or a scroll on
+    // the scale to do except renumber it.
+    pvt->waterfall.freqScaleInteractive = false;
 
     pvt->fft_in = (fftwf_complex*)fftwf_malloc(sizeof(fftwf_complex) * pvt->fftSize);
     pvt->fft_out = (fftwf_complex*)fftwf_malloc(sizeof(fftwf_complex) * pvt->fftSize);
@@ -217,6 +220,25 @@ SubWaterfall::~SubWaterfall() {
 void SubWaterfall::init() {
     pvt->waterfall.init();
     pvt->res.init(nullptr, pvt->sampleRate, 2 * pvt->hiFreq);
+}
+
+int SubWaterfall::getSplit() const {
+    return pvt->waterfall.getFFTHeight();
+}
+
+void SubWaterfall::setSplit(int height) {
+    if (height <= 0) { return; }
+    pvt->waterfall.setFFTHeight(height);
+}
+
+int SubWaterfall::getWidgetHeight() const {
+    return (int)pvt->waterfall.getWidgetHeight();
+}
+
+bool SubWaterfall::takeSplitMoved() {
+    bool moved = pvt->waterfall.splitMovedByUser;
+    pvt->waterfall.splitMovedByUser = false;
+    return moved;
 }
 
 void SubWaterfall::draw() {

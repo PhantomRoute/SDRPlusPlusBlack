@@ -303,7 +303,7 @@ void SinkManager::showVolumeSlider(std::string name, std::string prefix, float w
         ImGui::SliderFloat((prefix + name).c_str(), &dummy, 0.0f, 1.0f, "");
         style::endDisabled();
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-            ImGui::SetTooltip("No audio stream yet. Start a radio to get one.");
+            style::tooltip("No audio stream yet. Start a radio to get one.");
         }
         if (sameLine) { ImGui::SetCursorPosY(ypos); }
         return;
@@ -320,7 +320,7 @@ void SinkManager::showVolumeSlider(std::string name, std::string prefix, float w
             core::configManager.release(true);
         }
         ImGui::PopID();
-        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("%s is muted. Click to unmute.", name.c_str()); }
+        if (ImGui::IsItemHovered()) { style::tooltip("%s is muted. Click to unmute.", name.c_str()); }
     }
     else {
         ImGui::PushID(ImGui::GetID(("sdrpp_mute_btn_" + name).c_str()));
@@ -331,7 +331,7 @@ void SinkManager::showVolumeSlider(std::string name, std::string prefix, float w
             core::configManager.release(true);
         }
         ImGui::PopID();
-        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Mute %s", name.c_str()); }
+        if (ImGui::IsItemHovered()) { style::tooltip("Mute %s", name.c_str()); }
     }
 
     ImGui::SameLine();
@@ -345,7 +345,7 @@ void SinkManager::showVolumeSlider(std::string name, std::string prefix, float w
         core::configManager.release(true);
     }
     // The slider draws no value, so hovering is the only way to see where it is.
-    if (ImGui::IsItemHovered()) { ImGui::SetTooltip("%s volume: %d%%", name.c_str(), (int)((stream->guiVolume * 100.0f) + 0.5f)); }
+    if (ImGui::IsItemHovered()) { style::tooltip("%s volume: %d%%", name.c_str(), (int)((stream->guiVolume * 100.0f) + 0.5f)); }
     if (sameLine) { ImGui::SetCursorPosY(ypos); }
 
     this->recentStreeam = stream;
@@ -420,7 +420,7 @@ void SinkManager::showMenu() {
         // An unlabelled list of sink names, with nothing to say it decides where
         // this stream's audio ends up.
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Where the audio from %s goes: a sound card, the network, or nowhere.", name.c_str());
+            style::tooltip("Where the audio from %s goes: a sound card, the network, or nowhere.", name.c_str());
         }
 
         stream->sink->menuHandler();
@@ -435,7 +435,7 @@ void SinkManager::showMenu() {
                 postActions.emplace_back([=]{onAddSubstream.emit(name0);});
             }
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Send this same audio to a second output as well, with its own device\nand volume: headphones and a network stream at once, say.");
+                style::tooltip("Send this same audio to a second output as well, with its own device\nand volume: headphones and a network stream at once, say.");
             }
         } else {
             if (ImGui::Button("Remove secondary", ImVec2(menuWidth, v1.y - v2.y))) {

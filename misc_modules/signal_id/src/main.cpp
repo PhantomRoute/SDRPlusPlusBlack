@@ -1039,7 +1039,7 @@ private:
 
         ImGui::Dummy(ImVec2(width, height));
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("The peak hold around the signal, %s across.\n"
+            style::tooltip("The peak hold around the signal, %s across.\n"
                               "The long line is the noise floor, the two short ones are the -3 dB and\n"
                               "-26 dB widths where they were measured, and the shaded band is the VFO.",
                               fmtWidth(sketchHi - sketchLo).c_str());
@@ -1062,7 +1062,7 @@ private:
         ImGui::HelpMarker("Stops measuring, so the numbers stay put while you read them.");
         ImGui::SameLine();
         if (ImGui::Button(("Reset##_sigid_reset_" + name).c_str())) { resetAll(); }
-        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Throw away the peak hold and the timing history"); }
+        if (ImGui::IsItemHovered()) { style::tooltip("Throw away the peak hold and the timing history"); }
         ImGui::SameLine();
         if (!shownValid) { style::beginDisabled(); }
         if (ImGui::Button(("Copy##_sigid_copy_" + name).c_str()) && shownValid) {
@@ -1070,7 +1070,7 @@ private:
         }
         if (!shownValid) { style::endDisabled(); }
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-            ImGui::SetTooltip("Copy everything below as text, for pasting somewhere you can ask about it");
+            style::tooltip("Copy everything below as text, for pasting somewhere you can ask about it");
         }
 
         ImGui::LeftLabel("Hold");
@@ -1122,7 +1122,7 @@ private:
         // ---- Frequency
         ImGui::SectionHeader("FREQUENCY");
         ImGui::Text("Centre    %s", fmtFreq(shown.centre).c_str());
-        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("The peak of the signal, which is not necessarily where the VFO sits"); }
+        if (ImGui::IsItemHovered()) { style::tooltip("The peak of the signal, which is not necessarily where the VFO sits"); }
 
         // Where it is compared with what is being listened to. Being half a channel
         // off is the commonest reason a signal that is plainly there sounds wrong,
@@ -1138,18 +1138,18 @@ private:
             if (fabs(off) < std::max<double>(shown.hzPerBin, 1.0)) { ImGui::Text("Offset    centred on the VFO"); }
             else { ImGui::Text("Offset    %s%s from the VFO", (off > 0.0) ? "+" : "-", fmtWidth(fabs(off)).c_str()); }
         }
-        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("How far the peak sits from the middle of the channel you are listening to"); }
+        if (ImGui::IsItemHovered()) { style::tooltip("How far the peak sits from the middle of the channel you are listening to"); }
 
         double drifting = drift();
         if (fabs(drifting) >= 1.0) { ImGui::Text("Drift     %+.0f Hz/s", drifting); }
         else { ImGui::Text("Drift     steady"); }
-        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Movement of the peak over the last few seconds. Anything under one\nbin of the current resolution counts as steady."); }
+        if (ImGui::IsItemHovered()) { style::tooltip("Movement of the peak over the last few seconds. Anything under one\nbin of the current resolution counts as steady."); }
 
         double step = rasterStep(shown.centre, shown.hzPerBin);
         if (step > 0.0) { ImGui::Text("Channels  on the %s grid", fmtWidth(step).c_str()); }
         else { ImGui::Text("Channels  not on a common grid"); }
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Whether the centre lands on one of the spacings transmitters are usually\n"
+            style::tooltip("Whether the centre lands on one of the spacings transmitters are usually\n"
                               "assigned on - 25, 12.5, 9, 5 kHz and so on. The widest one it fits is the\n"
                               "one shown, so any finer spacing that divides into it fits as well.\n"
                               "Sitting on a grid means it was put there; sitting between them is normal\n"
@@ -1164,7 +1164,7 @@ private:
             tuner::tune(tuner::TUNER_MODE_NORMAL, gui::waterfall.selectedVFO, shown.centre);
         }
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-            ImGui::SetTooltip("Put the VFO on the measured centre");
+            style::tooltip("Put the VFO on the measured centre");
         }
         ImGui::SameLine();
         if (ImGui::Button(("Match width##_sigid_width_" + name).c_str(), ImVec2(ImGui::GetContentRegionAvail().x, 0)) &&
@@ -1179,16 +1179,16 @@ private:
             }
         }
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-            ImGui::SetTooltip("Set the channel width to the measured -26 dB width. Modes with a fixed\nwidth ignore this.");
+            style::tooltip("Set the channel width to the measured -26 dB width. Modes with a fixed\nwidth ignore this.");
         }
         if (!haveVfo) { style::endDisabled(); }
 
         // ---- Width and shape
         ImGui::SectionHeader("WIDTH AND SHAPE");
         ImGui::Text("-26 dB    %s", fmtWidth(shown.occupied).c_str());
-        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("How much room the signal takes up: the width measured 26 dB down from the\npeak, where it has fallen to about a four hundredth of its power. This is\nthe number to compare with a channel plan."); }
+        if (ImGui::IsItemHovered()) { style::tooltip("How much room the signal takes up: the width measured 26 dB down from the\npeak, where it has fallen to about a four hundredth of its power. This is\nthe number to compare with a channel plan."); }
         ImGui::Text("-3 dB     %s", fmtWidth(shown.halfPower).c_str());
-        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("The width of the strong part alone, at half the peak power"); }
+        if (ImGui::IsItemHovered()) { style::tooltip("The width of the strong part alone, at half the peak power"); }
 
 
         // Not "near": windows.h defines that as an empty macro.
@@ -1196,7 +1196,7 @@ private:
         if (comparable != NULL) { ImGui::Text("Compare   as wide as %s", comparable); }
         else { ImGui::Text("Compare   -"); }
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Something to hold the width up against, not an identification. Plenty of\n"
+            style::tooltip("Something to hold the width up against, not an identification. Plenty of\n"
                               "unrelated things share a channel width, and a signal can sit in a channel\n"
                               "far wider than itself.");
         }
@@ -1217,7 +1217,7 @@ private:
             ImGui::Text("Filter    %s, a good fit", fmtWidth(vfoBw).c_str());
         }
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Your channel width against the measured one. Narrower and you are hearing\n"
+            style::tooltip("Your channel width against the measured one. Narrower and you are hearing\n"
                               "part of the signal, which is why a wide signal in a narrow filter sounds\n"
                               "muffled or breaks up. Wider and you are letting in noise, and whatever\n"
                               "else is in the next channel along. Match width above sets it.");
@@ -1237,7 +1237,7 @@ private:
             ImGui::Text("Changes   by %s", fmtWidth(widthMoved).c_str());
         }
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("How much the occupied width moved over the last ten seconds, ignoring the\n"
+            style::tooltip("How much the occupied width moved over the last ten seconds, ignoring the\n"
                               "odd stray frame. A width that breathes belongs to something whose bandwidth\n"
                               "follows what is being sent, which is what voice does. A width that sits\n"
                               "still belongs to something sending at a constant rate.");
@@ -1251,7 +1251,7 @@ private:
             ImGui::Text("Profile   -");
         }
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("The -26 dB width divided by the -3 dB width. Near 1 means the energy is\n"
+            style::tooltip("The -26 dB width divided by the -3 dB width. Near 1 means the energy is\n"
                               "spread evenly across the whole band; a large number means most of it is\n"
                               "concentrated in the middle.");
         }
@@ -1266,31 +1266,31 @@ private:
             ImGui::Text("Peaks     %d", shown.peaks);
         }
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Separate maxima within 20 dB of the strongest, across the occupied width,\n"
+            style::tooltip("Separate maxima within 20 dB of the strongest, across the occupied width,\n"
                               "and the average gap between them. Two evenly spaced humps look like keying\n"
                               "between two frequencies; a row of them looks like a multi-carrier signal.");
         }
 
         ImGui::Text("Crest     %.0f dB", shown.crestDb);
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("How far the peak stands above the average across the occupied width.\n"
+            style::tooltip("How far the peak stands above the average across the occupied width.\n"
                               "A few dB means a flat block of energy; a lot means one dominant spike.");
         }
 
         if (shown.balance > 0.25) { ImGui::Text("Balance   mostly above the peak"); }
         else if (shown.balance < -0.25) { ImGui::Text("Balance   mostly below the peak"); }
         else { ImGui::Text("Balance   even"); }
-        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Which side of the peak the energy sits on"); }
+        if (ImGui::IsItemHovered()) { style::tooltip("Which side of the peak the energy sits on"); }
 
         // ---- Strength
         ImGui::SectionHeader("STRENGTH");
         ImGui::Text("Peak      %.0f dBFS", shown.peakDbfs);
-        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Relative to the full scale of the receiver, so it depends on the gain\nsettings. Only the difference from the noise below means anything on its own."); }
+        if (ImGui::IsItemHovered()) { style::tooltip("Relative to the full scale of the receiver, so it depends on the gain\nsettings. Only the difference from the noise below means anything on its own."); }
         ImGui::Text("Noise     %.0f dBFS", shown.noiseDbfs);
-        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("The quiet quarter of everything on screen, taken as the noise floor"); }
+        if (ImGui::IsItemHovered()) { style::tooltip("The quiet quarter of everything on screen, taken as the noise floor"); }
         ImGui::Text("SNR       %.0f dB", shown.snr);
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("How far the signal stands above the noise. Under about 6 dB nothing here\n"
+            style::tooltip("How far the signal stands above the noise. Under about 6 dB nothing here\n"
                               "is worth much; over 20 dB the measurements are as good as the resolution\n"
                               "at the bottom of this panel allows.");
         }
@@ -1302,7 +1302,7 @@ private:
         else if (levelMoved < 3.0) { ImGui::Text("Swing     steady"); }
         else { ImGui::Text("Swing     %.0f dB", levelMoved); }
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("How far the level rose and fell over the last ten seconds, ignoring the odd\n"
+            style::tooltip("How far the level rose and fell over the last ten seconds, ignoring the odd\n"
                               "stray frame. A steady level is a signal arriving by a stable path, usually\n"
                               "a local one. A level swinging by 10 or 20 dB is fading, which is what a\n"
                               "signal that has come a long way by ionosphere does - and also what a\n"
@@ -1316,7 +1316,7 @@ private:
 
         if (samplesTotal >= 20) { ImGui::Text("On        %.0f%% of the time", duty * 100.0); }
         else { ImGui::Text("On        -"); }
-        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Over the last twenty seconds or so"); }
+        if (ImGui::IsItemHovered()) { style::tooltip("Over the last twenty seconds or so"); }
 
         // All three of the rows below describe the last twenty transmissions, and
         // stop meaning anything once those stopped happening.
@@ -1327,7 +1327,7 @@ private:
             if (ImGui::IsItemHovered()) {
                 double shortest = *std::min_element(burstLengths.begin(), burstLengths.end());
                 double longest = *std::max_element(burstLengths.begin(), burstLengths.end());
-                ImGui::SetTooltip("How long it stays up, averaged over the last twenty transmissions.\n"
+                style::tooltip("How long it stays up, averaged over the last twenty transmissions.\n"
                                   "Shortest %s, longest %s.\n"
                                   "Bursts all the same length are a machine; ones that vary are someone talking.",
                                   fmtTime(shortest).c_str(), fmtTime(longest).c_str());
@@ -1339,14 +1339,14 @@ private:
 
         if (!gapLengths.empty() && !timingOld) { ImGui::Text("Gaps      %s", fmtTime(average(gapLengths)).c_str()); }
         else { ImGui::Text("Gaps      -"); }
-        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("How long it waits between transmissions, averaged the same way"); }
+        if (ImGui::IsItemHovered()) { style::tooltip("How long it waits between transmissions, averaged the same way"); }
 
         // Whether it keeps to a schedule, which the average period alone cannot say:
         // one burst every two seconds and a scatter of bursts averaging two seconds
         // apart gave the same number, and they are not the same signal.
         ImGui::Text("Rhythm    %s", rhythmText().c_str());
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("The time from one transmission starting to the next, and how much it varies.\n"
+            style::tooltip("The time from one transmission starting to the next, and how much it varies.\n"
                               "Regular means every gap was within a tenth of the average - a beacon, a\n"
                               "telemetry link, something on a timer rather than a person.");
         }
@@ -1378,7 +1378,7 @@ private:
             ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.3f, 1.0f), "%d bins, %s each - too coarse",
                                shown.binsAcross, fmtWidth(shown.hzPerBin).c_str());
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Too few bins across the signal to measure its width or shape. Zoom in,\n"
+                style::tooltip("Too few bins across the signal to measure its width or shape. Zoom in,\n"
                                   "or raise the FFT size. Held on until there are comfortably enough again,\n"
                                   "so a momentary dip does not flash a warning at you.");
             }

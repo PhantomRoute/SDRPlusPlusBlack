@@ -258,6 +258,11 @@ namespace backend {
 
     int renderLoop() {
         // Main loop
+        // Synthetic pointer state, stepped once per frame. See the block below.
+        bool synthDragActive = false;
+        float synthDragX1 = 0, synthDragY1 = 0, synthDragX2 = 0, synthDragY2 = 0;
+        int synthDragStep = 0, synthDragSteps = 0;
+
         while (!glfwWindowShouldClose(window)) {
 #ifdef BUILD_TESTS
             // Check if we should exit for testing purposes
@@ -270,6 +275,78 @@ namespace backend {
 #endif
 
             glfwPollEvents();
+
+            // Synthetic pointer input has to be handed over before NewFrame.
+            //
+            // NewFrame is what turns io.MouseDown into clicks, drag distances and
+            // item-active state, so anything written to io afterwards only affects
+            // code that reads io directly, and is gone again by the next frame. That
+            // is why a click could press a button but nothing could ever be dragged:
+            // the splitters, the VFO edges and the sliders all go through the derived
+            // state. Going through AddMousePosEvent/AddMouseButtonEvent ahead of the
+            // frame puts it on the same footing as a real pointer.
+            //
+            // The GLFW backend only re-reads the real cursor when its window has
+            // focus, so with the window in the background these events stand.
+            {
+                ImGuiIO& io = ImGui::GetIO();
+                if (synthDragActive) {
+                    // Step -1 puts the pointer on the start with the button still up.
+                    //
+                    // Without it the press lands on the same frame as the jump from
+                    // wherever the pointer was before, so MouseDelta on that frame is
+                    // that whole jump - and anything that resizes by accumulating
+                    // MouseDelta gets one enormous bogus step before the real drag
+                    // begins. Widgets that work from the absolute position never
+                    // noticed; the ones that integrate deltas did.
+                    if (synthDragStep < 0) {
+                        io.AddMousePosEvent(synthDragX1, synthDragY1);
+                        io.AddMouseButtonEvent(0, false);
+                        synthDragStep++;
+                    }
+                    else {
+                        float t = (synthDragSteps > 1) ? ((float)synthDragStep / (float)(synthDragSteps - 1)) : 1.0f;
+                        if (t > 1.0f) { t = 1.0f; }
+                        io.AddMousePosEvent(synthDragX1 + (synthDragX2 - synthDragX1) * t,
+                                            synthDragY1 + (synthDragY2 - synthDragY1) * t);
+                        // Held for every step, released on the frame after the last -
+                        // which is the frame ImGui reads as the end of the drag.
+                        io.AddMouseButtonEvent(0, synthDragStep < synthDragSteps);
+                        if (synthDragStep >= synthDragSteps) { synthDragActive = false; }
+                        synthDragStep++;
+                    }
+                }
+                else {
+                    httpdebug::ImGuiAction pa;
+                    if (httpdebug::popPointerAction(pa)) {
+                        switch (pa.type) {
+                        case httpdebug::ImGuiAction::MouseMove:
+                            io.AddMousePosEvent(pa.x, pa.y);
+                            break;
+                        case httpdebug::ImGuiAction::Click:
+                            // A press and a release cannot share a frame, so a click is
+                            // just the degenerate drag: same point, two steps.
+                            synthDragActive = true;
+                            synthDragX1 = synthDragX2 = pa.x;
+                            synthDragY1 = synthDragY2 = pa.y;
+                            synthDragSteps = 2;
+                            synthDragStep = -1;
+                            break;
+                        case httpdebug::ImGuiAction::Drag:
+                            synthDragActive = true;
+                            synthDragX1 = pa.x;
+                            synthDragY1 = pa.y;
+                            synthDragX2 = pa.x2;
+                            synthDragY2 = pa.y2;
+                            synthDragSteps = pa.steps;
+                            synthDragStep = -1;
+                            break;
+                        default:
+                            break;
+                        }
+                    }
+                }
+            }
 
             beginFrame();
 
@@ -338,17 +415,14 @@ namespace backend {
 
                 httpdebug::procfs::processQueue();
 
+                // The pointer actions were taken before the frame started; what is
+                // left here needs the ImGui context and so has to run inside it.
                 httpdebug::ImGuiAction action;
                 while (httpdebug::popAction(action)) {
                     switch (action.type) {
                     case httpdebug::ImGuiAction::Click:
-                        ImGui::GetIO().MousePos.x = action.x;
-                        ImGui::GetIO().MousePos.y = action.y;
-                        ImGui::GetIO().MouseDown[0] = true;
-                        break;
                     case httpdebug::ImGuiAction::MouseMove:
-                        ImGui::GetIO().MousePos.x = action.x;
-                        ImGui::GetIO().MousePos.y = action.y;
+                    case httpdebug::ImGuiAction::Drag:
                         break;
                     case httpdebug::ImGuiAction::KeyPress:
                         ImGui::GetIO().KeysDown[action.key] = true;

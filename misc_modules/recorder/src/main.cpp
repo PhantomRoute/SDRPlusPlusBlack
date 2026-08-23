@@ -359,7 +359,7 @@ private:
         ImGui::Columns(1, CONCAT("EndRecorderModeColumns##_", _this->name), false);
         ImGui::EndGroup();
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-            ImGui::SetTooltip("Baseband records the raw IQ of the whole visible spectrum, which is\n"
+            style::tooltip("Baseband records the raw IQ of the whole visible spectrum, which is\n"
                               "large but can be replayed and retuned later. Audio records what you\n"
                               "are listening to on one stream.");
         }
@@ -376,7 +376,7 @@ private:
                 config.release(true);
             }
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-                ImGui::SetTooltip("Which audio output to record. Each radio and each secondary output is\nits own stream.");
+                style::tooltip("Which audio output to record. Each radio and each secondary output is\nits own stream.");
             }
         }
 
@@ -401,7 +401,7 @@ private:
         ImGui::SameLine();
         ImGui::TextDisabled("(?)");
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("$t   audio or baseband\n"
+            style::tooltip("$t   audio or baseband\n"
                               "$f   frequency, in Hz\n"
                               "$r   mode (NFM, USB, ...)\n"
                               "$h $m $s   hour, minute, second\n"
@@ -420,7 +420,7 @@ private:
             ImGui::TextDisabled("%s", shown.c_str());
             ImGui::PopTextWrapPos();
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("%s\n%s", live ? "Writing to" : "Next recording goes to",
+                style::tooltip("%s\n%s", live ? "Writing to" : "Next recording goes to",
                                   live ? _this->currentPath.c_str() : _this->previewPath.c_str());
             }
         }
@@ -448,7 +448,7 @@ private:
             double bytesPerMinute = (double)rate * (double)_this->bytesPerFrame() * 60.0;
             ImGui::TextDisabled("%s per minute at %.0f kS/s", formatBytes((uint64_t)bytesPerMinute).c_str(), (double)rate / 1000.0);
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("A WAV file cannot go past 4 GB. At this rate that is about %s.",
+                style::tooltip("A WAV file cannot go past 4 GB. At this rate that is about %s.",
                                   formatSpan((uint64_t)(4294967296.0 / std::max<double>(1.0, bytesPerMinute / 60.0))).c_str());
             }
         }
@@ -500,7 +500,7 @@ private:
                 config.release(true);
             }
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Gain applied to what is written to the file, not to what you hear.\nKeep the meters off the right hand end.");
+                style::tooltip("Gain applied to what is written to the file, not to what you hear.\nKeep the meters off the right hand end.");
             }
         }
 
@@ -529,7 +529,7 @@ private:
             }
             else if (!_this->currentPath.empty()) {
                 ImGui::TextDisabled("Saved  %s", std::filesystem::path(_this->currentPath).filename().string().c_str());
-                if (ImGui::IsItemHovered()) { ImGui::SetTooltip("%s", _this->currentPath.c_str()); }
+                if (ImGui::IsItemHovered()) { style::tooltip("%s", _this->currentPath.c_str()); }
             }
             else {
                 ImGui::TextDisabled("Idle  --:--:--");

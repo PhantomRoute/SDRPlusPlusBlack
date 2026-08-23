@@ -550,24 +550,87 @@ private:
                 _this->bandwidth = std::clamp<float>(_this->bandwidth, _this->minBandwidth, _this->maxBandwidth);
                 _this->setBandwidth(_this->bandwidth);
             }
-            int limit = 12000;
-            switch(_this->selectedDemodID) {        // convenience to fully utilize slider, edit with above field for outside values
+            // Where the slider ends. Short of the mode's maximum on purpose, so that
+            // the part of the range anyone actually uses gets the whole width of the
+            // slider and the box on the left is there for the rest.
+            float limit = 12000.0f;
+            switch(_this->selectedDemodID) {
             case RADIO_DEMOD_LSB:
             case RADIO_DEMOD_USB:
-                limit = 3500;
+                limit = 3500.0f;
                 break;
             case RADIO_DEMOD_CW:
-                limit = 1000;
+                limit = 1000.0f;
+                break;
+            case RADIO_DEMOD_NFM:
+                // 12000 sat just below the 12.5 kHz this mode defaults to, so the
+                // slider started hard against its own end.
+                limit = 25000.0f;
+                break;
+            case RADIO_DEMOD_WFM:
+                limit = 200000.0f;
                 break;
             }
+            // Unlocked, the point is to be able to reach the top, so the convenience
+            // limit stops applying.
+            if (_this->unlockBandwidth) { limit = _this->maxBandwidth; }
+
+            // The slider has to span the mode's own range, and this is where it went
+            // wrong: it ran from a flat 50 Hz to a convenience limit that took no
+            // account of the mode's minimum. On WFM that meant a slider from 50 to
+            // 12000 against a minimum of 50000 - every position on it clamped to
+            // 50000, so the control did nothing at all and the widest the mode would
+            // go was its own narrowest.
+            float sliderMin = _this->minBandwidth;
+            float sliderMax = limit;
+            if (sliderMax > _this->maxBandwidth) { sliderMax = _this->maxBandwidth; }
+            // A convenience limit at or below the minimum is not a range. Fall back to
+            // the mode's real maximum rather than leaving a slider that cannot move.
+            if (sliderMax <= sliderMin) { sliderMax = _this->maxBandwidth; }
+
             ImGui::SameLine();
             ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());
-            if (ImGui::SliderFloat(("##_radio_bw_slider_" + _this->name).c_str(), &_this->bandwidth, 50, limit, "")) {
+            if (ImGui::SliderFloat(("##_radio_bw_slider_" + _this->name).c_str(), &_this->bandwidth, sliderMin, sliderMax, "")) {
                 _this->bandwidth = std::clamp<float>(_this->bandwidth, _this->minBandwidth, _this->maxBandwidth);
                 _this->setBandwidth(_this->bandwidth);
             }
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Width of the channel, in Hz. The slider stops at what is sensible for\nthis mode; the box on the left takes anything up to %.0f Hz.", _this->maxBandwidth);
+                style::tooltip("Width of the channel, in Hz. The slider covers %.0f to %.0f, which is\nthe part of this mode's range in normal use; the box on the left takes\nanything from %.0f up to %.0f Hz.",
+                               sliderMin, sliderMax, _this->minBandwidth, _this->maxBandwidth);
+            }
+
+            if (ImGui::Checkbox(("Any bandwidth##_radio_bwunlock_" + _this->name).c_str(), &_this->unlockBandwidth)) {
+                _this->applyBandwidthLimits();
+                // Re-clamp what is set now. Turning the switch off with a bandwidth
+                // wider than the mode allows has to bring it back in, or the control
+                // would be showing a figure the mode is no longer set to.
+                _this->setBandwidth(_this->bandwidth);
+                config.acquire();
+                config.conf[_this->name]["unlockBandwidth"] = _this->unlockBandwidth;
+                config.release(true);
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                // What it would open to, whether or not it is open now, so the tooltip
+                // answers "what do I get" rather than only describing the state it is
+                // already in.
+                double ifRate = _this->selectedDemod ? _this->selectedDemod->getIFSampleRate() : 0.0;
+                double wideLimit = ifRate;
+                if (_this->selectedDemod && _this->selectedDemod->getMaxBandwidth() > wideLimit) {
+                    wideLimit = _this->selectedDemod->getMaxBandwidth();
+                }
+                double narrowLimit = (ifRate > 0.0) ? (BW_TAPS_PER_RATIO * ifRate) / UNLOCKED_MAX_TAPS : 0.0;
+                if (_this->selectedDemod && _this->selectedDemod->getMinBandwidth() < narrowLimit) {
+                    narrowLimit = _this->selectedDemod->getMinBandwidth();
+                }
+                style::tooltip("Off, the bandwidth stops where the mode normally stops - which is what\n"
+                               "keeps you from opening a 12.5 kHz channel out to 50 and taking in the\n"
+                               "neighbours with it.\n"
+                               "On, it opens out to what this mode can actually carry, %.0f Hz, and\n"
+                               "down to %.0f Hz. Both are real limits rather than conventions: the wide\n"
+                               "end is how much spectrum the channel delivers, and the narrow end is\n"
+                               "where the channel filter would grow long enough to bog the audio down.\n"
+                               "Worth most on CW and SSB, whose usual limits are the tightest.",
+                               wideLimit, narrowLimit);
             }
         }
 
@@ -584,7 +647,7 @@ private:
             }
         }
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Tuning snaps to a multiple of this many Hz, so the VFO lands on channel\nspacing rather than between channels. It is also the step the arrow keys\nand the mouse wheel tune by.");
+            style::tooltip("Tuning snaps to a multiple of this many Hz, so the VFO lands on channel\nspacing rather than between channels. It is also the step the arrow keys\nand the mouse wheel tune by.");
         }
 
         // Everything from here down is about keeping unwanted audio out: the blanker,
@@ -608,7 +671,7 @@ private:
             }
             if (!_this->nbEnabled && _this->enabled) { style::endDisabled(); }
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-                ImGui::SetTooltip("Squashes samples louder than this many times the running average, which\nflattens ignition and power line clicks. Lower catches more, and starts\neating the signal too.");
+                style::tooltip("Squashes samples louder than this many times the running average, which\nflattens ignition and power line clicks. Lower catches more, and starts\neating the signal too.");
             }
         }
         
@@ -625,7 +688,7 @@ private:
         }
         if (!_this->squelchEnabled && _this->enabled) { style::endDisabled(); }
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-            ImGui::SetTooltip("Mutes the audio until the channel is louder than this. While it is on, the\nlevel is drawn as a line across the spectrum, so set it just above where\nthe noise sits.");
+            style::tooltip("Mutes the audio until the channel is louder than this. While it is on, the\nlevel is drawn as a line across the spectrum, so set it just above where\nthe noise sits.");
         }
 
         // CTCSS / DCS identification and tone squelch
@@ -660,13 +723,13 @@ private:
                 if (!canUse) { style::endDisabled(); }
                 if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
                     if (listFull) {
-                        ImGui::SetTooltip("The list is full.");
+                        style::tooltip("The list is full.");
                     }
                     else if (listMode) {
-                        ImGui::SetTooltip("Adds the tone shown above to the list of codes this channel\nopens for, and leaves the rest of the list alone.");
+                        style::tooltip("Adds the tone shown above to the list of codes this channel\nopens for, and leaves the rest of the list alone.");
                     }
                     else {
-                        ImGui::SetTooltip("Switches the tone squelch on and sets it to the tone shown above,\nwithout having to find it in the picker.");
+                        style::tooltip("Switches the tone squelch on and sets it to the tone shown above,\nwithout having to find it in the picker.");
                     }
                 }
             }
@@ -675,7 +738,7 @@ private:
                 _this->updateToneBlock(true);
             }
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("High passes the audio at 300 Hz so the sub-audible tone is\n"
+                style::tooltip("High passes the audio at 300 Hz so the sub-audible tone is\n"
                                   "not heard, the way a handheld does. Use this rather than the\n"
                                   "demodulator's own High Pass, which strips the tone before it\n"
                                   "can be identified.");
@@ -716,7 +779,7 @@ private:
                     _this->updateToneBlock(true);
                 }
                 if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-                    ImGui::SetTooltip("CTCSS or DCS opens for one code, the way a radio does.\n"
+                    style::tooltip("CTCSS or DCS opens for one code, the way a radio does.\n"
                                       "Any tone opens for whatever code it can decode, for a channel\n"
                                       "whose users you do not know yet.\n"
                                       "Custom list opens for the handful of codes you name and keeps\n"
@@ -761,7 +824,7 @@ private:
                     _this->updateToneBlock(true);
                 }
                 if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-                    ImGui::SetTooltip("A radio finishing a transmission flips the phase of its CTCSS tone\n"
+                    style::tooltip("A radio finishing a transmission flips the phase of its CTCSS tone\n"
                                       "for a moment before dropping the carrier, and sends a 134.4 Hz\n"
                                       "turn-off code at the end of a DCS one. Watching for those closes\n"
                                       "the squelch as the transmission ends rather than a sixth of a\n"
@@ -884,9 +947,10 @@ private:
 
         // Load config
         bandwidth = selectedDemod->getDefaultBandwidth();
-        minBandwidth = selectedDemod->getMinBandwidth();
-        maxBandwidth = selectedDemod->getMaxBandwidth();
         bandwidthLocked = selectedDemod->getBandwidthLocked();
+        // Before the config is read below, because the value that comes back out of it
+        // is clamped to these.
+        applyBandwidthLimits();
         snapInterval = selectedDemod->getDefaultSnapInterval();
         squelchLevel = MIN_SQUELCH;
         deempAllowed = selectedDemod->getDeempAllowed();
@@ -907,6 +971,14 @@ private:
         toneSqEnabled = false;
         toneTailCloseEnabled = true;
         toneTarget = tonedetect::Target();
+        // Read before applyBandwidthLimits below decides the range. Kept against the
+        // module rather than the demodulator, because it is a statement about how the
+        // operator wants the program to behave and not about any one mode.
+        {
+            config.acquire();
+            if (config.conf[name].contains("unlockBandwidth")) { unlockBandwidth = config.conf[name]["unlockBandwidth"]; }
+            config.release();
+        }
         double ifSamplerate = selectedDemod->getIFSampleRate();
         config.acquire();
         if (config.conf[name][selectedDemod->getName()].contains("bandwidth")) {
@@ -1036,6 +1108,52 @@ private:
     }
 
 
+    // The bandwidth range the controls will allow.
+    //
+    // Normally the demodulator's own, which are what the mode is actually for: 500 Hz
+    // on CW, 12.5 kHz on NFM. Unlocked, they open up to what the signal path can
+    // physically carry - the demodulator's IF sample rate, since that is how much
+    // spectrum the channel actually delivers, and nothing wider than it exists to be
+    // filtered. So this is not "no limit", it is "the limit that is real rather than
+    // the one that is convention".
+    //
+    // What that buys differs by mode, because some are already at the physical
+    // ceiling: CW goes from 500 Hz to 3 kHz and SSB from 12 to 24 kHz, while AM, NFM
+    // and WFM already sit at their IF rate and only gain at the narrow end.
+    void applyBandwidthLimits() {
+        if (!selectedDemod) { return; }
+        if (unlockBandwidth) {
+            maxBandwidth = selectedDemod->getIFSampleRate();
+            // A mode whose own maximum is already wider than its IF rate keeps it -
+            // unlocking must never narrow anything.
+            if (selectedDemod->getMaxBandwidth() > maxBandwidth) { maxBandwidth = selectedDemod->getMaxBandwidth(); }
+
+            // The narrow end is not a matter of taste, which is why it does not simply
+            // open to nothing.
+            //
+            // The channel filter in rx_vfo builds its transition band as a tenth of
+            // half the bandwidth, so its length works out at 76 * IF rate / bandwidth.
+            // Halving the bandwidth doubles the filter. The per mode minimums all land
+            // near four thousand taps, which is what they are really for - 50 Hz on
+            // WFM would ask for a filter of seven hundred and sixty thousand taps at
+            // half a megasample a second, and the program would stop responding rather
+            // than sound narrow.
+            //
+            // So the floor comes from a tap budget instead: loosen every mode by the
+            // same honest measure, and let the modes with a low IF rate go narrower
+            // because for them it genuinely costs less.
+            minBandwidth = (BW_TAPS_PER_RATIO * selectedDemod->getIFSampleRate()) / UNLOCKED_MAX_TAPS;
+            if (selectedDemod->getMinBandwidth() < minBandwidth) { minBandwidth = selectedDemod->getMinBandwidth(); }
+        }
+        else {
+            minBandwidth = selectedDemod->getMinBandwidth();
+            maxBandwidth = selectedDemod->getMaxBandwidth();
+        }
+        // The waterfall enforces its own copy when the VFO is dragged, so it has to be
+        // told as well or the box and the drag would disagree.
+        if (vfo) { vfo->setBandwidthLimits(minBandwidth, maxBandwidth, selectedDemod->getBandwidthLocked()); }
+    }
+
     void setBandwidth(double bw) {
         bw = std::clamp<double>(bw, minBandwidth, maxBandwidth);
         bandwidth = bw;
@@ -1055,10 +1173,8 @@ private:
         selectedDemod->AFSampRateChanged(audioSampleRate);
         if (!postProcEnabled && vfo) {
             // If postproc is disabled, IF SR = AF SR
-            minBandwidth = selectedDemod->getMinBandwidth();
-            maxBandwidth = selectedDemod->getMaxBandwidth();
+            applyBandwidthLimits();
             bandwidth = selectedDemod->getIFSampleRate();
-            vfo->setBandwidthLimits(minBandwidth, maxBandwidth, selectedDemod->getBandwidthLocked());
             vfo->setSampleRate(selectedDemod->getIFSampleRate(), bandwidth);
             return;
         }
@@ -1668,6 +1784,15 @@ private:
     float maxBandwidth;
     float bandwidth;
     bool bandwidthLocked;
+    // Whether the bandwidth controls are held to what the mode is for, or opened up to
+    // what the signal path can carry. See applyBandwidthLimits.
+    bool unlockBandwidth = false;
+    // taps = 3.8 * rate / transition, and transition = bandwidth / 20, so a channel
+    // filter is 76 * rate / bandwidth taps long. See applyBandwidthLimits.
+    static constexpr double BW_TAPS_PER_RATIO = 76.0;
+    // Roughly twice what the stock minimums come out at, so unlocking is a real
+    // loosening, and still bounded so that no setting can wedge the audio thread.
+    static constexpr double UNLOCKED_MAX_TAPS = 8192.0;
     int snapInterval;
     int selectedDemodID = 1;
     bool postProcEnabled;

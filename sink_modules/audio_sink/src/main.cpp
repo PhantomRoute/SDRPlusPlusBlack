@@ -168,7 +168,7 @@ public:
             config.conf[_streamName]["device"] = devList[devId].name;
             config.release(true);
         }
-        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Which sound card this stream is played out of"); }
+        if (ImGui::IsItemHovered()) { style::tooltip("Which sound card this stream is played out of"); }
 
         ImGui::LeftLabel("Rate");
         ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());

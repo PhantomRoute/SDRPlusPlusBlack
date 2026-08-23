@@ -363,7 +363,7 @@ void MainWindow::drawUpperLine(ImGui::WaterfallVFO* vfo) {
             setPlayState(false);
         }
         ImGui::PopID();
-        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Stop the radio  (End)"); }
+        if (ImGui::IsItemHovered()) { style::tooltip("Stop the radio  (End)"); }
     }
     else { // TODO: Might need to check if there even is a device
         ImGui::PushID(ImGui::GetID("sdrpp_play_btn"));
@@ -376,7 +376,7 @@ void MainWindow::drawUpperLine(ImGui::WaterfallVFO* vfo) {
         // The keyboard shortcuts are the only way to find out about these, and
         // nothing anywhere says they exist.
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-            ImGui::SetTooltip("%s", playButtonLocked ? "Waiting for the source to be ready" : "Start the radio  (End)");
+            style::tooltip("%s", playButtonLocked ? "Waiting for the source to be ready" : "Start the radio  (End)");
         }
     }
     if (playButtonLocked && !tmpPlaySate) { style::endDisabled(); }
@@ -411,7 +411,7 @@ void MainWindow::drawUpperLine(ImGui::WaterfallVFO* vfo) {
         }
         ImGui::PopID();
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Centre tuning: the receiver retunes so the signal stays in the middle,\n"
+            style::tooltip("Centre tuning: the receiver retunes so the signal stays in the middle,\n"
                               "and one click on the waterfall tunes there.\n"
                               "Click this button for VFO tuning instead.");
         }
@@ -428,7 +428,7 @@ void MainWindow::drawUpperLine(ImGui::WaterfallVFO* vfo) {
         }
         ImGui::PopID();
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("VFO tuning: the receiver stays put and the VFO moves inside the\n"
+            style::tooltip("VFO tuning: the receiver stays put and the VFO moves inside the\n"
                               "spectrum already on screen, so nothing has to be retuned.\n"
                               "Click this button for centre tuning instead.");
         }
@@ -865,7 +865,7 @@ void MainWindow::draw() {
         fitRange();
     }
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Set the Min and Max below from the signal on screen right now");
+        style::tooltip("Set the Min and Max below from the signal on screen right now");
     }
 
     ImGui::SetCursorPosX((ImGui::GetWindowSize().x / 2.0) - (ImGui::CalcTextSize("Zoom").x / 2.0));
@@ -879,7 +879,7 @@ void MainWindow::draw() {
         updateWaterfallZoomBandwidth(bw);
     }
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("How much spectrum is on screen: %sHz of %sHz.\nThe mouse wheel over the frequency scale pans it.",
+        style::tooltip("How much spectrum is on screen: %sHz of %sHz.\nThe mouse wheel over the frequency scale pans it.",
                           shortFreq(gui::waterfall.getViewBandwidth()).c_str(), shortFreq(gui::waterfall.getBandwidth()).c_str());
     }
     centeredCaption(shortFreq(gui::waterfall.getViewBandwidth()));
@@ -897,7 +897,7 @@ void MainWindow::draw() {
             gui::waterfall.setWaterfallMax(fftMax);
         }
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Top of the scale, %.0f dBFS. Anything at or above this is drawn\nin the brightest colour. Lower it to bring weak signals up.", fftMax);
+            style::tooltip("Top of the scale, %.0f dBFS. Anything at or above this is drawn\nin the brightest colour. Lower it to bring weak signals up.", fftMax);
         }
         centeredCaption(std::to_string((int)roundf(fftMax)));
     };
@@ -916,7 +916,7 @@ void MainWindow::draw() {
             gui::waterfall.setWaterfallMin(fftMin);
         }
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Bottom of the scale, %.0f dBFS. Raise it until the noise goes dark;\ndrop it too far and the whole waterfall lights up.", fftMin);
+            style::tooltip("Bottom of the scale, %.0f dBFS. Raise it until the noise goes dark;\ndrop it too far and the whole waterfall lights up.", fftMin);
         }
         centeredCaption(std::to_string((int)roundf(fftMin)));
     };
@@ -1333,11 +1333,74 @@ void MainWindow::drawBottomWindows(int dy) {
                          NULL, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse);
             ImGui::SetWindowPos(ImVec2(bottomWindows[i].loc.x, gui::waterfall.wfMax.y + dy));
             ImGui::SetWindowSize(ImVec2(bottomWindows[i].size.x, bottomWindows[i].size.y));
+            // Only on the first: they are laid out side by side and share a top edge,
+            // so one grip moves all of them.
+            if (i == 0) { drawBottomWindowGrip(); }
             bottomWindows[i].drawFunc();
             ImGui::End();
         }
     }
 }
+// The handle that sets how much of the window the bottom strip gets. A thin strip
+// along its top edge, dragged upwards to make it taller - the same gesture as the
+// splitter between the spectrum and the waterfall, so it needs no explaining.
+void MainWindow::drawBottomWindowGrip() {
+    // Taller than it looks: the line is drawn thin, but a splitter wants a target
+    // that can be hit without aiming, and this one shares an edge with the
+    // spectrum/waterfall splitter just above it.
+    const float h = 8.0f * style::uiScale;
+
+    // Reach up over the window's padding as well, so the band starts at the strip's
+    // top edge - the line someone aims at. Left at the content origin, the topmost
+    // few pixels of the strip were dead and the handle felt like it was not there.
+    // (Earlier attempts to move it flush failed for a different reason: the waterfall
+    // below took its origin from the content region rather than the cursor and painted
+    // straight over this button. That is fixed in WaterFall::draw.)
+    ImVec2 winPos = ImGui::GetWindowPos();
+    ImVec2 origin = ImGui::GetCursorScreenPos();
+    float band = (origin.y - winPos.y) + h;
+    ImGui::SetCursorScreenPos(ImVec2(origin.x, winPos.y));
+    ImGui::InvisibleButton("##bottom_window_grip", ImVec2(-1.0f, band));
+    ImGui::SetCursorScreenPos(ImVec2(origin.x, winPos.y + band));
+
+    bool hovered = ImGui::IsItemHovered();
+    bool active = ImGui::IsItemActive();
+    if (hovered || active) { ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS); }
+
+    // Drawn rather than left invisible: a grip nobody can see is a grip nobody finds.
+    ImVec2 mn = ImGui::GetItemRectMin();
+    ImVec2 mx = ImGui::GetItemRectMax();
+    float cy = (mn.y + mx.y) * 0.5f;
+    ImU32 col = ImGui::GetColorU32(active ? ImGuiCol_SeparatorActive
+                                          : (hovered ? ImGuiCol_SeparatorHovered : ImGuiCol_Separator));
+    ImGui::GetWindowDrawList()->AddLine(ImVec2(mn.x, cy), ImVec2(mx.x, cy), col, 2.0f * style::uiScale);
+    // A short thicker bar in the middle, the usual "this is a handle" mark. A plain
+    // line reads as a border; this reads as something to take hold of.
+    float gw = (std::min)((mx.x - mn.x) * 0.25f, 40.0f * style::uiScale);
+    float gcx = (mn.x + mx.x) * 0.5f;
+    ImGui::GetWindowDrawList()->AddLine(ImVec2(gcx - gw * 0.5f, cy), ImVec2(gcx + gw * 0.5f, cy),
+                                        col, 5.0f * style::uiScale);
+
+    if (active) {
+        float dy = ImGui::GetIO().MouseDelta.y;
+        float full = ImGui::GetIO().DisplaySize.y;
+        if (dy != 0.0f && full > 1.0f) {
+            // Up is bigger: the edge being dragged is the top of the strip.
+            float f = displaymenu::bottomWindowFrac - (dy / full);
+            if (f < displaymenu::BOTTOM_WINDOW_MIN_FRAC) { f = displaymenu::BOTTOM_WINDOW_MIN_FRAC; }
+            if (f > displaymenu::BOTTOM_WINDOW_MAX_FRAC) { f = displaymenu::BOTTOM_WINDOW_MAX_FRAC; }
+            displaymenu::bottomWindowFrac = f;
+            updateBottomWindowLayout();
+        }
+    }
+    // Written once when the drag ends, not on every frame of it - this goes to disk.
+    if (ImGui::IsItemDeactivated()) {
+        core::configManager.acquire();
+        core::configManager.conf["bottomWindowHeight"] = displaymenu::bottomWindowFrac;
+        core::configManager.release(true);
+    }
+}
+
 void MainWindow::addBottomWindow(std::string name, std::function<void()> drawFunc) {
     int foundIndex = -1;
     for (int i = 0; i < bottomWindows.size(); i++) {
@@ -1371,7 +1434,11 @@ void MainWindow::updateBottomWindowLayout() {
         bottomWindows[i].loc.x = scan;
         bottomWindows[i].loc.y = 0;
         bottomWindows[i].size.x = size;
-        bottomWindows[i].size.y = fullHeight / 5;
+        // Was fixed at a fifth of the window. One value cannot suit a laptop panel and
+        // a desktop monitor both, and with the strip taking a fixed share there was
+        // very little travel left in the spectrum/waterfall splitter above it - which
+        // is what made that one feel as though it snapped between two positions.
+        bottomWindows[i].size.y = fullHeight * displaymenu::bottomWindowFrac;
         scan += size;
     }
 }

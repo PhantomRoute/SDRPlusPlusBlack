@@ -70,7 +70,7 @@ namespace bandplanmenu {
             core::configManager.release(true);
         }
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-            ImGui::SetTooltip("Which country's allocations to draw along the spectrum. Pick the one\nyou are listening in; they differ between regions.");
+            style::tooltip("Which country's allocations to draw along the spectrum. Pick the one\nyou are listening in; they differ between regions.");
         }
 
         ImGui::LeftLabel("Position");
@@ -82,7 +82,7 @@ namespace bandplanmenu {
             core::configManager.release(true);
         }
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-            ImGui::SetTooltip("Which edge of the spectrum the band strip is drawn along");
+            style::tooltip("Which edge of the spectrum the band strip is drawn along");
         }
 
         if (!bandPlanEnabled) { style::endDisabled(); }

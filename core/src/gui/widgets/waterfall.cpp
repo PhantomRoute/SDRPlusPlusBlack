@@ -439,12 +439,18 @@ namespace ImGui {
         bool dragInProgress = fftResizeSelect || freqScaleSelect || vfoSelect || vfoBorderSelect;
         bool hasMouse = mouseOverWaterfallWindow || dragInProgress;
 
-        mouseInFFTResize = hasMouse && (dragOrigin.x > widgetPos.x && dragOrigin.x < widgetPos.x + widgetSize.x && dragOrigin.y >= widgetPos.y + newFFTAreaHeight - (2.0f * style::uiScale) && dragOrigin.y <= widgetPos.y + newFFTAreaHeight + (2.0f * style::uiScale));
+        // Widened from two pixels either side. Two is a hard target with any pointer,
+        // and this is the control someone reaches for precisely when the layout has
+        // got away from them.
+        const float FFT_RESIZE_GRAB = 4.0f * style::uiScale;
+        mouseInFFTResize = hasMouse && (dragOrigin.x > widgetPos.x && dragOrigin.x < widgetPos.x + widgetSize.x && dragOrigin.y >= widgetPos.y + newFFTAreaHeight - FFT_RESIZE_GRAB && dragOrigin.y <= widgetPos.y + newFFTAreaHeight + FFT_RESIZE_GRAB);
         mouseInFreq = hasMouse && IS_IN_AREA(dragOrigin, freqAreaMin, freqAreaMax);
         mouseInFFT = hasMouse && IS_IN_AREA(dragOrigin, fftAreaMin, fftAreaMax);
         mouseInWaterfall = hasMouse && IS_IN_AREA(dragOrigin, wfMin, wfMax);
 
-        int mouseWheel = ImGui::GetIO().MouseWheel;
+        // Not an int. Truncating threw away every movement smaller than one notch,
+        // which is what a trackpad and a high resolution wheel produce.
+        float mouseWheel = ImGui::GetIO().MouseWheel;
 
         bool mouseMoved = false;
         if (mousePos.x != lastMousePos.x || mousePos.y != lastMousePos.y) { mouseMoved = true; }
@@ -462,6 +468,7 @@ namespace ImGui {
         if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
             if (fftResizeSelect) {
                 FFTAreaHeight = newFFTAreaHeight;
+                splitMovedByUser = true;
                 onResize();
             }
 
@@ -521,7 +528,7 @@ namespace ImGui {
 
             // Now, check frequency scale
             if (!targetFound && mouseInFreq) {
-                freqScaleSelect = true;
+                if (freqScaleInteractive) { freqScaleSelect = true; }
             }
         }
 
@@ -529,7 +536,12 @@ namespace ImGui {
         if (fftResizeSelect) {
             ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
             newFFTAreaHeight = mousePos.y - widgetPos.y;
-            newFFTAreaHeight = std::clamp<float>(newFFTAreaHeight, 150, widgetSize.y - 50);
+            // Was a bare 150 and widgetSize.y - 50, unscaled, so at any UI scale other
+            // than 1 the drag and the clamp in onResize disagreed about where the ends
+            // were. Both ask the same question now.
+            float splitMin, splitMax;
+            getSplitRange(splitMin, splitMax);
+            newFFTAreaHeight = std::clamp<float>(newFFTAreaHeight, splitMin, splitMax);
             ImGui::GetForegroundDrawList()->AddLine(ImVec2(widgetPos.x, newFFTAreaHeight + widgetPos.y), ImVec2(widgetEndPos.x, newFFTAreaHeight + widgetPos.y),
                                                     ImGui::GetColorU32(ImGuiCol_SeparatorActive), style::uiScale);
             return;
@@ -587,7 +599,7 @@ namespace ImGui {
         }
 
         // If the mouse wheel is moved on the frequency scale
-        if (mouseWheel != 0 && mouseInFreq) {
+        if (mouseWheel != 0 && mouseInFreq && freqScaleInteractive) {
             viewOffset -= (double)mouseWheel * viewBandwidth / 20.0;
 
             if (viewOffset + (viewBandwidth / 2.0) > wholeBandwidth / 2.0) {
@@ -659,30 +671,31 @@ namespace ImGui {
             for (auto const& [name, _vfo] : vfos) {
                 if (ImGui::IsMouseHoveringRect(_vfo->rectMin, _vfo->rectMax) || ImGui::IsMouseHoveringRect(_vfo->wfRectMin, _vfo->wfRectMax)) {
                     char buf[128];
-                    ImGui::BeginTooltip();
+                    if (style::beginTooltip()) {
 
-                    ImGui::TextUnformatted(name.c_str());
+                        ImGui::TextUnformatted(name.c_str());
 
-                    if (ImGui::GetIO().KeyCtrl) {
-                        ImGui::Separator();
-                        printAndScale(_vfo->generalOffset + centerFreq, buf);
-                        ImGui::Text("Frequency: %sHz", buf);
-                        printAndScale(_vfo->bandwidth, buf);
-                        ImGui::Text("Bandwidth: %sHz", buf);
-                        ImGui::Text("Bandwidth Locked: %s", _vfo->bandwidthLocked ? "Yes" : "No");
+                        if (ImGui::GetIO().KeyCtrl) {
+                            ImGui::Separator();
+                            printAndScale(_vfo->generalOffset + centerFreq, buf);
+                            ImGui::Text("Frequency: %sHz", buf);
+                            printAndScale(_vfo->bandwidth, buf);
+                            ImGui::Text("Bandwidth: %sHz", buf);
+                            ImGui::Text("Bandwidth Locked: %s", _vfo->bandwidthLocked ? "Yes" : "No");
 
-                        float strength, snr;
-                        if (calculateVFOSignalInfo(waterfallVisible ? &rawFFTs[currentFFTLine * rawFFTSize] : rawFFTs, _vfo, strength, snr)) {
-                            ImGui::Text("Strength: %0.1fdBFS", strength);
-                            ImGui::Text("SNR: %0.1fdB", snr);
+                            float strength, snr;
+                            if (calculateVFOSignalInfo(waterfallVisible ? &rawFFTs[currentFFTLine * rawFFTSize] : rawFFTs, _vfo, strength, snr)) {
+                                ImGui::Text("Strength: %0.1fdBFS", strength);
+                                ImGui::Text("SNR: %0.1fdB", snr);
+                            }
+                            else {
+                                ImGui::TextUnformatted("Strength: ---.-dBFS");
+                                ImGui::TextUnformatted("SNR: ---.-dB");
+                            }
                         }
-                        else {
-                            ImGui::TextUnformatted("Strength: ---.-dBFS");
-                            ImGui::TextUnformatted("SNR: ---.-dB");
-                        }
+
+                        style::endTooltip();
                     }
-
-                    ImGui::EndTooltip();
                     break;
                 }
             }
@@ -695,7 +708,7 @@ namespace ImGui {
             double mouseFreq = lowerFreq + (mouseXRel / (double)dataWidth) * freqRange;
             char buf[128];
             printAndScale(mouseFreq, buf);
-            ImGui::SetTooltip("Frequency: %sHz", buf);
+            style::tooltip("Frequency: %sHz", buf);
         }
 
         // Handle Page Up to cycle through VFOs
@@ -1089,12 +1102,46 @@ namespace ImGui {
         updateAllVFOs();
     }
 
+    // The floor used to be a flat 150px of spectrum area, which is right for the main
+    // waterfall but taller than the whole of the audio strip along the bottom. A floor
+    // bigger than the widget pins the split against one end, so that strip's spectrum
+    // and waterfall were stuck at whatever share the clamp landed on and the handle
+    // under the frequency scale did nothing at all. Give way on a short widget: keep
+    // 150px where there is room for it, otherwise a third of the widget, and never
+    // less than the frequency scale plus a few pixels of trace to draw into.
+    void WaterFall::getSplitRange(float& lo, float& hi) const {
+        const float scaleH = 50.0f * style::uiScale;
+        lo = 150.0f * style::uiScale;
+        // Not named "small": windows.h defines that as a macro for char, the same
+        // trap as its min/max, and core is compiled with it in scope.
+        float shortWidget = widgetSize.y / 3.0f;
+        const float hardFloor = scaleH + (12.0f * style::uiScale);
+        if (shortWidget < hardFloor) { shortWidget = hardFloor; }
+        if (shortWidget < lo) { lo = shortWidget; }
+        hi = widgetSize.y - scaleH;
+        if (hi < lo) { hi = lo; }
+    }
+
     void WaterFall::onResize() {
         MEASURE_LOCK_GUARD(latestFFTMtx);
         MEASURE_LOCK_GUARD1(smoothingBufMtx);
         // return if widget is too small. The horizontal margin scales with the
         // UI scale and overtakes the 100px floor past 1.6x, which left dataWidth
         // negative and turned every allocation below into a huge new[].
+        // Clamped before the size check below bails out, not after. The split is
+        // remembered across resizes, so a widget that shrank - the strip along the
+        // bottom growing will do it - can leave the split line below the bottom of
+        // the widget, and the four pixel band that grabs it with it. There is then no
+        // way to drag the spectrum back up, because the handle is off the end of the
+        // thing it belongs to.
+        if (waterfallVisible && widgetSize.y > (100.0f * style::uiScale)) {
+            float splitMin, splitMax;
+            getSplitRange(splitMin, splitMax);
+            if (FFTAreaHeight > splitMax) { FFTAreaHeight = splitMax; }
+            if (FFTAreaHeight < splitMin) { FFTAreaHeight = splitMin; }
+            newFFTAreaHeight = FFTAreaHeight;
+        }
+
         if (widgetSize.x < 100 || widgetSize.y < 100 || widgetSize.x - (60.0f * style::uiScale) < 1.0f) {
             return;
         }
@@ -1206,10 +1253,16 @@ namespace ImGui {
         // frequency scale dragging were already unaffected.
         mouseOverWaterfallWindow = (GImGui->HoveredWindow == window);
 
-        widgetPos = ImGui::GetWindowContentRegionMin();
+        // Start where the cursor actually is, not at the window's content origin.
+        // Taking the origin meant the widget drew over anything submitted before it in
+        // the same window - which is exactly what happened to the audio waterfall's
+        // resize grip: the grip was laid out at the top of the strip, then the waterfall
+        // painted its own background rectangle over it, so the handle was invisible and
+        // shared its pixels with the waterfall's own hit tests. The main waterfall is
+        // the first thing in its child window, where the cursor is at the content
+        // origin, so nothing moves for it.
+        widgetPos = ImGui::GetCursorScreenPos();
         widgetEndPos = ImGui::GetWindowContentRegionMax();
-        widgetPos.x += window->Pos.x;
-        widgetPos.y += window->Pos.y;
         widgetEndPos.x += window->Pos.x - 4; // Padding
         widgetEndPos.y += window->Pos.y;
         widgetSize = ImVec2(widgetEndPos.x - widgetPos.x, widgetEndPos.y - widgetPos.y);

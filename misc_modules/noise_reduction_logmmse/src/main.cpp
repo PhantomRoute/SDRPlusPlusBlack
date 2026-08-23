@@ -305,7 +305,7 @@ private:
             config.release(true);
         }
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Plots the SNR of the selected VFO over the last minute, in a panel\n"
+            style::tooltip("Plots the SNR of the selected VFO over the last minute, in a panel\n"
                               "along the bottom of the window next to the audio waterfall. Useful\n"
                               "for telling whether the noise reduction above is actually helping.");
         }

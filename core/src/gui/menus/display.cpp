@@ -17,6 +17,8 @@ namespace displaymenu {
     bool showMicHistogram = false;
     bool fullWaterfallUpdate = true;
     bool showBattery = true;
+    // A fifth of the window, which is what the height used to be fixed at.
+    float bottomWindowFrac = 0.2f;
     bool detectSignals = false;
 
     // Handler for center frequency changes
@@ -128,6 +130,14 @@ namespace displaymenu {
         fullWaterfallUpdate = core::configManager.conf["fullWaterfallUpdate"];
         gui::waterfall.setFullWaterfallUpdate(fullWaterfallUpdate);
 
+        if (core::configManager.conf.contains("bottomWindowHeight")) {
+            bottomWindowFrac = core::configManager.conf["bottomWindowHeight"];
+            if (!(bottomWindowFrac >= BOTTOM_WINDOW_MIN_FRAC)) { bottomWindowFrac = BOTTOM_WINDOW_MIN_FRAC; }
+            if (bottomWindowFrac > BOTTOM_WINDOW_MAX_FRAC) { bottomWindowFrac = BOTTOM_WINDOW_MAX_FRAC; }
+        }
+        if (core::configManager.conf.contains("showTooltips")) {
+            style::showTooltips = core::configManager.conf["showTooltips"];
+        }
         if (core::configManager.conf.contains("showBattery")) {
             showBattery = core::configManager.conf["showBattery"];
         }
@@ -309,6 +319,45 @@ namespace displaymenu {
         }
         ImGui::HelpMarker("Stops the sections of this menu being dragged into a different order.");
 
+        {
+            // The strip below the spectrum can also be resized by dragging its top
+            // edge, but that handle sits next to the spectrum/waterfall splitter and
+            // the two are easy to confuse - and if either is dragged somewhere awkward
+            // the other becomes hard to reach. This one is always here and always
+            // works, which is what a layout control has to be.
+            int pct = (int)(bottomWindowFrac * 100.0f + 0.5f);
+            ImGui::LeftLabel("Bottom panel height");
+            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+            if (ImGui::SliderInt("##_sdrpp_bottomwin_h", &pct,
+                                 (int)(BOTTOM_WINDOW_MIN_FRAC * 100.0f),
+                                 (int)(BOTTOM_WINDOW_MAX_FRAC * 100.0f), "%d%%")) {
+                bottomWindowFrac = (float)pct / 100.0f;
+                if (bottomWindowFrac < BOTTOM_WINDOW_MIN_FRAC) { bottomWindowFrac = BOTTOM_WINDOW_MIN_FRAC; }
+                if (bottomWindowFrac > BOTTOM_WINDOW_MAX_FRAC) { bottomWindowFrac = BOTTOM_WINDOW_MAX_FRAC; }
+                gui::mainWindow.updateBottomWindowLayout();
+                core::configManager.acquire();
+                core::configManager.conf["bottomWindowHeight"] = bottomWindowFrac;
+                core::configManager.release(true);
+            }
+            ImGui::HelpMarker("How much of the window the audio waterfall and anything else along the\n"
+                              "bottom gets. The same edge can be dragged directly; this is here so the\n"
+                              "layout can always be put back whatever state it has got into.");
+        }
+
+        if (ImGui::Checkbox("Show tooltips##_sdrpp", &style::showTooltips)) {
+            core::configManager.acquire();
+            core::configManager.conf["showTooltips"] = style::showTooltips;
+            core::configManager.release(true);
+        }
+        // Its own explanation is the one that has to survive the switch being off, or
+        // there is no way to find out what turned everything off - so it is drawn
+        // directly rather than through the helper it controls.
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("The explanations that appear when you rest the pointer on a control,\n"
+                              "and the (?) marks beside them. Worth leaving on until the program is\n"
+                              "familiar; turning it off is for when they are in the way.");
+        }
+
 #ifdef __ANDROID__
         if (ImGui::Checkbox("Show battery##_sdrpp", &showBattery)) {
             gui::waterfall.setFullWaterfallUpdate(fullWaterfallUpdate);
@@ -436,7 +485,7 @@ namespace displaymenu {
             // nothing to say what it measured.
             ImGui::TextDisabled("Costs %lld ms of CPU per second", lastFFTReport);
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Time spent computing the spectrum, out of every second. 1000 would be\none core fully busy. Framerate and FFT size above are what move it.");
+                style::tooltip("Time spent computing the spectrum, out of every second. 1000 would be\none core fully busy. Framerate and FFT size above are what move it.");
             }
         }
 

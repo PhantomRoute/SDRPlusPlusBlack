@@ -237,7 +237,7 @@ public:
             config.conf[_streamName]["device"] = devList[devId].name;
             config.release(true);
         }
-        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Which sound card this stream is played out of"); }
+        if (ImGui::IsItemHovered()) { style::tooltip("Which sound card this stream is played out of"); }
 
         if (SinkManager::getSecondaryStreamIndex(_streamName).second == 0) {
             // only primary one has frequency selection

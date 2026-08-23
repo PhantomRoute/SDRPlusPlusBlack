@@ -64,6 +64,7 @@ RadiosondeDecoderModule::RadiosondeDecoderModule(std::string name) {
     if (!config.conf.contains(name)) {
         config.conf[name]["sondeType"] = 0;
         config.conf[name]["logEnabled"] = false;
+        config.conf[name]["frameLogEnabled"] = false;
         config.conf[name]["logPath"] = (std::string(core::getRoot()) + "/radiosonde.gpx");
         created = true;
     }
@@ -71,6 +72,9 @@ RadiosondeDecoderModule::RadiosondeDecoderModule(std::string name) {
     logEnabled = config.conf[name].contains("logEnabled") && config.conf[name]["logEnabled"].is_boolean()
                      ? (bool)config.conf[name]["logEnabled"]
                      : false;
+    frameLogEnabled = config.conf[name].contains("frameLogEnabled") && config.conf[name]["frameLogEnabled"].is_boolean()
+                          ? (bool)config.conf[name]["frameLogEnabled"]
+                          : false;
     std::string path = config.conf[name].contains("logPath") && config.conf[name]["logPath"].is_string()
                            ? config.conf[name]["logPath"].get<std::string>()
                            : (std::string(core::getRoot()) + "/radiosonde.gpx");
@@ -106,6 +110,7 @@ RadiosondeDecoderModule::RadiosondeDecoderModule(std::string name) {
     // there is nothing to start here first.
     selectType(selectedType);
     if (logEnabled) { logEnabled = openLog(); }
+    if (frameLogEnabled) { frameLogEnabled = openFrameLog(); }
 
     enabled = true;
     gui::menu.registerEntry(name, menuHandler, this, this);
@@ -115,6 +120,7 @@ RadiosondeDecoderModule::~RadiosondeDecoderModule() {
     gui::menu.removeEntry(name);
     if (enabled) { disable(); }
     closeLog();
+    closeFrameLog();
 }
 
 void RadiosondeDecoderModule::postInit() {}
@@ -179,6 +185,12 @@ void RadiosondeDecoderModule::selectType(int type) {
         everDecoded = false;
         framesDecoded = 0;
         track.clear();
+        // A different sonde is a different clock. Keeping the old reference would have
+        // the guard reject the whole of the next flight until it gave up and
+        // rebaselined, which is exactly the wrong way round.
+        lastGoodSondeTime = 0;
+        consecutiveTimeRejects = 0;
+        framesTimeRejected = 0;
     }
 
     double bw = types[selectedType].bandwidth;
@@ -214,6 +226,13 @@ void RadiosondeDecoderModule::sondeDataHandler(SondeFullData* data, void* ctx) {
     _this->framesDecoded++;
     _this->lastFrameTime = currentTimeMillis();
 
+    bool timeAccepted = _this->timeIsBelievable(data->time);
+
+    // Written for every frame, including the ones with no position and the ones whose
+    // time was thrown out, because those are the frames worth having when something
+    // needs explaining.
+    if (_this->frameLogFile) { _this->writeFrameLogRow(*data, timeAccepted); }
+
     // Only keep a point once there is a position to keep. A frame can decode with
     // valid telemetry before the GPS has a fix, and plotting 0,0 puts the balloon in
     // the Atlantic.
@@ -226,7 +245,7 @@ void RadiosondeDecoderModule::sondeDataHandler(SondeFullData* data, void* ctx) {
         _this->track.push_back(fix);
         while (_this->track.size() > MAX_TRACK) { _this->track.pop_front(); }
 
-        if (_this->logFile) { _this->writeLogPoint(*data); }
+        if (_this->logFile) { _this->writeLogPoint(*data, timeAccepted); }
     }
 }
 
@@ -250,6 +269,56 @@ bool RadiosondeDecoderModule::bearingFromOperator(const SondeFullData& d, utils:
     double groundM = bd.distance * 1000.0;
     elevationDeg = (groundM > 1.0) ? (atan2((double)d.alt, groundM) * RAD_TO_DEG) : 90.0;
     return true;
+}
+
+// Whether to believe the onboard clock in this frame.
+//
+// A sonde's own time is normally the best clock in the system - it comes from GPS -
+// but a frame can pass its checksum with the time field wrong, and one wrong reading
+// is enough to make a track file that mapping software sorts into nonsense.
+//
+// The test is continuity against the last time that was believed, not agreement with
+// this computer's clock. Comparing against the wall clock would be simpler and would
+// break the moment anyone replayed a recording, where the sonde's time is quite
+// properly hours or years away from now.
+//
+// Backwards is barely tolerated: frames arrive in order and a repeat is worth a second
+// or two, no more. Forwards is tolerated generously, because losing the signal for a
+// while and picking it up again is an ordinary part of a flight, not an error.
+bool RadiosondeDecoderModule::timeIsBelievable(time_t t) {
+    // How far back a frame may step before it is disbelieved, and how far forward.
+    const time_t BACK_TOLERANCE = 3;
+    const time_t FORWARD_TOLERANCE = 3600;
+    // If this many in a row are rejected, the baseline itself was wrong - the first
+    // frame of the flight carried a bad time, or the gap really was longer than an
+    // hour - so take the current one and carry on from there. Without this a single
+    // bad frame at the start would throw away the timestamps of the whole flight.
+    const int REBASELINE_AFTER = 20;
+
+    if (t <= 0) { return false; }
+
+    if (lastGoodSondeTime == 0) {
+        lastGoodSondeTime = t;
+        consecutiveTimeRejects = 0;
+        return true;
+    }
+
+    if (t >= lastGoodSondeTime - BACK_TOLERANCE && t <= lastGoodSondeTime + FORWARD_TOLERANCE) {
+        lastGoodSondeTime = t;
+        consecutiveTimeRejects = 0;
+        return true;
+    }
+
+    if (++consecutiveTimeRejects >= REBASELINE_AFTER) {
+        flog::warn("Radiosonde: onboard clock has disagreed for {0} frames, taking it as the new reference",
+                   (int64_t)consecutiveTimeRejects);
+        lastGoodSondeTime = t;
+        consecutiveTimeRejects = 0;
+        return true;
+    }
+
+    framesTimeRejected++;
+    return false;
 }
 
 // ---- GPX logging
@@ -288,11 +357,14 @@ void RadiosondeDecoderModule::closeLog() {
     logFile = NULL;
 }
 
-void RadiosondeDecoderModule::writeLogPoint(const SondeFullData& d) {
+void RadiosondeDecoderModule::writeLogPoint(const SondeFullData& d, bool timeAccepted) {
     if (!logFile) { return; }
 
     char when[64] = { 0 };
-    if (d.time > 0) {
+    // A point with no time is valid GPX and every reader takes it. A point with a
+    // wrong one is worse than useless: anything that sorts by time puts it at the far
+    // end of the track and draws a line across the map to reach it.
+    if (timeAccepted && d.time > 0) {
         time_t t = (time_t)d.time;
         struct tm* utc = gmtime(&t);
         if (utc) { strftime(when, sizeof when, "%Y-%m-%dT%H:%M:%SZ", utc); }
@@ -310,6 +382,107 @@ void RadiosondeDecoderModule::writeLogPoint(const SondeFullData& d) {
     fprintf(logFile, "    </trkseg>\n  </trk>\n</gpx>\n");
     fflush(logFile);
     if (resume >= 0) { fseek(logFile, resume, SEEK_SET); }
+}
+
+// ---- Frame log
+//
+// One row per decoded frame, next to the GPX. Every field the decoder produces, the
+// receiver's own clock, and whether the onboard time was believed - so a flight can be
+// replayed against a change to the parsing rather than waiting for the next launch.
+//
+// It is the parsed frame rather than the bytes off the air: the vendored decoders hand
+// back a filled-in SondeData and never expose the frame they built it from, so this is
+// as raw as anything gets on this side of them. It is enough to re-run everything this
+// module does with the values it was given - which is where the timestamp fault was.
+
+// Beside the track rather than in a place of its own, so the two files from a flight
+// stay together. radiosonde.gpx gives radiosonde.frames.csv.
+static std::string frameLogPathFor(const std::string& gpxPath) {
+    std::string base = gpxPath;
+    size_t slash = base.find_last_of("/\\");
+    size_t dot = base.find_last_of('.');
+    if (dot != std::string::npos && (slash == std::string::npos || dot > slash)) {
+        base.erase(dot);
+    }
+    return base + ".frames.csv";
+}
+
+bool RadiosondeDecoderModule::openFrameLog() {
+    closeFrameLog();
+    std::string path = frameLogPathFor(logPath);
+    // Appended, not truncated. Losing the signal and starting again is normal, and
+    // the point of the file is that nothing decoded goes missing.
+    bool existed = false;
+    {
+        FILE* probe = fopen(path.c_str(), "rb");
+        if (probe) {
+            existed = true;
+            fclose(probe);
+        }
+    }
+    frameLogFile = fopen(path.c_str(), "ab");
+    if (!frameLogFile) {
+        flog::error("Radiosonde: could not open frame log '{0}'", path);
+        return false;
+    }
+    if (!existed) {
+        fprintf(frameLogFile,
+                "rx_unix_ms,serial,seq,sonde_time,time_accepted,lat,lon,alt,"
+                "spd,hdg,climb,temp,rh,dewpt,pressure,calibrated,calib_percent,burstkill,aux\r\n");
+    }
+    fflush(frameLogFile);
+    return true;
+}
+
+void RadiosondeDecoderModule::closeFrameLog() {
+    if (!frameLogFile) { return; }
+    fclose(frameLogFile);
+    frameLogFile = NULL;
+}
+
+// Quoted the same way the frequency manager's exporter does it, because a serial or an
+// aux field is free text off the air and there is nothing stopping it holding a comma.
+static std::string frameCsvEscape(const std::string& in) {
+    bool needsQuote = false;
+    for (char c : in) {
+        if (c == ',' || c == '"' || c == '\n' || c == '\r') {
+            needsQuote = true;
+            break;
+        }
+    }
+    if (!needsQuote) { return in; }
+    std::string out;
+    out.reserve(in.size() + 2);
+    out.push_back('"');
+    for (char c : in) {
+        if (c == '"') { out.push_back('"'); }
+        out.push_back(c);
+    }
+    out.push_back('"');
+    return out;
+}
+
+void RadiosondeDecoderModule::writeFrameLogRow(const SondeFullData& d, bool timeAccepted) {
+    if (!frameLogFile) { return; }
+    // sonde_time is written as the raw seconds the frame carried, not as a formatted
+    // date - the whole point is to keep what arrived, including the value that was
+    // rejected, so the guard can be re-run over it.
+    fprintf(frameLogFile,
+            "%lld,%s,%d,%lld,%d,%.6f,%.6f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%d,%.1f,%d,%s\r\n",
+            (long long)currentTimeMillis(),
+            frameCsvEscape(d.serial).c_str(),
+            d.seq,
+            (long long)d.time,
+            timeAccepted ? 1 : 0,
+            (double)d.lat, (double)d.lon, (double)d.alt,
+            (double)d.spd, (double)d.hdg, (double)d.climb,
+            (double)d.temp, (double)d.rh, (double)d.dewpt, (double)d.pressure,
+            d.calibrated ? 1 : 0, (double)d.calib_percent,
+            d.burstkill,
+            frameCsvEscape(d.auxData).c_str());
+    // Flushed every frame for the same reason the GPX is: a flight that ends with the
+    // program being killed should still have everything it decoded.
+    fflush(frameLogFile);
 }
 
 // ---- UI
@@ -333,7 +506,7 @@ void RadiosondeDecoderModule::menuHandler(void* ctx) {
         ImGui::EndCombo();
     }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-        ImGui::SetTooltip("Which family of sonde to decode. They are not interchangeable, and there is\n"
+        style::tooltip("Which family of sonde to decode. They are not interchangeable, and there is\n"
                           "no auto detection: if you do not know, RS41 is the most widely flown, and\n"
                           "the channel width changes with the choice so a wrong pick usually looks\n"
                           "obviously wrong on the waterfall.\n"
@@ -377,14 +550,14 @@ void RadiosondeDecoderModule::drawTelemetry() {
         if (types[selectedType].decoder == &imet54decoder) {
             ImGui::Separator();
             ImGui::TextDisabled("Framed    %d", imet54_stat_framed);
-            if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Times the sync word was found. Zero means it is not seeing the signal at\nall - check the frequency, and that the channel covers the whole of it."); }
+            if (ImGui::IsItemHovered()) { style::tooltip("Times the sync word was found. Zero means it is not seeing the signal at\nall - check the frequency, and that the channel covers the whole of it."); }
             ImGui::TextDisabled("FEC fail  %d", imet54_stat_ecc_fail);
-            if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Framed, but the payload did not survive error correction. If this tracks\nFramed one for one, the payload is being read from the wrong offset."); }
+            if (ImGui::IsItemHovered()) { style::tooltip("Framed, but the payload did not survive error correction. If this tracks\nFramed one for one, the payload is being read from the wrong offset."); }
             ImGui::TextDisabled("CRC fail  %d", imet54_stat_crc_fail);
-            if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Error correction succeeded and the checksum still disagreed."); }
+            if (ImGui::IsItemHovered()) { style::tooltip("Error correction succeeded and the checksum still disagreed."); }
             ImGui::TextDisabled("Bad words %d / 216", imet54_stat_last_bad);
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Codewords in the last frame that error correction could not repair.\n"
+                style::tooltip("Codewords in the last frame that error correction could not repair.\n"
                                   "A handful is a weak signal and the checksum will sort it out.\n"
                                   "A hundred or more means the payload is being read from the wrong\n"
                                   "place - random bytes almost never land on a valid codeword.");
@@ -394,10 +567,10 @@ void RadiosondeDecoderModule::drawTelemetry() {
     }
 
     ImGui::Text("Serial    %s", d.serial.empty() ? "-" : d.serial.c_str());
-    if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Printed on the sonde. This is what identifies the flight on tracking sites."); }
+    if (ImGui::IsItemHovered()) { style::tooltip("Printed on the sonde. This is what identifies the flight on tracking sites."); }
 
     ImGui::Text("Frame     %d", d.seq);
-    if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Sequence number from the sonde, and %d frames decoded since it was tuned", frames); }
+    if (ImGui::IsItemHovered()) { style::tooltip("Sequence number from the sonde, and %d frames decoded since it was tuned", frames); }
 
     if (d.time > 0) {
         char when[64] = "-";
@@ -414,7 +587,7 @@ void RadiosondeDecoderModule::drawTelemetry() {
     // age of that frame has to be visible or the panel looks live when it is not.
     if (age > 10.0) {
         ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.3f, 1.0f), "Last      %.0f s ago", age);
-        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Nothing has decoded recently. Everything above and below is from that frame."); }
+        if (ImGui::IsItemHovered()) { style::tooltip("Nothing has decoded recently. Everything above and below is from that frame."); }
     }
     else {
         ImGui::TextDisabled("Last      %.0f s ago", age);
@@ -423,7 +596,7 @@ void RadiosondeDecoderModule::drawTelemetry() {
     if (!d.calibrated) {
         ImGui::TextColored(ImVec4(1.0f, 0.9f, 0.0f, 1.0f), "Calibrat. %.0f%%", d.calib_percent);
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("The sonde sends its calibration a piece at a time, over a minute or two.\n"
+            style::tooltip("The sonde sends its calibration a piece at a time, over a minute or two.\n"
                               "Until it is complete the temperature and humidity below are approximate.");
         }
     }
@@ -433,7 +606,7 @@ void RadiosondeDecoderModule::drawTelemetry() {
 
     if (d.burstkill > 0) {
         ImGui::Text("Shutdown  in %d s", d.burstkill);
-        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("The sonde is on a timer and will switch itself off"); }
+        if (ImGui::IsItemHovered()) { style::tooltip("The sonde is on a timer and will switch itself off"); }
     }
 
     ImGui::SectionHeader("POSITION");
@@ -456,12 +629,12 @@ void RadiosondeDecoderModule::drawTelemetry() {
     else if (d.climb > 0.0f) { ImGui::Text("Climb     up %.1f m/s", d.climb); }
     else { ImGui::Text("Climb     down %.1f m/s", -d.climb); }
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Around 5 m/s up is a normal ascent. A sharp change to a fast descent is the\n"
+        style::tooltip("Around 5 m/s up is a normal ascent. A sharp change to a fast descent is the\n"
                           "balloon bursting, usually somewhere above 25 km.");
     }
 
     ImGui::Text("Ground    %.0f km/h, %s", d.spd * 3.6f, compassPoint(d.hdg));
-    if (ImGui::IsItemHovered()) { ImGui::SetTooltip("How fast the wind is carrying it, and which way it is going"); }
+    if (ImGui::IsItemHovered()) { style::tooltip("How fast the wind is carrying it, and which way it is going"); }
 
     // Where to point, from the grid square in the Source menu.
     utils::BearingDistance bd;
@@ -469,14 +642,14 @@ void RadiosondeDecoderModule::drawTelemetry() {
     if (bearingFromOperator(d, bd, elevation)) {
         ImGui::Text("From you  %s %s", fmtDistance(bd.distance).c_str(), compassPoint(bd.bearing));
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Distance and direction from your grid square, and %.0f degrees above the\n"
+            style::tooltip("Distance and direction from your grid square, and %.0f degrees above the\n"
                               "horizon. Set the grid square in the Source menu.", elevation);
         }
         ImGui::Text("Elevation %.0f deg", elevation);
     }
     else {
         ImGui::Text("From you  -");
-        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Set your grid square in the Source menu and this shows the distance,\nthe direction and how far above the horizon it is."); }
+        if (ImGui::IsItemHovered()) { style::tooltip("Set your grid square in the Source menu and this shows the distance,\nthe direction and how far above the horizon it is."); }
         ImGui::Text("Elevation -");
     }
 
@@ -487,13 +660,13 @@ void RadiosondeDecoderModule::drawTelemetry() {
     ImGui::Text("Dew point %.1f C", d.dewpt);
     ImGui::Text("Pressure  %.1f hPa", d.pressure);
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Measured on the way up. This is the actual point of the flight: these are\n"
+        style::tooltip("Measured on the way up. This is the actual point of the flight: these are\n"
                           "the readings that go into weather forecasting models.");
     }
 
     if (!d.auxData.empty()) {
         ImGui::Text("Aux       %s", d.auxData.c_str());
-        if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Extra instrument data, most often an ozone sonde"); }
+        if (ImGui::IsItemHovered()) { style::tooltip("Extra instrument data, most often an ozone sonde"); }
     }
 }
 
@@ -571,7 +744,7 @@ void RadiosondeDecoderModule::drawTrack() {
         ImGui::TextDisabled("%s to %s over %.0f min", fmtAltitude(lowest).c_str(),
                             fmtAltitude(highest).c_str(), (double)(lastTime - firstTime) / 60000.0);
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Altitude against time since this sonde was tuned. The peak is the burst;\n"
+            style::tooltip("Altitude against time since this sonde was tuned. The peak is the burst;\n"
                               "after it the descent is much steeper than the climb.");
         }
     }
@@ -594,6 +767,27 @@ void RadiosondeDecoderModule::drawLogging() {
                       "The file is kept valid after every frame, so it is still readable if the\n"
                       "program stops part way through a flight.");
 
+    if (ImGui::Checkbox(("Record every frame##radiosonde_framelog_" + name).c_str(), &frameLogEnabled)) {
+        if (frameLogEnabled) { frameLogEnabled = openFrameLog(); }
+        else { closeFrameLog(); }
+        config.acquire();
+        config.conf[name]["frameLogEnabled"] = frameLogEnabled;
+        config.release(true);
+    }
+    ImGui::HelpMarker("Writes every decoded frame to a .frames.csv beside the track - position,\n"
+                      "telemetry, the onboard clock as it arrived, and whether that clock was\n"
+                      "believed. Rows are kept for frames with no position too.\n"
+                      "It is what lets a flight be gone over afterwards, or replayed against a\n"
+                      "change, instead of waiting for the next launch.");
+
+    if (framesTimeRejected > 0) {
+        ImGui::TextDisabled("%d frame(s) had an unbelievable clock", framesTimeRejected);
+        if (ImGui::IsItemHovered()) {
+            style::tooltip("Their position was kept and only the timestamp dropped, so the track\n"
+                           "is complete and nothing is stamped with a wrong time.");
+        }
+    }
+
     ImGui::LeftLabel("File");
     ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
     if (ImGui::InputText(("##radiosonde_logpath_" + name).c_str(), logPath, sizeof logPath)) {
@@ -601,7 +795,7 @@ void RadiosondeDecoderModule::drawLogging() {
         config.conf[name]["logPath"] = std::string(logPath);
         config.release(true);
     }
-    if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Reopened when the tick box above is turned off and on again"); }
+    if (ImGui::IsItemHovered()) { style::tooltip("Reopened when the tick box above is turned off and on again"); }
 
     if (!logStatus.empty()) {
         ImGui::PushTextWrapPos(0.0f);

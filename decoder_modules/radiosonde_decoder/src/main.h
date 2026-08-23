@@ -75,7 +75,7 @@ private:
 
     bool openLog();
     void closeLog();
-    void writeLogPoint(const SondeFullData& d);
+    void writeLogPoint(const SondeFullData& d, bool timeAccepted);
 
     std::string name;
     bool enabled = true;
@@ -116,6 +116,26 @@ private:
     bool everDecoded = false;
     long long lastFrameTime = 0;   // currentTimeMillis(), see SondeFix::time
     int framesDecoded = 0;
+
+    // The onboard clock, as far as it has been believed. A sonde sends its own GPS
+    // time and now and then sends a wrong one: a single frame arrived in a recorded
+    // flight reading 00:00:01 on the right date, eleven hours behind the frames either
+    // side of it, while its position and altitude were exactly where they should be.
+    // So the time is checked for continuity against the last one accepted, and a frame
+    // that fails keeps its position and loses only its timestamp. See timeIsBelievable.
+    time_t lastGoodSondeTime = 0;
+    int consecutiveTimeRejects = 0;
+    int framesTimeRejected = 0;
+
+    // Every decoded frame, written as it arrives, so a flight can be replayed against
+    // changes to the parsing instead of waiting for the next launch.
+    bool frameLogEnabled = false;
+    FILE* frameLogFile = NULL;
+
+    bool timeIsBelievable(time_t t);
+    bool openFrameLog();
+    void closeFrameLog();
+    void writeFrameLogRow(const SondeFullData& d, bool timeAccepted);
     std::deque<SondeFix> track;
     // Scratch for the plot, kept between frames so drawing does not allocate on
     // every one. Only ever touched on the UI thread.

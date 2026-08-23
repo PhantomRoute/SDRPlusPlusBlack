@@ -363,7 +363,7 @@ namespace sourcemenu {
         // A disabled item is not "hovered" unless asked for explicitly, and this is
         // exactly the case where the reason is worth showing.
         if (running && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-            ImGui::SetTooltip("Stop the radio to change the source");
+            style::tooltip("Stop the radio to change the source");
         }
 
         // An empty combo with nothing said about it is the first thing a new
@@ -425,7 +425,7 @@ namespace sourcemenu {
             core::configManager.release(true);
         }
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("For a transverter or converter: added to every frequency you tune, so\nthe display reads what is on the antenna. None if the SDR is connected\nstraight to it.");
+            style::tooltip("For a transverter or converter: added to every frequency you tune, so\nthe display reads what is on the antenna. None if the SDR is connected\nstraight to it.");
         }
         ImGui::SameLine();
         ImGui::SetCursorPosX(ImGui::GetCursorPosX() - spacing);
@@ -471,7 +471,7 @@ namespace sourcemenu {
             style::endDisabled();
         }
         if (offsetId != OFFSET_ID_MANUAL && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-            ImGui::SetTooltip("Pick Manual above to type an offset, or + to save a named one");
+            style::tooltip("Pick Manual above to type an offset, or + to save a named one");
         }
 
         ImGui::SectionHeader("OPERATOR");
@@ -501,7 +501,7 @@ namespace sourcemenu {
             }
         }
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Yours. Nothing here changes how the radio behaves; it is what the\ndecoders and reporting features put in what they send.");
+            style::tooltip("Yours. Nothing here changes how the radio behaves; it is what the\ndecoders and reporting features put in what they send.");
         }
         // Empty before anything has been typed, rather than reading as a failure.
         if (operatorCallsignRaw[0] == 0) {
