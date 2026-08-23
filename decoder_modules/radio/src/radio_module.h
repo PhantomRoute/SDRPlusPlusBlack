@@ -553,7 +553,14 @@ private:
             // Where the slider ends. Short of the mode's maximum on purpose, so that
             // the part of the range anyone actually uses gets the whole width of the
             // slider and the box on the left is there for the rest.
-            float limit = 12000.0f;
+            // The slider covers the part of the range in normal use. Now that each
+            // mode's maximum is the channel width it is named for, that is the whole
+            // of the range for most of them - only SSB and CW have a maximum far
+            // enough above everyday use to be worth tightening, and being able to set
+            // 2.8 kHz without fighting the pixel is worth more there than reaching 12.
+            // The per mode numbers that used to be repeated here are gone: they lived
+            // in two places and could drift apart silently.
+            float limit = _this->maxBandwidth;
             switch(_this->selectedDemodID) {
             case RADIO_DEMOD_LSB:
             case RADIO_DEMOD_USB:
@@ -561,14 +568,6 @@ private:
                 break;
             case RADIO_DEMOD_CW:
                 limit = 1000.0f;
-                break;
-            case RADIO_DEMOD_NFM:
-                // 12000 sat just below the 12.5 kHz this mode defaults to, so the
-                // slider started hard against its own end.
-                limit = 25000.0f;
-                break;
-            case RADIO_DEMOD_WFM:
-                limit = 200000.0f;
                 break;
             }
             // Unlocked, the point is to be able to reach the top, so the convenience
@@ -629,7 +628,8 @@ private:
                                "down to %.0f Hz. Both are real limits rather than conventions: the wide\n"
                                "end is how much spectrum the channel delivers, and the narrow end is\n"
                                "where the channel filter would grow long enough to bog the audio down.\n"
-                               "Worth most on CW and SSB, whose usual limits are the tightest.",
+                               "Every mode gains at both ends: CW opens the widest, and WFM goes\n"
+                               "from one broadcast channel to two and a half.",
                                wideLimit, narrowLimit);
             }
         }
@@ -915,7 +915,15 @@ private:
         else {
             config.release();
         }
-        bw = std::clamp<double>(bw, demod->getMinBandwidth(), demod->getMaxBandwidth());
+        // Against the range the switch actually allows, not the demodulator's own.
+        // Clamping to the raw maximum here would have thrown away a saved bandwidth
+        // that only exists because the switch is on - a 400 kHz WFM channel would come
+        // back as 200 kHz on every restart.
+        {
+            double bwLo, bwHi;
+            demodBandwidthRange(demod, bwLo, bwHi);
+            bw = std::clamp<double>(bw, bwLo, bwHi);
+        }
 
         // Initialize
         demod->init(name, &config, ifChain.out, bw, streams.front()->getSampleRate());
@@ -1108,25 +1116,28 @@ private:
     }
 
 
-    // The bandwidth range the controls will allow.
+    // The bandwidth range a demodulator allows under the current setting of the
+    // unlock switch.
     //
-    // Normally the demodulator's own, which are what the mode is actually for: 500 Hz
-    // on CW, 12.5 kHz on NFM. Unlocked, they open up to what the signal path can
-    // physically carry - the demodulator's IF sample rate, since that is how much
-    // spectrum the channel actually delivers, and nothing wider than it exists to be
-    // filtered. So this is not "no limit", it is "the limit that is real rather than
-    // the one that is convention".
+    // Locked, the demodulator's own limits, which describe the channels the mode is
+    // actually for: 25 kHz on NFM, 200 kHz on WFM, 500 Hz on CW. Unlocked, the ceiling
+    // becomes the IF sample rate - how much spectrum the channel physically delivers,
+    // beyond which there is nothing to filter. So this is not "no limit", it is "the
+    // limit that is real rather than the one that is convention".
     //
-    // What that buys differs by mode, because some are already at the physical
-    // ceiling: CW goes from 500 Hz to 3 kHz and SSB from 12 to 24 kHz, while AM, NFM
-    // and WFM already sit at their IF rate and only gain at the narrow end.
-    void applyBandwidthLimits() {
-        if (!selectedDemod) { return; }
+    // The two have to be genuinely different numbers for the switch to do anything,
+    // which is what went wrong first time round: NFM, WFM and AM each defined their
+    // own maximum AS their IF sample rate, so unlocking set the ceiling to the value
+    // it already had and the switch did nothing at the wide end on exactly the three
+    // modes anyone would try it on. Their maximums are now the channel widths the
+    // modes are named for, and the IF rate is what unlocking opens them to.
+    void demodBandwidthRange(demod::Demodulator* dem, double& lo, double& hi) const {
+        if (!dem) { lo = 0.0; hi = 0.0; return; }
         if (unlockBandwidth) {
-            maxBandwidth = selectedDemod->getIFSampleRate();
+            hi = dem->getIFSampleRate();
             // A mode whose own maximum is already wider than its IF rate keeps it -
             // unlocking must never narrow anything.
-            if (selectedDemod->getMaxBandwidth() > maxBandwidth) { maxBandwidth = selectedDemod->getMaxBandwidth(); }
+            if (dem->getMaxBandwidth() > hi) { hi = dem->getMaxBandwidth(); }
 
             // The narrow end is not a matter of taste, which is why it does not simply
             // open to nothing.
@@ -1142,13 +1153,22 @@ private:
             // So the floor comes from a tap budget instead: loosen every mode by the
             // same honest measure, and let the modes with a low IF rate go narrower
             // because for them it genuinely costs less.
-            minBandwidth = (BW_TAPS_PER_RATIO * selectedDemod->getIFSampleRate()) / UNLOCKED_MAX_TAPS;
-            if (selectedDemod->getMinBandwidth() < minBandwidth) { minBandwidth = selectedDemod->getMinBandwidth(); }
+            lo = (BW_TAPS_PER_RATIO * dem->getIFSampleRate()) / UNLOCKED_MAX_TAPS;
+            if (dem->getMinBandwidth() < lo) { lo = dem->getMinBandwidth(); }
         }
         else {
-            minBandwidth = selectedDemod->getMinBandwidth();
-            maxBandwidth = selectedDemod->getMaxBandwidth();
+            lo = dem->getMinBandwidth();
+            hi = dem->getMaxBandwidth();
         }
+    }
+
+    // The same, for the demodulator in use, published where the controls can see it.
+    void applyBandwidthLimits() {
+        if (!selectedDemod) { return; }
+        double lo, hi;
+        demodBandwidthRange(selectedDemod, lo, hi);
+        minBandwidth = lo;
+        maxBandwidth = hi;
         // The waterfall enforces its own copy when the VFO is dragged, so it has to be
         // told as well or the box and the drag would disagree.
         if (vfo) { vfo->setBandwidthLimits(minBandwidth, maxBandwidth, selectedDemod->getBandwidthLocked()); }

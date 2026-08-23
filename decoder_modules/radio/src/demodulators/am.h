@@ -77,7 +77,10 @@ namespace demod {
         double getAFSampleRate() { return getIFSampleRate(); }
         double getDefaultBandwidth() { return 10000.0; }
         double getMinBandwidth() { return 1000.0; }
-        double getMaxBandwidth() { return getIFSampleRate(); }
+        // Comfortably past a 9 or 10 kHz broadcast channel. Was getIFSampleRate(),
+        // which unlocking also raises the ceiling to, so the switch did nothing here.
+        // 12 kHz locked, 15 kHz unlocked.
+        double getMaxBandwidth() { return 12000.0; }
         bool getBandwidthLocked() { return false; }
         double getDefaultSnapInterval() { return 1000.0; }
         int getVFOReference() { return ImGui::WaterfallVFO::REF_CENTER; }

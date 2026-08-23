@@ -66,7 +66,10 @@ namespace demod {
         double getAFSampleRate() { return getIFSampleRate(); }
         double getDefaultBandwidth() { return 12500.0; }
         double getMinBandwidth() { return 1000.0; }
-        double getMaxBandwidth() { return getIFSampleRate(); }
+        // The widest standard narrowband FM channel. Was getIFSampleRate(), which is
+        // also what unlocking raises the ceiling to - so "Any bandwidth" had nothing
+        // to lift and appeared to do nothing. 25 kHz locked, 50 kHz unlocked.
+        double getMaxBandwidth() { return 25000.0; }
         bool getBandwidthLocked() { return false; }
         double getDefaultSnapInterval() { return 2500.0; }
         int getVFOReference() { return ImGui::WaterfallVFO::REF_CENTER; }
