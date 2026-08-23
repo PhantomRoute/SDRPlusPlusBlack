@@ -1228,10 +1228,16 @@ namespace ImGui {
         // frequency scale dragging were already unaffected.
         mouseOverWaterfallWindow = (GImGui->HoveredWindow == window);
 
-        widgetPos = ImGui::GetWindowContentRegionMin();
+        // Start where the cursor actually is, not at the window's content origin.
+        // Taking the origin meant the widget drew over anything submitted before it in
+        // the same window - which is exactly what happened to the audio waterfall's
+        // resize grip: the grip was laid out at the top of the strip, then the waterfall
+        // painted its own background rectangle over it, so the handle was invisible and
+        // shared its pixels with the waterfall's own hit tests. The main waterfall is
+        // the first thing in its child window, where the cursor is at the content
+        // origin, so nothing moves for it.
+        widgetPos = ImGui::GetCursorScreenPos();
         widgetEndPos = ImGui::GetWindowContentRegionMax();
-        widgetPos.x += window->Pos.x;
-        widgetPos.y += window->Pos.y;
         widgetEndPos.x += window->Pos.x - 4; // Padding
         widgetEndPos.y += window->Pos.y;
         widgetSize = ImVec2(widgetEndPos.x - widgetPos.x, widgetEndPos.y - widgetPos.y);

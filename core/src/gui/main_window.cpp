@@ -1350,12 +1350,18 @@ void MainWindow::drawBottomWindowGrip() {
     // spectrum/waterfall splitter just above it.
     const float h = 8.0f * style::uiScale;
 
-    // Sits where the window's own padding puts it, a few pixels in from the top edge.
-    // Two attempts to move it flush with that edge - zeroing the window padding, and
-    // setting the cursor to the window origin - both left it impossible to hit at all,
-    // so it stays where it demonstrably works. The slider in the display menu is there
-    // for anyone who cannot find it.
-    ImGui::InvisibleButton("##bottom_window_grip", ImVec2(-1.0f, h));
+    // Reach up over the window's padding as well, so the band starts at the strip's
+    // top edge - the line someone aims at. Left at the content origin, the topmost
+    // few pixels of the strip were dead and the handle felt like it was not there.
+    // (Earlier attempts to move it flush failed for a different reason: the waterfall
+    // below took its origin from the content region rather than the cursor and painted
+    // straight over this button. That is fixed in WaterFall::draw.)
+    ImVec2 winPos = ImGui::GetWindowPos();
+    ImVec2 origin = ImGui::GetCursorScreenPos();
+    float band = (origin.y - winPos.y) + h;
+    ImGui::SetCursorScreenPos(ImVec2(origin.x, winPos.y));
+    ImGui::InvisibleButton("##bottom_window_grip", ImVec2(-1.0f, band));
+    ImGui::SetCursorScreenPos(ImVec2(origin.x, winPos.y + band));
 
     bool hovered = ImGui::IsItemHovered();
     bool active = ImGui::IsItemActive();
@@ -1368,6 +1374,12 @@ void MainWindow::drawBottomWindowGrip() {
     ImU32 col = ImGui::GetColorU32(active ? ImGuiCol_SeparatorActive
                                           : (hovered ? ImGuiCol_SeparatorHovered : ImGuiCol_Separator));
     ImGui::GetWindowDrawList()->AddLine(ImVec2(mn.x, cy), ImVec2(mx.x, cy), col, 2.0f * style::uiScale);
+    // A short thicker bar in the middle, the usual "this is a handle" mark. A plain
+    // line reads as a border; this reads as something to take hold of.
+    float gw = (std::min)((mx.x - mn.x) * 0.25f, 40.0f * style::uiScale);
+    float gcx = (mn.x + mx.x) * 0.5f;
+    ImGui::GetWindowDrawList()->AddLine(ImVec2(gcx - gw * 0.5f, cy), ImVec2(gcx + gw * 0.5f, cy),
+                                        col, 5.0f * style::uiScale);
 
     if (active) {
         float dy = ImGui::GetIO().MouseDelta.y;
