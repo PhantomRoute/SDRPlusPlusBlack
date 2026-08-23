@@ -219,7 +219,7 @@ public:
             config.conf["devices"][selectedDevName]["offsetTuning"] = offsetTuning;
             config.conf["devices"][selectedDevName]["rtlAgc"] = rtlAgc;
             config.conf["devices"][selectedDevName]["tunerAgc"] = tunerAgc;
-            config.conf["devices"][selectedDevName]["gain"] = gainId;
+            config.conf["devices"][selectedDevName]["gainIndex"] = gainId;
         }
 
         // Load config
@@ -258,7 +258,16 @@ public:
             tunerAgc = config.conf["devices"][selectedDevName]["tunerAgc"];
         }
 
-        if (config.conf["devices"][selectedDevName].contains("gain")) {
+        // "gainIndex", not "gain", because that is what it is: a position in the
+        // tuner's own table of gains, not a figure in dB. Sitting next to "ppm" and
+        // "sampleRate", which are real values, the old name invited the reading that
+        // it was decibels - and since a number too large is clamped to the end of the
+        // table, asking for "30" meaning 30 dB silently gave maximum gain instead.
+        // Configs written before the rename still say "gain", so those are still read.
+        if (config.conf["devices"][selectedDevName].contains("gainIndex")) {
+            gainId = config.conf["devices"][selectedDevName]["gainIndex"];
+        }
+        else if (config.conf["devices"][selectedDevName].contains("gain")) {
             gainId = config.conf["devices"][selectedDevName]["gain"];
         }
 
@@ -507,7 +516,7 @@ private:
                 }
                 if (_this->selectedDevName != "") {
                     config.acquire();
-                    config.conf["devices"][_this->selectedDevName]["gain"] = _this->gainId;
+                    config.conf["devices"][_this->selectedDevName]["gainIndex"] = _this->gainId;
                     config.release(true);
                 }
             }
@@ -520,7 +529,7 @@ private:
                 }
                 if (_this->selectedDevName != "") {
                     config.acquire();
-                    config.conf["devices"][_this->selectedDevName]["gain"] = _this->gainId;
+                    config.conf["devices"][_this->selectedDevName]["gainIndex"] = _this->gainId;
                     config.release(true);
                 }
             }
