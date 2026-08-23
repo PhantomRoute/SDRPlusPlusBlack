@@ -215,23 +215,78 @@ void RadiosondeDecoderModule::selectType(int type) {
     if (activeDecoder) { activeDecoder->start(); }
 }
 
+// Speed, heading and climb from the change between two consecutive fixes.
+//
+// The iMet-54 carries no velocity of any kind - checked against a live flight by
+// correlating every offset in its 108 byte payload, as int16, uint16, int32 and
+// float32 in both byte orders, against the speed and climb worked out from its own
+// GPS track: nothing reached even a 0.9 correlation. So for that sonde these three
+// numbers are zero for the whole flight unless they are derived, which is what every
+// other tracker does with it.
+void RadiosondeDecoderModule::deriveVelocity(SondeFullData& d) {
+    const double DEG = 3.14159265358979323846 / 180.0;
+    long long now = lastFrameTime;
+    if (havePrevFix) {
+        double dt = (double)(now - prevFixTime) / 1000.0;
+        // One frame a second is the usual rate. Shorter than half of that and GPS
+        // noise swamps the difference; longer than a few seconds and the balloon has
+        // turned in between, so the straight line between the two fixes is not the
+        // path it took. Outside that window, leave the figures alone rather than
+        // publish one that is wrong.
+        if (dt >= 0.4 && dt <= 8.0) {
+            // Metres per degree of latitude, and of longitude at this latitude. Good
+            // to a fraction of a percent over the second between fixes, which is far
+            // below the GPS noise this is differentiating.
+            const double MPERDEG = 111320.0;
+            double dn = ((double)d.lat - prevLat) * MPERDEG;
+            double de = ((double)d.lon - prevLon) * MPERDEG * cos((double)prevLat * DEG);
+            d.spd = (float)(sqrt(dn * dn + de * de) / dt);
+            d.climb = (float)(((double)d.alt - prevAlt) / dt);
+            if (dn != 0.0 || de != 0.0) {
+                double h = atan2(de, dn) / DEG;
+                if (h < 0.0) { h += 360.0; }
+                d.hdg = (float)h;
+            }
+        }
+    }
+    prevLat = d.lat;
+    prevLon = d.lon;
+    prevAlt = d.alt;
+    prevFixTime = now;
+    havePrevFix = true;
+}
+
 // Runs on the decoder's worker thread, not the UI thread.
 void RadiosondeDecoderModule::sondeDataHandler(SondeFullData* data, void* ctx) {
     RadiosondeDecoderModule* _this = (RadiosondeDecoderModule*)ctx;
     if (data == NULL) { return; }
 
     std::lock_guard<std::mutex> lck(_this->dataMtx);
-    _this->lastData = *data;
     _this->everDecoded = true;
     _this->framesDecoded++;
     _this->lastFrameTime = currentTimeMillis();
+
+    // Derive into our own copy, never into *data.
+    //
+    // The decoder hands back a pointer to a SondeFullData it keeps and reuses for
+    // every frame, and a parser only writes the fields its sonde actually carries.
+    // Writing the derived velocity back into it therefore poisons the very test used
+    // to decide whether the decoder supplied one: the next frame arrives still
+    // holding last frame's numbers, the test says "already set", and the figures
+    // freeze at their first value for the rest of the flight. Seen doing exactly that
+    // on a live iMet-54 - 5.65 m/s on every frame while the balloon accelerated.
+    _this->lastData = *data;
+    if (data->spd == 0.0f && data->climb == 0.0f && data->hdg == 0.0f &&
+        (data->lat != 0.0f || data->lon != 0.0f)) {
+        _this->deriveVelocity(_this->lastData);
+    }
 
     bool timeAccepted = _this->timeIsBelievable(data->time);
 
     // Written for every frame, including the ones with no position and the ones whose
     // time was thrown out, because those are the frames worth having when something
-    // needs explaining.
-    if (_this->frameLogFile) { _this->writeFrameLogRow(*data, timeAccepted); }
+    // needs explaining. The module's copy, so it carries the derived velocity.
+    if (_this->frameLogFile) { _this->writeFrameLogRow(_this->lastData, timeAccepted); }
 
     // Only keep a point once there is a position to keep. A frame can decode with
     // valid telemetry before the GPS has a fix, and plotting 0,0 puts the balloon in
@@ -245,7 +300,7 @@ void RadiosondeDecoderModule::sondeDataHandler(SondeFullData* data, void* ctx) {
         _this->track.push_back(fix);
         while (_this->track.size() > MAX_TRACK) { _this->track.pop_front(); }
 
-        if (_this->logFile) { _this->writeLogPoint(*data, timeAccepted); }
+        if (_this->logFile) { _this->writeLogPoint(_this->lastData, timeAccepted); }
     }
 }
 

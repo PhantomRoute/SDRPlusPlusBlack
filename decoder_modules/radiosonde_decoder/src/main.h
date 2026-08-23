@@ -136,6 +136,17 @@ private:
     bool openFrameLog();
     void closeFrameLog();
     void writeFrameLogRow(const SondeFullData& d, bool timeAccepted);
+
+    // Fills in speed, heading and climb from successive fixes for the sondes that do
+    // not send them. Confirmed against a live iMet-54 flight: no field anywhere in
+    // its 108 byte payload correlates with speed, climb or either velocity component,
+    // so those three read zero all the way up unless they are worked out here.
+    void deriveVelocity(SondeFullData& d);
+    bool havePrevFix = false;
+    long long prevFixTime = 0;
+    float prevLat = 0.0f;
+    float prevLon = 0.0f;
+    float prevAlt = 0.0f;
     std::deque<SondeFix> track;
     // Scratch for the plot, kept between frames so drawing does not allocate on
     // every one. Only ever touched on the UI thread.
