@@ -110,7 +110,7 @@ RadiosondeDecoderModule::RadiosondeDecoderModule(std::string name) {
     // selectType builds the channel at the right width and starts the decoder, so
     // there is nothing to start here first.
     selectType(selectedType);
-    if (logEnabled) { logEnabled = openLog(); }
+    if (logEnabled) { logEnabled = requestLog() || logAskingOverwrite; }
     if (frameLogEnabled) { frameLogEnabled = openFrameLog(); }
 
     enabled = true;
@@ -384,11 +384,34 @@ bool RadiosondeDecoderModule::timeIsBelievable(time_t t) {
 // through writeLogPoint, so they take the same lock that guards the data. Neither is
 // ever called with it already held, and writeLogPoint does not take it - it is only
 // reached from the callback, which does.
+// How many points a file already holds, and nothing else - used only to tell the
+// operator what they are about to continue or replace.
+static int countTrackPoints(const char* path) {
+    FILE* f = fopen(path, "rb");
+    if (!f) { return 0; }
+    int n = 0;
+    char buf[4096];
+    std::string carry;
+    size_t got;
+    while ((got = fread(buf, 1, sizeof buf, f)) > 0) {
+        carry.append(buf, got);
+        size_t at = 0;
+        while ((at = carry.find("<trkpt", at)) != std::string::npos) { n++; at += 6; }
+        // Keep one character less than the tag, which is just enough to catch one
+        // straddling two reads and few enough that a whole tag can never survive into
+        // the next pass to be counted twice. Keeping 8 did exactly that and reported
+        // one point more than the file held.
+        if (carry.size() > 5) { carry = carry.substr(carry.size() - 5); }
+    }
+    fclose(f);
+    return n;
+}
+
 // The closing tags, in one place: openLog winds back over them to continue a track,
 // writeLogPoint rewrites them after every point, and closeLog leaves them behind.
 static const char* GPX_TRAILER = "    </trkseg>\n  </trk>\n</gpx>\n";
 
-bool RadiosondeDecoderModule::openLog() {
+bool RadiosondeDecoderModule::openLog(bool startFresh) {
     closeLog();
     if (logPath[0] == 0) {
         logStatus = "No file chosen";
@@ -409,7 +432,7 @@ bool RadiosondeDecoderModule::openLog() {
     // find them and wind back over them. Anything else, append at the end and let the
     // next point put a fresh trailer on.
     bool appending = false;
-    logFile = fopen(logPath, "r+b");
+    logFile = startFresh ? NULL : fopen(logPath, "r+b");
     if (logFile) {
         fseek(logFile, 0, SEEK_END);
         long size = ftell(logFile);
@@ -455,6 +478,30 @@ bool RadiosondeDecoderModule::openLog() {
 
     logStatus = std::string(appending ? "Appending to " : "Writing ") + logPath;
     return true;
+}
+
+// Start logging, asking first if that would touch a track that is already there.
+bool RadiosondeDecoderModule::requestLog() {
+    logAskingOverwrite = false;
+    if (logPath[0] == 0) {
+        logStatus = "No file chosen";
+        return false;
+    }
+    FILE* probe = fopen(logPath, "rb");
+    if (probe) {
+        fseek(probe, 0, SEEK_END);
+        long size = ftell(probe);
+        fclose(probe);
+        if (size > 0) {
+            // Neither answer is safe to assume, so do not pick one. Nothing is opened
+            // and nothing is written until the operator says which they meant.
+            logExistingPoints = countTrackPoints(logPath);
+            logAskingOverwrite = true;
+            logStatus = "Waiting - that file already exists";
+            return false;
+        }
+    }
+    return openLog(true);
 }
 
 void RadiosondeDecoderModule::closeLog() {
@@ -939,9 +986,10 @@ void RadiosondeDecoderModule::drawLogging() {
     ImGui::SectionHeader("LOG");
 
     if (ImGui::Checkbox(("Record the track##radiosonde_log_" + name).c_str(), &logEnabled)) {
-        if (logEnabled) { logEnabled = openLog(); }
+        if (logEnabled) { logEnabled = requestLog() || logAskingOverwrite; }
         else {
             closeLog();
+            logAskingOverwrite = false;
             logStatus = "";
         }
         config.acquire();
@@ -951,6 +999,38 @@ void RadiosondeDecoderModule::drawLogging() {
     ImGui::HelpMarker("Writes a GPX file as it decodes, which most mapping software will open.\n"
                       "The file is kept valid after every frame, so it is still readable if the\n"
                       "program stops part way through a flight.");
+
+    // Asked rather than assumed, because both answers destroy something: continuing
+    // draws two flights as one line across the map, starting fresh throws the old one
+    // away. Nothing is opened and nothing is written until this is answered.
+    if (logAskingOverwrite) {
+        ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.25f, 1.0f),
+                           "That file already holds %d point(s).", logExistingPoints);
+        if (ImGui::Button(("Continue it##radiosonde_logcont_" + name).c_str())) {
+            logAskingOverwrite = false;
+            logEnabled = openLog(false);
+            config.acquire();
+            config.conf[name]["logEnabled"] = logEnabled;
+            config.release(true);
+        }
+        if (ImGui::IsItemHovered()) {
+            style::tooltip("Adds this flight to the end of the track already in the file.\n"
+                           "Nothing there now is lost, but two flights in one file draw\n"
+                           "as a single line between them.");
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(("Start fresh##radiosonde_lognew_" + name).c_str())) {
+            logAskingOverwrite = false;
+            logEnabled = openLog(true);
+            config.acquire();
+            config.conf[name]["logEnabled"] = logEnabled;
+            config.release(true);
+        }
+        if (ImGui::IsItemHovered()) {
+            style::tooltip("Replaces the file. The %d point(s) in it now are gone for good.",
+                           logExistingPoints);
+        }
+    }
 
     if (ImGui::Checkbox(("Record every frame##radiosonde_framelog_" + name).c_str(), &frameLogEnabled)) {
         if (frameLogEnabled) { frameLogEnabled = openFrameLog(); }

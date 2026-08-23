@@ -73,7 +73,14 @@ private:
     static bool bearingFromOperator(const SondeFullData& d, utils::BearingDistance& bd,
                                     double& elevationDeg);
 
-    bool openLog();
+    // openLog does as it is told; requestLog decides whether it needs to ask first.
+    // An existing track is never continued or replaced without the operator saying
+    // which, because both are destructive in one direction or the other: appending
+    // merges two flights into one line across the map, replacing throws one away.
+    bool openLog(bool startFresh);
+    bool requestLog();
+    bool logAskingOverwrite = false;
+    int logExistingPoints = 0;
     void closeLog();
     void writeLogPoint(const SondeFullData& d, bool timeAccepted);
 
