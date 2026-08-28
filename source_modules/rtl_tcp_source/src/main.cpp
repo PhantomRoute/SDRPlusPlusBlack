@@ -6,7 +6,7 @@
 #include <signal_path/signal_path.h>
 #include <core.h>
 #include <gui/smgui.h>
-#include <gui/dialogs/bias_tee_confirm.h>
+#include <gui/dialogs/hazard_confirm.h>
 #include <gui/style.h>
 #include <utils/optionlist.h>
 

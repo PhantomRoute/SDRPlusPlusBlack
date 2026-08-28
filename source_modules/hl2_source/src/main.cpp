@@ -199,6 +199,16 @@ public:
 
         selectedIP = ipAddr;
 
+        // Keep the device combo pointing at the radio actually in use. Selecting by
+        // address - from the config at startup, or after a rescan - left this alone,
+        // so the list went on showing whichever device happened to be first.
+        for (int i = 0; i < devices; i++) {
+            if (discoveredToIp(discovered[i]) == ipAddr) {
+                devId = i;
+                break;
+            }
+        }
+
         sampleRateList.clear();
         sampleRateListTxt = "";
         sampleRateList.push_back(48000);

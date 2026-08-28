@@ -8,7 +8,7 @@
 #include <config.h>
 #include <sdrplay_api.h>
 #include <gui/smgui.h>
-#include <gui/dialogs/bias_tee_confirm.h>
+#include <gui/dialogs/hazard_confirm.h>
 #include <utils/optionlist.h>
 
 #define CONCAT(a, b) ((std::string(a) + b).c_str())
@@ -286,6 +286,9 @@ public:
         channelParams = openDevParams->rxChannelA;
 
         selectedName = devNameList[id];
+        // The id was already being passed in for the name; the combo needs it too,
+        // or picking a device by name leaves the list showing the first one.
+        devId = id;
 
         if (openDev.hwVer == SDRPLAY_RSP1_ID) {
             lnaSteps = 4;
@@ -341,14 +344,21 @@ public:
                 sampleRate = samplerates[srId];
             }
         }
+        // Both of these are positions in a list, and both were being taken from the
+        // config and used as one without being looked at. A file written by another
+        // build, or edited by hand, indexed straight off the end of the table.
         if (config.conf["devices"][selectedName].contains("ifModeId")) {
             ifModeId = config.conf["devices"][selectedName]["ifModeId"];
+            ifModeId = std::clamp<int>(ifModeId, 0, (int)(sizeof(ifModes) / sizeof(ifModes[0])) - 1);
             if (ifModeId != 0) {
                 sampleRate = ifModes[ifModeId].effectiveSamplerate;
             }
         }
         if (config.conf["devices"][selectedName].contains("bwMode")) {
             bandwidthId = config.conf["devices"][selectedName]["bwMode"];
+            // 8 is the "Auto" entry, which is one past the end of the table and is
+            // tested for rather than looked up.
+            bandwidthId = std::clamp<int>(bandwidthId, 0, 8);
         }
         if (config.conf["devices"][selectedName].contains("lnaGain")) {
             lnaGain = config.conf["devices"][selectedName]["lnaGain"];
@@ -723,6 +733,7 @@ private:
                 // Reload bandwidth
                 if (config.conf["devices"][_this->selectedName].contains("bwMode")) {
                     _this->bandwidthId = config.conf["devices"][_this->selectedName]["bwMode"];
+                    _this->bandwidthId = std::clamp<int>(_this->bandwidthId, 0, 8);
                 }
                 else {
                     // Auto

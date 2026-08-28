@@ -9,7 +9,7 @@
 #include <gui/widgets/stepped_slider.h>
 #include <libbladeRF.h>
 #include <gui/smgui.h>
-#include <gui/dialogs/bias_tee_confirm.h>
+#include <gui/dialogs/hazard_confirm.h>
 #include <algorithm>
 #include <utils/optionlist.h>
 
@@ -271,7 +271,6 @@ public:
         else {
             bwId = 0;
         }
-        config.release(true);
 
         // Load clock source
         clkId = clocks.keyId("onboard");
@@ -329,6 +328,10 @@ public:
                 biasT = false;
             }
         }
+        // Released only now. Clock source, gain mode, gain and Bias-T were all being
+        // read after this, on a config the autosave thread is free to be writing out
+        // at the same time.
+        config.release(true);
 
         bladerf_close(openDev);
     }

@@ -150,6 +150,16 @@ public:
     }
 
     void selectBySerial(uint64_t serial) {
+        // Keep the device combo pointing at the radio actually in use. Selecting by
+        // serial - from the config at startup, or after a rescan - left this
+        // alone, so the list went on showing whichever device happened to be first.
+        for (int i = 0; i < (int)devList.size(); i++) {
+            if (devList[i] == serial) {
+                devId = i;
+                break;
+            }
+        }
+
         airspyhf_device_t* dev;
         try {
 #ifndef __ANDROID__

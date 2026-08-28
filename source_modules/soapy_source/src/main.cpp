@@ -144,6 +144,19 @@ private:
         return res;
     }
 
+    // The remembered device, read under the lock. The two Refresh buttons were
+    // reading config.conf["device"] with nothing held, on a config the autosave
+    // thread writes out from underneath them.
+    std::string savedDevice() {
+        std::string dev;
+        config.acquire();
+        if (config.conf.contains("device") && config.conf["device"].is_string()) {
+            dev = config.conf["device"].get<std::string>();
+        }
+        config.release();
+        return dev;
+    }
+
     void selectDevice(std::string name) {
         if (devList.size() == 0) {
             devId = -1;
@@ -257,6 +270,11 @@ private:
             else {
                 uiAntennaId = 0;
             }
+            // A position in a list that belongs to this device, saved by whatever the
+            // device offered last time. Drivers change what they offer between
+            // versions, and start() reads antennaList[uiAntennaId] without looking.
+            if (uiAntennaId >= (int)antennaList.size()) { uiAntennaId = 0; }
+            if (uiAntennaId < 0) { uiAntennaId = 0; }
             int i = 0;
             for (auto gain : gainList) {
                 if (config.conf["devices"][name]["gains"].contains(gain)) {
@@ -273,6 +291,8 @@ private:
             else if (bandwidthList.size() > 2) {
                 uiBandwidthId = 0;
             }
+            if (uiBandwidthId >= (int)bandwidthList.size()) { uiBandwidthId = 0; }
+            if (uiBandwidthId < 0) { uiBandwidthId = 0; }
             if (hasAgc && config.conf["devices"][name].contains("agc")) {
                 agc = config.conf["devices"][name]["agc"];
             }
@@ -436,7 +456,7 @@ private:
             SmGui::ForceSync();
             if (SmGui::Button(CONCAT("Refresh##_dev_refr_", _this->name))) {
                 _this->refresh();
-                _this->selectDevice(config.conf["device"]);
+                _this->selectDevice(_this->savedDevice());
             }
             return;
         }
@@ -463,7 +483,7 @@ private:
         SmGui::FillWidth();
         if (SmGui::Button(CONCAT("Refresh##_dev_refr_", _this->name))) {
             _this->refresh();
-            _this->selectDevice(config.conf["device"]);
+            _this->selectDevice(_this->savedDevice());
         }
 
         SmGui::LeftLabel("Device Args");

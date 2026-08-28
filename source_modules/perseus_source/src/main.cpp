@@ -134,6 +134,11 @@ public:
             return;
         }
 
+        // Keep the device combo pointing at the radio actually in use. Selecting by
+        // serial - from the config at startup, or after a rescan - left this
+        // alone, so the list went on showing whichever device happened to be first.
+        devId = devList.keyId(serial);
+
         // Open device
         selectedSerial = serial;
         selectedPerseusId = devList.value(devList.keyId(serial));

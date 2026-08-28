@@ -7,7 +7,7 @@
 #include <config.h>
 #include <gui/widgets/stepped_slider.h>
 #include <gui/smgui.h>
-#include <gui/dialogs/bias_tee_confirm.h>
+#include <gui/dialogs/hazard_confirm.h>
 
 #ifndef __ANDROID__
 #include <libhackrf/hackrf.h>
@@ -139,7 +139,6 @@ public:
         devListTxt = "";
 
 #ifndef __ANDROID__
-        uint64_t serials[256];
         hackrf_device_list_t* _devList = hackrf_device_list();
 
         for (int i = 0; i < _devList->devicecount; i++) {
@@ -178,21 +177,34 @@ public:
             return;
         }
 
-        bool created = false;
+        // Keep the device combo pointing at the radio actually selected. Picking one
+        // from the combo sets this on the way in, but selecting by serial - from the
+        // config at startup, or after a rescan - did not, so the list went on showing
+        // the first device while a different one was in use.
+        for (int i = 0; i < (int)devList.size(); i++) {
+            if (devList[i] == serial) {
+                devId = i;
+                break;
+            }
+        }
+
+        bool configChanged = false;
         config.acquire();
         if (!config.conf["devices"].contains(serial)) {
+            configChanged = true;
             config.conf["devices"][serial]["sampleRate"] = 2000000;
             config.conf["devices"][serial]["biasT"] = false;
-            config.conf["devices"][serial]["amp"] = false;
             config.conf["devices"][serial]["lnaGain"] = 0;
             config.conf["devices"][serial]["vgaGain"] = 0;
             config.conf["devices"][serial]["bandwidth"] = 16;
         }
-        config.release(created);
 
         // Set default values
-        srId = 0;
-        sampleRate = 2000000;
+        // srId has to agree with sampleRate: it was 0, which is the 20MHz entry, while
+        // the rate beside it was 2MHz. A device entry with no usable sample rate in it
+        // therefore ran at 2MHz with the combo reading 20MHz.
+        srId = 6;
+        sampleRate = sampleRates[srId];
         biasT = false;
         amp = false;
         lna = 0;
@@ -212,8 +224,19 @@ public:
         if (config.conf["devices"][serial].contains("biasT")) {
             biasT = config.conf["devices"][serial]["biasT"];
         }
+        // The amp is deliberately not remembered.
+        //
+        // It is the part of a HackRF that a strong signal destroys, and a setting that
+        // is remembered is one that comes back on without being asked for: enable it
+        // once for a weak signal on a quiet band, come back a week later on a
+        // different antenna, press play, and it is live again with nothing said. The
+        // confirmation on the checkbox only guards the click, not the restore. So it
+        // starts off every session and has to be switched on deliberately - which also
+        // means start() explicitly turns it off, clearing one left on by other
+        // software. Delete these three lines to make it persist again.
         if (config.conf["devices"][serial].contains("amp")) {
-            amp = config.conf["devices"][serial]["amp"];
+            config.conf["devices"][serial].erase("amp");
+            configChanged = true;
         }
         if (config.conf["devices"][serial].contains("lnaGain")) {
             lna = config.conf["devices"][serial]["lnaGain"];
@@ -225,6 +248,9 @@ public:
             bwId = config.conf["devices"][serial]["bandwidth"];
             bwId = std::clamp<int>(bwId, 0, 16);
         }
+        // Released only now. Every read above was being done on a released config,
+        // which the autosave thread is free to be writing out at the same time.
+        config.release(configChanged);
 
         selectedSerial = serial;
     }
@@ -412,13 +438,18 @@ private:
             config.release(true);
         }
 
-        if (SmGui::Checkbox(CONCAT("Amp Enabled##_hackrf_amp_", _this->name), &_this->amp)) {
+        // Not saved: see selectBySerial. The amp is off at the start of every session.
+        if (dialogs::RfAmpCheckbox(CONCAT("RF Amp##_hackrf_amp_", _this->name), &_this->amp)) {
             if (_this->running) {
                 hackrf_set_amp_enable(_this->openDev, _this->amp);
             }
-            config.acquire();
-            config.conf["devices"][_this->selectedSerial]["amp"] = _this->amp;
-            config.release(true);
+        }
+
+        // Said out loud while it is on. The checkbox alone is easy to leave ticked and
+        // not notice, and the whole point of the warning is lost if the state it warns
+        // about is quiet.
+        if (_this->amp) {
+            SmGui::TextColored(ImVec4(1.0f, 0.7f, 0.3f, 1.0f), "Amp on - strong signals can destroy it");
         }
     }
 
@@ -436,7 +467,7 @@ private:
     int sampleRate;
     SourceManager::SourceHandler handler;
     bool running = false;
-    double freq;
+    double freq = 100000000.0;
     std::string selectedSerial = "";
     int devId = 0;
     int srId = 0;

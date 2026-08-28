@@ -6,7 +6,7 @@
 #include <gui/style.h>
 #include <config.h>
 #include <gui/smgui.h>
-#include <gui/dialogs/bias_tee_confirm.h>
+#include <gui/dialogs/hazard_confirm.h>
 #include <rtl-sdr.h>
 
 #ifdef __ANDROID__

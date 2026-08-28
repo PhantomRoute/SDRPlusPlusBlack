@@ -91,6 +91,11 @@ private:
             return;
         }
 
+        // Keep the device combo pointing at the radio actually in use. Selecting by
+        // serial - from the config at startup, or after a rescan - left this
+        // alone, so the list went on showing whichever device happened to be first.
+        devId = devices.keyId(serial);
+
         // Open the device
         librfnm* dev = new librfnm(librfnm_transport::LIBRFNM_TRANSPORT_USB, serial);
 

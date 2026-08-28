@@ -7,7 +7,7 @@
 #include <gui/style.h>
 #include <config.h>
 #include <gui/smgui.h>
-#include <gui/dialogs/bias_tee_confirm.h>
+#include <gui/dialogs/hazard_confirm.h>
 #include <airspy.h>
 
 #ifdef __ANDROID__
@@ -136,6 +136,16 @@ public:
     }
 
     void selectBySerial(uint64_t serial) {
+        // Keep the device combo pointing at the radio actually in use. Selecting by
+        // serial - from the config at startup, or after a rescan - left this
+        // alone, so the list went on showing whichever device happened to be first.
+        for (int i = 0; i < (int)devList.size(); i++) {
+            if (devList[i] == serial) {
+                devId = i;
+                break;
+            }
+        }
+
         airspy_device* dev;
         try {
 #ifndef __ANDROID__
