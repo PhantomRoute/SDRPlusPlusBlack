@@ -17,11 +17,25 @@ namespace dialogs {
     // sets allowSilence false cannot be turned off, which is for the ones where the
     // answer has to be given every time.
 
+    // Accepting takes two separate deliberate actions rather than one button press,
+    // because a single stray tap is the difference between a working radio and a dead
+    // one:
+    //
+    //  - the dialog opens in the middle of the screen, not under the control that was
+    //    touched, so the tap that opened it cannot carry through into it
+    //  - a tick box has to be ticked before the accept button does anything, and the
+    //    two are in different places
+    //  - the accept button is the far one; the near one cancels
+    //  - the tick box is cleared every time the dialog opens
+    //
+    // A fat finger can hit any one of those. It cannot hit all of them.
     struct HazardWarning {
         const char* configKey;    // Main config flag holding "do not ask me again"
         const char* question;     // Heading, e.g. "Enable Bias-T?"
         const char* const* body;  // Lines of explanation, NULL terminated
         bool allowSilence;        // Whether the dialog offers "Don't show this again"
+        const char* armLabel;     // The tick box that arms the accept button
+        const char* confirmLabel; // The accept button
     };
 
     bool HazardCheckbox(const char* label, bool* value, const HazardWarning& warning);
