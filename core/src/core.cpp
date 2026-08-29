@@ -938,6 +938,19 @@ int sdrpp_main(int argc, char* argv[]) {
     // them does the window is already gone, so it looks like the app has exited
     // while the process is still there. Log each step: the last line in the log is
     // the one that hung.
+    // Nothing else on the way out stops the radio: end() below does not, and a
+    // module's _END_ only saves its config - the instance is never deleted, so the
+    // destructor that would have called the stop handler never runs. Quitting while
+    // playing therefore left every source module's device wide open. No close, no
+    // worker thread joined, and on an RTL-SDR or a HackRF the bias tee still powering
+    // whatever is on the coax, because clearing that is something the stop handler
+    // does and the stop handler was never reached.
+    //
+    // This is the same call the stop button makes, and it does nothing when already
+    // stopped.
+    flog::info("Shutdown: stopping the radio");
+    gui::mainWindow.setPlayState(false);
+
     flog::info("Shutdown: main window");
     gui::mainWindow.end();
 

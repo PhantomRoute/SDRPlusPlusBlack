@@ -49,7 +49,7 @@ public:
         prebufferMsec.define("100 msec", 100);
         prebufferMsec.define("250 msec", 250);
         prebufferMsec.define("500 msec", 500);
-        prebufferMsec.define("750 msec", 700);
+        prebufferMsec.define("700 msec", 700);
         prebufferMsec.define("1000 msec", 1000);
         prebufferMsec.define("1500 msec", 1500);
         prebufferMsec.define("2000 msec", 2000);
@@ -417,19 +417,26 @@ private:
             std::string key = cfg["sampleType"];
             if (sampleTypeList.keyExists(key)) { sampleTypeId = sampleTypeList.keyId(key); }
         }
-        if (cfg.contains("compressionType")) {
-            compressionTypeId = compressionTypeList.valueId(cfg["compressionType"]);
+        // Every one of these is checked before it is looked up, the way sampleType
+        // above already was. valueId() throws on a value that is not in its list, and
+        // the config lock is held here - so a settings file naming a prebuffer or a
+        // resample rate that this build no longer offers took the module out with an
+        // uncaught exception and left the config mutex locked behind it.
+        if (cfg.contains("compressionType") && cfg["compressionType"].is_number_integer()) {
+            server::CompressionType ct = (server::CompressionType)(int)cfg["compressionType"];
+            if (compressionTypeList.valueExists(ct)) { compressionTypeId = compressionTypeList.valueId(ct); }
         }
-        if (cfg.contains("rxPrebuffer")) {
+        if (cfg.contains("rxPrebuffer") && cfg["rxPrebuffer"].is_number_integer()) {
             int rxPrebufferMsec = cfg["rxPrebuffer"];
-            rxPrebufferId = prebufferMsec.valueId(rxPrebufferMsec);
+            if (prebufferMsec.valueExists(rxPrebufferMsec)) { rxPrebufferId = prebufferMsec.valueId(rxPrebufferMsec); }
         }
-        if (cfg.contains("rxResample")) {
+        if (cfg.contains("rxResample") && cfg["rxResample"].is_number_integer()) {
             int sps = cfg["rxResample"];
-            rxResampleId = serverResample.valueId(sps);
+            if (serverResample.valueExists(sps)) { rxResampleId = serverResample.valueId(sps); }
         }
-        if (cfg.contains("txPrebuffer")) {
-            txPrebufferId = prebufferMsec.valueId(cfg["txPrebuffer"]);
+        if (cfg.contains("txPrebuffer") && cfg["txPrebuffer"].is_number_integer()) {
+            int txPrebufferMsec = cfg["txPrebuffer"];
+            if (prebufferMsec.valueExists(txPrebufferMsec)) { txPrebufferId = prebufferMsec.valueId(txPrebufferMsec); }
         }
 
         config.release();

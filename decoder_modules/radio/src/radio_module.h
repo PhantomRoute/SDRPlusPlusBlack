@@ -989,9 +989,15 @@ private:
         }
         if (config.conf[name][selectedDemod->getName()].contains("snapInterval")) {
             snapInterval = config.conf[name][selectedDemod->getName()]["snapInterval"];
+            // Held to the same floor the field in the menu enforces. A zero here is
+            // divided by when the waterfall snaps a click to the tuning step, which
+            // makes the offset NaN and leaves the VFO somewhere it cannot be tuned
+            // back from.
+            if (snapInterval < 1) { snapInterval = 1; }
         }
         if (config.conf[name][selectedDemod->getName()].contains("squelchLevel")) {
             squelchLevel = config.conf[name][selectedDemod->getName()]["squelchLevel"];
+            squelchLevel = std::clamp<float>(squelchLevel, MIN_SQUELCH, MAX_SQUELCH);
         }
         if (config.conf[name][selectedDemod->getName()].contains("squelchEnabled")) {
             squelchEnabled = config.conf[name][selectedDemod->getName()]["squelchEnabled"];

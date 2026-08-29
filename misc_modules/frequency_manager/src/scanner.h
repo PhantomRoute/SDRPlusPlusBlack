@@ -50,8 +50,9 @@ public:
     void update(float deltaTime);
 
     // Drawn over the FFT from the frequency manager's redraw handler: the channel
-    // being checked right now, the other channels in the scan, and the level they
-    // are being compared against.
+    // being checked right now and the other channels in the scan. The trigger level
+    // is not drawn here - it is on the meter in the panel, beside the level it is
+    // being compared against.
     void drawWaterfallOverlay(const ImGui::WaterFall::FFTRedrawArgs& args);
 
 private:
@@ -84,7 +85,6 @@ private:
     bool haveLevel = false;
     float level = 0.0f;         // dB over the local noise floor
     float meterPeak = 0.0f;     // decaying peak, for the meter only
-    float noiseDbfs = NAN;      // absolute level the measurement was taken against
     std::vector<float> noiseScratch;
 
     // Rolling 500ms window, used by "Set from noise".

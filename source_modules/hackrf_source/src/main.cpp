@@ -238,11 +238,15 @@ public:
             config.conf["devices"][serial].erase("amp");
             configChanged = true;
         }
+        // Held to the ranges the sliders use, which are the ranges the hardware takes.
+        // libhackrf rejects anything outside them, so a stale or hand written value did
+        // not just show wrong on the slider - the gain silently stayed at whatever the
+        // device already had.
         if (config.conf["devices"][serial].contains("lnaGain")) {
-            lna = config.conf["devices"][serial]["lnaGain"];
+            lna = std::clamp<float>(config.conf["devices"][serial]["lnaGain"], 0.0f, 40.0f);
         }
         if (config.conf["devices"][serial].contains("vgaGain")) {
-            vga = config.conf["devices"][serial]["vgaGain"];
+            vga = std::clamp<float>(config.conf["devices"][serial]["vgaGain"], 0.0f, 62.0f);
         }
         if (config.conf["devices"][serial].contains("bandwidth")) {
             bwId = config.conf["devices"][serial]["bandwidth"];
@@ -346,6 +350,19 @@ private:
         _this->running = false;
         _this->stream.stopWriter();
         // TODO: Stream stop
+
+        // Both of the things on this radio that can destroy something are put back to
+        // off before the device is let go of: the amplifier a strong signal burns out,
+        // and the voltage on the antenna port. Whether the firmware would have done it
+        // on close is not a thing to leave to chance - the RTL-SDR's library documents
+        // that closing does not clear its bias tee, and "stopped" has to mean stopped
+        // for the parts that can cost you hardware.
+        //
+        // Same control transfers the checkboxes issue while running. Neither member is
+        // changed, so start() puts back exactly what the user set.
+        hackrf_set_amp_enable(_this->openDev, 0);
+        hackrf_set_antenna_enable(_this->openDev, 0);
+
         hackrf_error err = (hackrf_error)hackrf_close(_this->openDev);
         if (err != HACKRF_SUCCESS) {
             flog::error("Could not close HackRF {0}: {1}", _this->selectedSerial, hackrf_error_name(err));

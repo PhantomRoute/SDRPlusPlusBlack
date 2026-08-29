@@ -9,7 +9,9 @@
 #include <signal_path/signal_path.h>
 #include <gui/style.h>
 #include <utils/optionlist.h>
+#include <utils/flog.h>
 #include <algorithm>
+#include <cmath>
 
 namespace displaymenu {
     bool showWaterfall;
@@ -212,6 +214,24 @@ namespace displaymenu {
             uiScales.define(scale, std::to_string((int)(scale * 100)) + "%", scale);
         }
 
+        // style::uiScale comes straight out of the config with no validation, so it need
+        // not be one of the scales offered above. A hand edit will do it, and so will a
+        // config carried over from Android, where the device's native density is defined
+        // into this list and on the desktop is not. valueId() throws on a value it cannot
+        // find, and nothing here catches it: the program died in the middle of startup
+        // with no window and nothing in the log after the colormaps to say why.
+        if (!(style::uiScale >= 0.1f && style::uiScale <= 8.0f)) {
+            flog::warn("uiScale of {0} is out of range, using 1.0", style::uiScale);
+            style::uiScale = 1.0f;
+        }
+        if (!uiScales.valueExists(style::uiScale)) {
+            int nearest = 0;
+            for (int i = 1; i < uiScales.size(); i++) {
+                if (fabsf(uiScales.value(i) - style::uiScale) < fabsf(uiScales.value(nearest) - style::uiScale)) { nearest = i; }
+            }
+            flog::warn("uiScale of {0} is not one of the offered scales, using {1}", style::uiScale, uiScales.value(nearest));
+            style::uiScale = uiScales.value(nearest);
+        }
         uiScaleId = uiScales.valueId(style::uiScale);
     }
 

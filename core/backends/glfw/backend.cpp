@@ -264,6 +264,12 @@ namespace backend {
         int synthDragStep = 0, synthDragSteps = 0;
 
         while (!glfwWindowShouldClose(window)) {
+            // Set by the HTTP debug server's /stop and /exit. Nothing read it, so both
+            // answered "exiting" and the program carried straight on running. That is
+            // worse than not having the endpoint at all: the caller is told the process
+            // is gone, and goes on to overwrite the files it is still holding open.
+            if (httpdebug::shouldExit.load(std::memory_order_acquire)) { break; }
+
 #ifdef BUILD_TESTS
             // Check if we should exit for testing purposes
             if (sdrpp::test::renderLoopHook.shouldExitRenderLoop()) {

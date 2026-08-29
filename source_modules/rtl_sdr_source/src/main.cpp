@@ -362,6 +362,21 @@ private:
         rtlsdr_cancel_async(_this->openDev);
         if (_this->workerThread.joinable()) { _this->workerThread.join(); }
         _this->stream.clearWriteStop();
+
+        // Closing the device does not do this for us. rtl-sdr.h says so in as many
+        // words, on rtlsdr_set_bias_tee itself: "rtlsdr_close() does not clear GPIO
+        // lines, so it leaves the (bias tee) line enabled if a client program doesn't
+        // explictly disable it." So pressing Stop - or quitting, which comes through
+        // here - left 5V sitting on the antenna connector with nothing on screen to
+        // say so, and the next thing plugged into that port got it. That is the state
+        // the confirmation on the checkbox exists to keep people out of, and it was
+        // being entered by stopping the radio.
+        //
+        // After the worker has joined, so this is not a control transfer racing the
+        // async reader. The checkbox keeps its setting and start() applies it again,
+        // so a powered LNA comes back with the radio.
+        rtlsdr_set_bias_tee(_this->openDev, 0);
+
         rtlsdr_close(_this->openDev);
         flog::info("RTLSDRSourceModule '{0}': Stop!", _this->name);
     }

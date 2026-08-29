@@ -180,7 +180,6 @@ void ThemeManager::initCustomColors() {
             { "VFOSelectedLineColor", "Centre line of the selected VFO", &vfoSelectedLineColor, vfoSelectedLineColor },
             { "VFOLineColor", "Centre line of the other VFOs", &vfoLineColor, vfoLineColor },
             { "SquelchColor", "Squelch threshold marker", &squelchColor, squelchColor },
-            { "ScannerSquelchColor", "Scanner trigger level line", &scannerSquelchColor, scannerSquelchColor },
             { "NotchColor", "Notch filter marker", &notchColor, notchColor },
         } },
         { "Bookmarks", {

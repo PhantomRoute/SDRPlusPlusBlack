@@ -632,11 +632,13 @@ private:
         // Add new stream to the list
         _this->audioStreams.define(name, name, name);
 
-        // If no stream is selected, select new stream. If not, update the menu ID. 
+        // If no stream is selected, select new stream. If not, update the menu ID.
+        // keyId() throws on a name it cannot find, so it is only asked about a name
+        // that is in the list - see the note in streamUnregisterHandler.
         if (_this->selectedStreamName.empty()) {
             _this->selectStream(name);
         }
-        else {
+        else if (_this->audioStreams.keyExists(_this->selectedStreamName)) {
             _this->streamId = _this->audioStreams.keyId(_this->selectedStreamName);
         }
     }
@@ -648,10 +650,16 @@ private:
         _this->audioStreams.undefineKey(name);
 
         // If the stream is in used, deselect it and reselect default. Otherwise, update ID.
+        //
+        // The else branch asks for the id of whatever is still selected, which is the
+        // empty string when nothing is - selectStream() leaves it that way if binding
+        // failed. keyId() throws on a name it cannot find, and this runs from a stream
+        // unregister event, so the exception came out of the middle of a radio being
+        // torn down rather than anywhere it could be handled.
         if (_this->selectedStreamName == name) {
             _this->selectStream("");
         }
-        else {
+        else if (_this->audioStreams.keyExists(_this->selectedStreamName)) {
             _this->streamId = _this->audioStreams.keyId(_this->selectedStreamName);
         }
     }

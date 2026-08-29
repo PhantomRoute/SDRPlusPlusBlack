@@ -201,7 +201,6 @@ void Scanner::gotoStation(size_t index) {
     }
 
     haveLevel = false;
-    noiseDbfs = NAN;
     enterState(SCAN_SETTLING);
 }
 
@@ -366,13 +365,11 @@ void Scanner::sampleLevel(float deltaTime) {
     double now = ImGui::GetTime();
     if (state == SCAN_IDLE && (now - lastRenderTime) > 0.5) {
         haveLevel = false;
-        noiseDbfs = NAN;
         signalHistory.clear();
         return;
     }
 
     haveLevel = false;
-    noiseDbfs = NAN;
 
     double freq = 0.0;
     double bandwidth = 0.0;
@@ -381,7 +378,6 @@ void Scanner::sampleLevel(float deltaTime) {
         float noise = 0.0f;
         if (measureChannel(freq, bandwidth, snr, noise)) {
             level = snr;
-            noiseDbfs = noise;
             haveLevel = true;
         }
     }
@@ -793,19 +789,4 @@ void Scanner::drawWaterfallOverlay(const ImGui::WaterFall::FFTRedrawArgs& args) 
         }
     }
 
-    // The level the current channel is being compared against, on the FFT's own
-    // scale. It is drawn from the noise the last measurement was taken against, so
-    // it lines up with the trace rather than floating at an absolute dB value.
-    if (std::isfinite(noiseDbfs)) {
-        float fftMin = gui::waterfall.getFFTMin();
-        float fftMax = gui::waterfall.getFFTMax();
-        if (fftMax > fftMin) {
-            double db = (double)noiseDbfs + (double)getTriggerLevel();
-            double y = args.max.y - ((db - fftMin) * (args.max.y - args.min.y) / (fftMax - fftMin));
-            if (y >= args.min.y && y <= args.max.y) {
-                draw->AddLine(ImVec2(args.min.x, roundf((float)y)), ImVec2(args.max.x, roundf((float)y)),
-                              ImGui::ColorConvertFloat4ToU32(gui::themeManager.scannerSquelchColor), 1.0f);
-            }
-        }
-    }
 }
