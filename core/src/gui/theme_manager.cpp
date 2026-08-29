@@ -179,7 +179,7 @@ void ThemeManager::initCustomColors() {
         { "VFOs and squelch", {
             { "VFOSelectedLineColor", "Centre line of the selected VFO", &vfoSelectedLineColor, vfoSelectedLineColor },
             { "VFOLineColor", "Centre line of the other VFOs", &vfoLineColor, vfoLineColor },
-            { "SquelchColor", "Squelch level line", &squelchColor, squelchColor },
+            { "SquelchColor", "Squelch threshold marker", &squelchColor, squelchColor },
             { "ScannerSquelchColor", "Scanner trigger level line", &scannerSquelchColor, scannerSquelchColor },
             { "NotchColor", "Notch filter marker", &notchColor, notchColor },
         } },
@@ -196,6 +196,7 @@ void ThemeManager::initCustomColors() {
         } },
         { "Meters", {
             { "SNRMeterColor", "SNR meter bar", &snrMeterColor, snrMeterColor },
+            { "MeterOpenColor", "Level meter bar, over the threshold", &meterOpenColor, meterOpenColor },
             { "VolumeMeterLow", "Audio meter bar, below 0 dB", &volumeMeterLow, volumeMeterLow },
             { "VolumeMeterHigh", "Audio meter bar, clipping", &volumeMeterHigh, volumeMeterHigh },
             { "VolumeMeterPeakLow", "Audio meter peak mark, below 0 dB", &volumeMeterPeakLow, volumeMeterPeakLow },

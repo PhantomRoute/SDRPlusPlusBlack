@@ -6,6 +6,7 @@
 #include <utils/flog.h>
 #include <gui/gui.h>
 #include <gui/style.h>
+#include <gui/widgets/level_meter.h>
 #include <signal_path/signal_path.h>
 
 namespace {
@@ -598,71 +599,24 @@ void Scanner::drawStatus() {
 }
 
 void Scanner::drawMeter() {
-    float width = ImGui::GetContentRegionAvail().x;
-    if (width < 16.0f) { return; }
-    float height = 18.0f * style::uiScale;
+    ImGui::LevelMeterStyle look;
+    look.fillClosed = gui::themeManager.snrMeterColor;
+    look.fillOpen = gui::themeManager.meterOpenColor;
+    look.threshold = ImGui::GetStyleColorVec4(ImGuiCol_Text);
+
+    // The widget edits the trigger, which is where the two settings behind it meet.
+    // Only the floor moves with the drag; the margin is what the user set it to.
     float trigger = getTriggerLevel();
-    float range = METER_MAX_DB - METER_MIN_DB;
-
-    ImVec2 pos = ImGui::GetCursorScreenPos();
-    ImGui::InvisibleButton("##scanner_meter", ImVec2(width, height));
-
-    // Dragging anywhere on the meter sets the level a channel has to beat. Written
-    // back to the config on release, so a drag does not touch the file per frame.
-    if (ImGui::IsItemActive()) {
-        float ratio = std::clamp<float>((ImGui::GetIO().MousePos.x - pos.x) / width, 0.0f, 1.0f);
-        noiseFloor = std::clamp<float>(METER_MIN_DB + (ratio * range) - signalMarginDb, METER_MIN_DB, METER_MAX_DB);
-        trigger = getTriggerLevel();
+    ImGui::LevelMeterResult r = ImGui::LevelMeter("##scanner_meter", METER_MIN_DB, METER_MAX_DB,
+                                                 haveLevel, level, meterPeak,
+                                                 haveLevel && level >= trigger,
+                                                 &trigger, look);
+    if (r.changed) {
+        noiseFloor = std::clamp<float>(trigger - signalMarginDb, METER_MIN_DB, METER_MAX_DB);
     }
-    if (ImGui::IsItemDeactivated()) { saveSetting("noiseFloor", noiseFloor); }
-    if (ImGui::IsItemHovered()) { style::tooltip("Signal on the current channel, in dB over the noise around it.\nDrag to set the level a channel has to beat."); }
-
-    ImDrawList* draw = ImGui::GetWindowDrawList();
-    ImVec2 boxMin = pos;
-    ImVec2 boxMax = ImVec2(pos.x + width, pos.y + height);
-    draw->AddRectFilled(boxMin, boxMax, ImGui::GetColorU32(ImGuiCol_FrameBg), 2.0f);
-
-    auto dbToX = [&](float db) {
-        return boxMin.x + (std::clamp<float>((db - METER_MIN_DB) / range, 0.0f, 1.0f) * width);
-    };
-
-    if (haveLevel) {
-        bool open = (level >= trigger);
-        ImU32 fill = ImGui::ColorConvertFloat4ToU32(open ? gui::themeManager.scannerSquelchColor : gui::themeManager.snrMeterColor);
-        draw->AddRectFilled(boxMin, ImVec2(dbToX(level), boxMax.y), fill, 2.0f);
-
-        // Peak hold, so a short burst that opened the squelch is still visible.
-        if (meterPeak > level) {
-            float peakX = dbToX(meterPeak);
-            draw->AddLine(ImVec2(peakX, boxMin.y + 1.0f), ImVec2(peakX, boxMax.y - 1.0f), ImGui::GetColorU32(ImGuiCol_Text), 1.0f);
-        }
-    }
-
-    // 10dB ticks
-    ImU32 tickColor = ImGui::GetColorU32(ImGuiCol_Border);
-    for (float db = METER_MIN_DB + 10.0f; db < METER_MAX_DB; db += 10.0f) {
-        float x = dbToX(db);
-        draw->AddLine(ImVec2(x, boxMax.y - (4.0f * style::uiScale)), ImVec2(x, boxMax.y), tickColor, 1.0f);
-    }
-
-    // The trigger, drawn as a full height line so it can be compared with the fill
-    // at a glance.
-    float triggerX = dbToX(trigger);
-    ImU32 triggerColor = ImGui::GetColorU32(ImGuiCol_Text);
-    draw->AddLine(ImVec2(triggerX, boxMin.y), ImVec2(triggerX, boxMax.y), triggerColor, 2.0f * style::uiScale);
-    draw->AddTriangleFilled(ImVec2(triggerX - (4.0f * style::uiScale), boxMin.y),
-                            ImVec2(triggerX + (4.0f * style::uiScale), boxMin.y),
-                            ImVec2(triggerX, boxMin.y + (5.0f * style::uiScale)), triggerColor);
-    draw->AddRect(boxMin, boxMax, tickColor, 2.0f);
-
-    if (haveLevel) {
-        ImGui::Text("Signal %.1f dB", level);
-    }
-    else {
-        ImGui::TextDisabled("Signal --.- dB");
-    }
-    ImGui::SameLine();
-    ImGui::TextDisabled("| opens at %.1f dB", trigger);
+    // Written back on release, so a drag does not touch the config file per frame.
+    if (r.released) { saveSetting("noiseFloor", noiseFloor); }
+    if (r.hovered) { style::tooltip("Signal on the current channel, in dB over the noise around it.\nDrag to set the level a channel has to beat."); }
 }
 
 void Scanner::drawActivity() {

@@ -3,6 +3,7 @@
 #include <module.h>
 #include <gui/gui.h>
 #include <gui/style.h>
+#include <gui/widgets/level_meter.h>
 #include <signal_path/signal_path.h>
 #include <config.h>
 #include <dsp/chain.h>
@@ -681,15 +682,8 @@ private:
             _this->setSquelchEnabled(_this->squelchEnabled);
         }
         if (!_this->squelchEnabled && _this->enabled) { style::beginDisabled(); }
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());
-        if (ImGui::SliderFloat(("##_radio_sqelch_lvl_" + _this->name).c_str(), &_this->squelchLevel, _this->MIN_SQUELCH, _this->MAX_SQUELCH, "%.1f dB")) {
-            _this->setSquelchLevel(_this->squelchLevel);
-        }
+        _this->drawSquelchMeter();
         if (!_this->squelchEnabled && _this->enabled) { style::endDisabled(); }
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-            style::tooltip("Mutes the audio until the channel is louder than this. While it is on, the\nlevel is drawn as a line across the spectrum, so set it just above where\nthe noise sits.");
-        }
 
         // CTCSS / DCS identification and tone squelch
         if (_this->toneIdAllowed) {
@@ -1467,42 +1461,93 @@ private:
         return log(n) + 0.5772156649 + (1.0 / (2.0 * n));
     }
 
-    // The user picks the squelch threshold by eye off the waterfall, so the squelch
-    // has to end up on the same scale as what is drawn there. Two things separate
-    // them, both fixed offsets. The squelch's own transform is far coarser than the
+    // The threshold is set on the scale the spectrum is drawn on, so the squelch has
+    // to end up on that scale too. Two things separate them, both fixed offsets. The squelch's own transform is far coarser than the
     // display's, so each of its bins collects the power of many display bins. And
     // the display keeps only the loudest raw bin of each screen pixel, which draws
     // signal and noise alike above their true level.
     void updateSquelchScaling() {
-        double level;
         double sampleRate = sigpath::iqFrontEnd.getEffectiveSamplerate();
         int fftSize = sigpath::iqFrontEnd.getFFTSize();
         double displayWindowGain = sigpath::iqFrontEnd.getFFTWindowNoiseGain();
         double squelchWindowGain = squelch.getWindowNoiseGain();
         double ifSamplerate = selectedDemod ? selectedDemod->getIFSampleRate() : 0.0;
 
-        if (squelchLevel <= MIN_SQUELCH) {
-            // Bottom of the slider means "off"; don't let the correction turn it
-            // into a threshold that mutes everything.
-            level = -INFINITY;
-        }
-        else if (sampleRate <= 0.0 || fftSize <= 0 || ifSamplerate <= 0.0 || displayWindowGain <= 0.0 || squelchWindowGain <= 0.0) {
-            level = squelchLevel;
-        }
-        else {
+        double offset = 0.0;
+        if (sampleRate > 0.0 && fftSize > 0 && ifSamplerate > 0.0 && displayWindowGain > 0.0 && squelchWindowGain > 0.0) {
             double displayBinBw = sampleRate / (double)fftSize;
             double squelchBinBw = ifSamplerate / (double)dsp::noise_reduction::Squelch::SPECTRUM_SIZE;
-            double offset = 10.0 * log10(displayBinBw / squelchBinBw)
-                            + 10.0 * log10(displayWindowGain)
-                            - 10.0 * log10(squelchWindowGain)
-                            + 10.0 * log10(noiseMaxBias(gui::waterfall.getRawBinsPerPixel()));
-            level = squelchLevel - offset;
+            offset = 10.0 * log10(displayBinBw / squelchBinBw)
+                     + 10.0 * log10(displayWindowGain)
+                     - 10.0 * log10(squelchWindowGain)
+                     + 10.0 * log10(noiseMaxBias(gui::waterfall.getRawBinsPerPixel()));
         }
+
+        // Kept so the meter can undo it and show the squelch's own measurement on the
+        // scale the threshold is set on. Without that the bar and the mark beside it
+        // would be in different units, and the bar would cross the mark at some other
+        // moment than the squelch opens.
+        squelchOffsetDb = offset;
+
+        // Bottom of the scale means "off"; don't let the correction turn it into a
+        // threshold that mutes everything.
+        double level = (squelchLevel <= MIN_SQUELCH) ? -INFINITY : (squelchLevel - offset);
 
         // Called on every FFT redraw, so only touch the DSP block on a real change.
         if (level == appliedSquelchLevel) { return; }
         appliedSquelchLevel = level;
         squelch.setLevel(level);
+    }
+
+    // The squelch threshold means nothing on its own - what matters is where it sits
+    // relative to what is arriving - so the meter carries both. This replaced a bare
+    // slider, which held only half of the comparison and so needed the threshold drawn
+    // as a line across the spectrum to be usable at all. That line is gone with it.
+    //
+    // The level shown is the squelch block's own measurement rather than a second one
+    // taken off the FFT, so the bar reaching the mark and the audio opening are the
+    // same event and not two things that nearly agree.
+    void drawSquelchMeter() {
+        ImGui::LevelMeterStyle look;
+        look.fillClosed = gui::themeManager.snrMeterColor;
+        look.fillOpen = gui::themeManager.meterOpenColor;
+        look.threshold = gui::themeManager.squelchColor;
+        look.floorCaption = "| always open";
+
+        // With the squelch switched off its block is out of the chain, so the level it
+        // last measured is whatever was arriving whenever that was. -300 is the block's
+        // own "nothing measured yet".
+        bool live = squelchEnabled && selectedDemod != NULL && gui::mainWindow.sdrIsRunning();
+        float measured = squelch.getMeasuredLevel();
+        bool haveLevel = live && std::isfinite(measured) && measured > -200.0f;
+        float level = haveLevel ? (float)(measured + squelchOffsetDb) : (float)MIN_SQUELCH;
+
+        // Falls at a fixed share of the scale per second, so a burst hangs on the meter
+        // for as long here as it does on the scanner's despite the wider range.
+        if (haveLevel) {
+            float decay = (float)((MAX_SQUELCH - MIN_SQUELCH) * 0.3 * ImGui::GetIO().DeltaTime);
+            squelchMeterPeak = std::max<float>(level, squelchMeterPeak - decay);
+        }
+        else {
+            squelchMeterPeak = (float)MIN_SQUELCH;
+        }
+
+        float threshold = squelchLevel;
+        ImGui::LevelMeterResult r = ImGui::LevelMeter(("##_radio_sqelch_lvl_" + name).c_str(),
+                                                     (float)MIN_SQUELCH, (float)MAX_SQUELCH,
+                                                     haveLevel, level, squelchMeterPeak,
+                                                     haveLevel && squelch.isOpen(),
+                                                     &threshold, look);
+        if (r.changed) {
+            // Applied as the drag goes, saved when it ends. The slider this replaced
+            // wrote the config file on every frame the mouse moved.
+            squelchLevel = std::clamp<float>(threshold, MIN_SQUELCH, MAX_SQUELCH);
+            updateSquelchScaling();
+        }
+        if (r.released) { setSquelchLevel(squelchLevel); }
+        if (r.hovered) {
+            style::tooltip("Mutes the audio until the channel is louder than the mark on the bar.\nDrag anywhere on the bar to move the mark; put it just above where the\nnoise sits. Fully left leaves the audio always open.");
+        }
     }
 
     void setFMIFNREnabled(bool enabled) {
@@ -1567,12 +1612,12 @@ private:
 
         if (_this->squelchEnabled) {
             // Cheap place to pick up FFT size / sample rate changes, neither of which
-            // notifies us but both of which move the squelch threshold.
+            // notifies us but both of which move the squelch threshold. The threshold
+            // itself is no longer drawn here - it is on the meter in the menu, beside
+            // the level it is being compared against, which is where the comparison was
+            // actually being made. A line across the whole spectrum for as long as the
+            // squelch was on was a lot of ink for one number.
             _this->updateSquelchScaling();
-            double bPos = args.max.y - ((_this->squelchLevel - gui::waterfall.getFFTMin()) * (args.max.y - args.min.y) / (gui::waterfall.getFFTMax() - gui::waterfall.getFFTMin()));
-            if (bPos >= args.min.y && bPos <= args.max.y) {
-                args.window->DrawList->AddLine(ImVec2(args.min.x, roundf(bPos)), ImVec2(args.max.x, roundf(bPos)), ImGui::ColorConvertFloat4ToU32(gui::themeManager.squelchColor), 1.0);
-            }
         }
 
         _this->drawToneBadge(args);
@@ -1820,6 +1865,8 @@ private:
     bool squelchEnabled = false;
     float squelchLevel;
     double appliedSquelchLevel = NAN; // squelchLevel converted to the squelch block's units
+    double squelchOffsetDb = 0.0;     // what that conversion subtracts, so the meter can add it back
+    float squelchMeterPeak = -100.0f; // decaying peak, for the meter only
 
     int deempId = 0;
     bool deempAllowed;

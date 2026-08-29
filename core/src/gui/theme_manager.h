@@ -168,6 +168,10 @@ public:
     ImVec4 bookmarkTextColor = ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
 
     ImVec4 snrMeterColor = ImVec4(0.0f, 136.0f / 255.0f, 1.0f, 1.0f);
+    // Fill of a level meter once the level has passed the threshold beside it. Shared
+    // by the squelch and the scanner so that "this one is open" reads the same
+    // wherever it appears.
+    ImVec4 meterOpenColor = ImVec4(0.0f, 1.0f, 0.0f, 1.0f);
     ImVec4 volumeMeterBgLow = ImVec4(9.0f / 255.0f, 136.0f / 255.0f, 9.0f / 255.0f, 1.0f);
     ImVec4 volumeMeterBgHigh = ImVec4(136.0f / 255.0f, 9.0f / 255.0f, 9.0f / 255.0f, 1.0f);
     ImVec4 volumeMeterLow = ImVec4(0.0f, 1.0f, 0.0f, 1.0f);
