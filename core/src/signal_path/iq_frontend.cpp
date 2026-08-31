@@ -191,8 +191,25 @@ void IQFrontEnd::removeVFO(std::string name) {
 }
 
 void IQFrontEnd::setFFTSize(int size) {
+    // Stopped before the size changes, not after.
+    //
+    // handler() runs on the FFT sink's own thread and writes _fftSize floats into the
+    // waterfall's raw FFT buffer, which is only resized once updateFFTPath() reaches
+    // setRawFFTSize(). Assigning the member first left a window - short, but the size
+    // is picked from a combo while the radio is running - in which that thread wrote
+    // the new size into a buffer still laid out for the old one. Going from 1024 to
+    // 524288, which the menu offers, is two megabytes past the end of a four kilobyte
+    // row.
+    //
+    // tempStop/tempStart nest properly (they count), so the pair inside updateFFTPath
+    // is harmless, and doStop() joins the worker - after this the handler cannot be
+    // part way through.
+    reshape.tempStop();
+    fftSink.tempStop();
     _fftSize = size;
     updateFFTPath(true);
+    reshape.tempStart();
+    fftSink.tempStart();
 }
 
 void IQFrontEnd::setFFTRate(double rate) {

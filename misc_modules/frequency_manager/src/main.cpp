@@ -787,6 +787,98 @@ private:
         if (lockConfig) { config.release(); }
     }
 
+    // Whether a bookmark can be tuned at all. One whose radio is not loaded cannot:
+    // applyBookmark does nothing for it, so stepping onto it would look like the button
+    // had missed.
+    bool bookmarkIsTunable(const FrequencyBookmark& bm) const {
+        return bm.vfoName.empty() || sigpath::vfoManager.vfoExists(bm.vfoName);
+    }
+
+    // Cheap enough to ask every frame, which the disabled state of the step buttons
+    // does. Building the name list for that instead would copy every string in the
+    // list once a frame to answer a yes or no.
+    bool anyBookmarkTunable() {
+        for (auto& [bmName, bm] : bookmarks) {
+            if (bookmarkIsTunable(bm)) { return true; }
+        }
+        return false;
+    }
+
+    // The bookmarks that can actually be tuned, in the order the list draws them.
+    std::vector<std::string> tunableBookmarkNames() {
+        std::vector<std::string> names;
+        for (auto& [bmName, bm] : bookmarks) {
+            if (!bookmarkIsTunable(bm)) { continue; }
+            names.push_back(bmName);
+        }
+        return names;
+    }
+
+    // What the radio is tuned to now, or NAN when there is no VFO to ask.
+    double currentTunedFrequency() {
+        if (gui::waterfall.selectedVFO.empty()) { return NAN; }
+        return gui::waterfall.getCenterFrequency() + sigpath::vfoManager.getOffset(gui::waterfall.selectedVFO);
+    }
+
+    // Remembered by name, so that editing the list around it does not leave the
+    // position pointing at a different channel than the one being listened to.
+    void setNavBookmark(const std::string& bmName) {
+        navBookmarkName = bmName;
+    }
+
+    // One channel along the list from wherever the radio is, and tune it.
+    //
+    // dir is +1 for further down the list and -1 for further up, which is what the
+    // arrows say and which way the list runs on screen.
+    //
+    // The position is the last channel tuned from this panel - that is what makes a
+    // run of presses walk the list one at a time rather than jumping back to the same
+    // place. But if the radio has since been tuned by hand onto some other channel in
+    // the list, that is where the operator actually is, so the step is taken from
+    // there instead. Failing both, it comes in from the end it is heading away from:
+    // the first press of Next lands on the top of the list, of Previous on the bottom.
+    void stepBookmark(int dir) {
+        std::vector<std::string> names = tunableBookmarkNames();
+        if (names.empty()) { return; }
+        int count = (int)names.size();
+
+        // Stepping while a scan is running would put the radio somewhere the scanner
+        // moves it straight back off. Taking manual control of the channel is a good
+        // enough statement that the scan is over.
+        if (scanner.isScanning()) { scanner.stopScanner(); }
+
+        std::string from = navBookmarkName;
+        double tuned = currentTunedFrequency();
+        auto onFrequency = [&](const std::string& bmName) {
+            auto it = bookmarks.find(bmName);
+            return it != bookmarks.end() && std::isfinite(tuned) && fabs(it->second.frequency - tuned) < 1.0;
+        };
+        if (!onFrequency(from)) {
+            from.clear();
+            for (const auto& bmName : names) {
+                if (onFrequency(bmName)) { from = bmName; break; }
+            }
+        }
+
+        int index;
+        auto it = std::find(names.begin(), names.end(), from);
+        if (from.empty() || it == names.end()) {
+            index = (dir > 0) ? 0 : count - 1;
+        }
+        else {
+            // Wraps, so neither end of the list is a button that does nothing.
+            index = (int)std::distance(names.begin(), it) + dir;
+            index = ((index % count) + count) % count;
+        }
+
+        setNavBookmark(names[index]);
+        scrollToNav = true;
+        // The selection follows, because it is what says where you are in the list and
+        // what Edit and Remove act on. Anything else would leave the highlight behind.
+        for (auto& [bmName, bm] : bookmarks) { bm.selected = (bmName == navBookmarkName); }
+        applyBookmark(bookmarks[navBookmarkName], gui::waterfall.selectedVFO);
+    }
+
     void loadFirst() {
         if (listNames.size() > 0) {
             loadByName(listNames[0]);
@@ -798,6 +890,8 @@ private:
 
     void loadByName(std::string listName) {
         bookmarks.clear();
+        // A position in the old list means nothing in the new one.
+        navBookmarkName.clear();
         if (std::find(listNames.begin(), listNames.end(), listName) == listNames.end()) {
             selectedListName = "";
             selectedListId = 0;
@@ -1129,6 +1223,13 @@ private:
                 ImGui::TableSetColumnIndex(0);
                 ImVec2 min = ImGui::GetCursorPos();
 
+                // Stepping to a channel that is off the visible part of the list would
+                // otherwise move the radio with nothing on screen to show for it.
+                if (_this->scrollToNav && name == _this->navBookmarkName) {
+                    ImGui::SetScrollHereY(0.5f);
+                    _this->scrollToNav = false;
+                }
+
                 if (vfoMissing) { style::beginDisabled(); }
                 if (ImGui::Selectable((name + "##_freq_mgr_bkm_name_" + _this->name).c_str(), &bm.selected, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_SelectOnClick)) {
                     // if shift or control isn't pressed, deselect all others
@@ -1159,6 +1260,7 @@ private:
                     }
                 }
                 if (ImGui::TableGetHoveredColumn() >= 0 && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                    _this->setNavBookmark(name);
                     applyBookmark(bm, gui::waterfall.selectedVFO);
                 }
 
@@ -1185,9 +1287,52 @@ private:
         }
 
 
+        // Step through the list a channel at a time, without having to find the next
+        // one and double click it. The arrows read the way the list runs on screen:
+        // Next moves further down it, Previous back up.
+        {
+            bool canStep = _this->anyBookmarkTunable() && _this->selectedListName != "";
+            if (!canStep) { style::beginDisabled(); }
+
+            ImGui::BeginTable(("freq_manager_nav_table" + _this->name).c_str(), 2);
+            ImGui::TableNextRow();
+
+            ImGui::TableSetColumnIndex(0);
+            if (ImGui::Button(("Previous##_freq_mgr_nav_prev_" + _this->name).c_str(), ImVec2(ImGui::GetContentRegionAvail().x, 0))) {
+                _this->stepBookmark(-1);
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                style::tooltip("Tune the channel above this one in the list, wrapping round at the top.\n"
+                               "Stops a scan if one is running.");
+            }
+
+            ImGui::TableSetColumnIndex(1);
+            if (ImGui::Button(("Next##_freq_mgr_nav_next_" + _this->name).c_str(), ImVec2(ImGui::GetContentRegionAvail().x, 0))) {
+                _this->stepBookmark(1);
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                style::tooltip("Tune the channel below this one in the list, wrapping round at the bottom.\n"
+                               "Stops a scan if one is running.");
+            }
+
+            ImGui::EndTable();
+
+            // Which channel the buttons will step from. Without it the first press
+            // after tuning by hand looks like it came from nowhere.
+            if (!_this->navBookmarkName.empty() && _this->bookmarks.count(_this->navBookmarkName)) {
+                ImGui::TextDisabled("On %s", _this->navBookmarkName.c_str());
+            }
+            else {
+                ImGui::TextDisabled("Not on a channel");
+            }
+
+            if (!canStep) { style::endDisabled(); }
+        }
+
         if (selectedNames.size() != 1 && _this->selectedListName != "") { style::beginDisabled(); }
         if (ImGui::Button(("Tune to bookmark##_freq_mgr_apply_" + _this->name).c_str(), ImVec2(menuWidth, 0))) {
             FrequencyBookmark& bm = _this->bookmarks[selectedNames[0]];
+            _this->setNavBookmark(selectedNames[0]);
             applyBookmark(bm, gui::waterfall.selectedVFO);
             bm.selected = false;
         }
@@ -1807,6 +1952,14 @@ private:
 
     std::vector<WaterfallBookmark> waterfallBookmarks;
     Scanner scanner{this};
+
+    // Where the up/down buttons think the radio is in the list. Empty until something
+    // has been tuned from here, which the buttons read as "not on a channel yet" and
+    // step in from whichever end they are heading away from.
+    std::string navBookmarkName;
+    // Set when a step moves the position, so the list scrolls the new channel into
+    // view on the frame it is drawn.
+    bool scrollToNav = false;
 
     int bookmarkDisplayMode = 0;
 };
