@@ -422,7 +422,11 @@ namespace ImGui {
         // Pre calculate useful values
         WaterfallVFO* selVfo = NULL;
         if (selectedVFO != "") {
-            selVfo = vfos[selectedVFO];
+            // find, not operator[] - see the note in pushFFT. Indexing here inserted a
+            // null under the selected name whenever it had gone stale, and the draw
+            // loops below iterate this map and dereference every entry.
+            auto it = vfos.find(selectedVFO);
+            if (it != vfos.end()) { selVfo = it->second; }
         }
         ImVec2 mousePos = ImGui::GetMousePos();
         ImVec2 drag = ImGui::GetMouseDragDelta(ImGuiMouseButton_Left);
@@ -759,7 +763,7 @@ namespace ImGui {
     }
 
     bool WaterFall::calculateVFOSignalInfo(float* fftLine, WaterfallVFO* _vfo, float& strength, float& snr) {
-        if (fftLine == NULL || fftLines <= 0) { return false; }
+        if (fftLine == NULL || _vfo == NULL || fftLines <= 0) { return false; }
 
         // Calculate FFT index data
         double vfoMinSizeFreq = _vfo->centerOffset - _vfo->bandwidth;
@@ -1404,15 +1408,25 @@ namespace ImGui {
             memcpy(latestFFT, smoothingBuf, dataWidth * sizeof(float));
         }
 
-        if (selectedVFO != "" && vfos.size() > 0) {
+        // Looked up, not indexed. map::operator[] on a name that is not there inserts a
+        // null and hands it back, and every reader of this map - here and the two draw
+        // loops - dereferences what it finds without checking. So a stale selectedVFO
+        // did not merely read nothing: it put a null entry in the map that stayed there
+        // and was dereferenced again on the next frame.
+        //
+        // The name does go stale. ~VFOManager::VFO erases itself from this map and only
+        // then repoints selectedVFO, and this runs on the FFT sink's thread, so the gap
+        // between those two lines is reachable from here.
+        auto selIt = (selectedVFO != "") ? vfos.find(selectedVFO) : vfos.end();
+        if (selIt != vfos.end() && selIt->second != NULL) {
             float dummy;
             if (snrSmoothing) {
                 float newSNR = 0.0f;
-                calculateVFOSignalInfo(waterfallVisible ? &rawFFTs[currentFFTLine * rawFFTSize] : rawFFTs, vfos[selectedVFO], dummy, newSNR);
+                calculateVFOSignalInfo(waterfallVisible ? &rawFFTs[currentFFTLine * rawFFTSize] : rawFFTs, selIt->second, dummy, newSNR);
                 selectedVFOSNR = (snrSmoothingBeta * selectedVFOSNR) + (snrSmoothingAlpha * newSNR);
             }
             else {
-                calculateVFOSignalInfo(waterfallVisible ? &rawFFTs[currentFFTLine * rawFFTSize] : rawFFTs, vfos[selectedVFO], dummy, selectedVFOSNR);
+                calculateVFOSignalInfo(waterfallVisible ? &rawFFTs[currentFFTLine * rawFFTSize] : rawFFTs, selIt->second, dummy, selectedVFOSNR);
             }
         }
 

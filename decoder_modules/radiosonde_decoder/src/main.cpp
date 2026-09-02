@@ -571,7 +571,13 @@ void RadiosondeDecoderModule::writeLogPoint(const SondeFullData& d, bool timeAcc
     // iMet-54 parser writes to mean "this frame missed it". Either one written to the
     // file is a plausible looking reading that nothing measured, which is worse than
     // leaving the point without a temperature at all.
-    const bool havePTU = (d.seenFields & DATA_PTU) != 0 && d.temp > -273.0f;
+    // Temperature and humidity are asked about separately. They used to share one
+    // test, so a sonde that had sent humidity but no temperature yet - which the
+    // iMet-54 does - had both left out of the file, and one missed temperature
+    // reading took that point's humidity with it.
+    const bool haveTemp = d.haveTemp;
+    const bool haveRh = (d.seenFields & DATA_PTU) != 0;
+    const bool havePTU = haveTemp || haveRh;
     const bool haveVel = (d.seenFields & DATA_SPEED) != 0 || d.velocityDerived;
     const bool haveAny = havePTU || haveVel || d.pressure > 0.0f;
 
@@ -586,9 +592,16 @@ void RadiosondeDecoderModule::writeLogPoint(const SondeFullData& d, bool timeAcc
     if (haveAny) {
         std::string desc;
         char part[160];
-        if (havePTU) {
-            snprintf(part, sizeof part, "%.1f C, %.0f%% RH, dew point %.1f C",
-                     (double)d.temp, (double)d.rh, (double)d.dewpt);
+        if (haveTemp) {
+            snprintf(part, sizeof part, "%.1f C", (double)d.temp);
+            desc += part;
+        }
+        if (haveRh) {
+            snprintf(part, sizeof part, "%s%.0f%% RH", desc.empty() ? "" : ", ", (double)d.rh);
+            desc += part;
+        }
+        if (haveTemp && haveRh) {
+            snprintf(part, sizeof part, ", dew point %.1f C", (double)d.dewpt);
             desc += part;
         }
         if (d.pressure > 0.0f) {
@@ -612,14 +625,18 @@ void RadiosondeDecoderModule::writeLogPoint(const SondeFullData& d, bool timeAcc
                              ? " xmlns:gpxtpx=\"" GPXTPX_NS "\" xmlns:sonde=\"" SONDE_NS "\""
                              : "";
         fprintf(logFile, "        <extensions%s>\n", ns);
-        if (havePTU) {
+        if (haveTemp) {
             fprintf(logFile,
                     "          <gpxtpx:TrackPointExtension>"
                     "<gpxtpx:atemp>%.2f</gpxtpx:atemp>"
-                    "</gpxtpx:TrackPointExtension>\n"
-                    "          <sonde:rh>%.1f</sonde:rh>\n"
-                    "          <sonde:dewpt>%.2f</sonde:dewpt>\n",
-                    (double)d.temp, (double)d.rh, (double)d.dewpt);
+                    "</gpxtpx:TrackPointExtension>\n",
+                    (double)d.temp);
+        }
+        if (haveRh) {
+            fprintf(logFile, "          <sonde:rh>%.1f</sonde:rh>\n", (double)d.rh);
+        }
+        if (haveTemp && haveRh) {
+            fprintf(logFile, "          <sonde:dewpt>%.2f</sonde:dewpt>\n", (double)d.dewpt);
         }
         if (d.pressure > 0.0f) {
             // Only the derivation this module does is flagged. Several of the vendored
@@ -698,7 +715,8 @@ bool RadiosondeDecoderModule::openFrameLog() {
     if (!existed) {
         fprintf(frameLogFile,
                 "rx_unix_ms,serial,seq,sonde_time,time_accepted,lat,lon,alt,"
-                "spd,hdg,climb,temp,rh,dewpt,pressure,calibrated,calib_percent,burstkill,aux\r\n");
+                "spd,hdg,climb,temp,rh,dewpt,pressure,calibrated,calib_percent,burstkill,aux,"
+                "seen_fields,have_temp\r\n");
     }
     fflush(frameLogFile);
     return true;
@@ -737,8 +755,12 @@ void RadiosondeDecoderModule::writeFrameLogRow(const SondeFullData& d, bool time
     // sonde_time is written as the raw seconds the frame carried, not as a formatted
     // date - the whole point is to keep what arrived, including the value that was
     // rejected, so the guard can be re-run over it.
+    // The last two columns are what the GPX writer gates on, and nothing else records
+    // them. Without them a track missing its telemetry cannot be told apart from one
+    // whose sonde never sent any - which is exactly the question raised by a flight
+    // with good temperatures in this file and none in the GPX beside it.
     fprintf(frameLogFile,
-            "%lld,%s,%d,%lld,%d,%.6f,%.6f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%d,%.1f,%d,%s\r\n",
+            "%lld,%s,%d,%lld,%d,%.6f,%.6f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%d,%.1f,%d,%s,%u,%d\r\n",
             (long long)currentTimeMillis(),
             frameCsvEscape(d.serial).c_str(),
             d.seq,
@@ -749,7 +771,8 @@ void RadiosondeDecoderModule::writeFrameLogRow(const SondeFullData& d, bool time
             (double)d.temp, (double)d.rh, (double)d.dewpt, (double)d.pressure,
             d.calibrated ? 1 : 0, (double)d.calib_percent,
             d.burstkill,
-            frameCsvEscape(d.auxData).c_str());
+            frameCsvEscape(d.auxData).c_str(),
+            d.seenFields, d.haveTemp ? 1 : 0);
     // Flushed every frame for the same reason the GPX is: a flight that ends with the
     // program being killed should still have everything it decoded.
     fflush(frameLogFile);

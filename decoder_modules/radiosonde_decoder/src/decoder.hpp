@@ -85,11 +85,21 @@ namespace radiosonde {
 					if (fragment.fields & DATA_PTU) {
 						m_data.calib_percent = fragment.calib_percent;
 						m_data.calibrated = m_data.calib_percent >= 100.0f;
-						m_data.temp = fragment.temp;
+						/* Only when this frame actually carried one. The iMet-54
+						 * writes -273.15 to mean "missed it" and still sets DATA_PTU
+						 * if the humidity came through, so copying unconditionally
+						 * put the sentinel over a good reading - and since this
+						 * struct is cumulative and nothing later restores it, one
+						 * such frame threw the temperature away for the rest of the
+						 * flight. */
+						if (fragment.temp > -273.0f) {
+							m_data.temp = fragment.temp;
+							m_data.haveTemp = true;
+						}
 						m_data.rh = fragment.rh;
 						m_data.pressure = fragment.pressure;
 						m_data.pressureMeasured = fragment.pressure > 0;
-						m_data.dewpt = dewpt(m_data.temp, m_data.rh);
+						m_data.dewpt = m_data.haveTemp ? dewpt(m_data.temp, m_data.rh) : 0.0f;
 					}
 
 					if (fragment.fields & DATA_SERIAL) {

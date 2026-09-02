@@ -283,7 +283,12 @@ void MainWindow::preDraw(ImGui::WaterfallVFO** vfo) {
 
     *vfo = NULL;
     if (gui::waterfall.selectedVFO != "") {
-        *vfo = gui::waterfall.vfos[gui::waterfall.selectedVFO];
+        // find, not operator[]. The null check below says a missing VFO is expected
+        // here, but indexing would have created one rather than reporting it - and the
+        // waterfall's draw loops walk that map dereferencing every entry, so the null
+        // left behind would take the next frame down rather than this one.
+        auto it = gui::waterfall.vfos.find(gui::waterfall.selectedVFO);
+        if (it != gui::waterfall.vfos.end()) { *vfo = it->second; }
     }
 
     // Handle VFO movement
@@ -1241,7 +1246,8 @@ bool MainWindow::isPlaying() {
 void MainWindow::updateWaterfallZoomBandwidth(float bw) {
     ImGui::WaterfallVFO* vfo = NULL;
     if (gui::waterfall.selectedVFO != "") {
-        vfo = gui::waterfall.vfos[gui::waterfall.selectedVFO];
+        auto it = gui::waterfall.vfos.find(gui::waterfall.selectedVFO);
+        if (it != gui::waterfall.vfos.end()) { vfo = it->second; }
     }
     double factor = (double)bw * (double)bw;
 

@@ -15,6 +15,7 @@ public:
 		calibrated = false;
 		auxData = "";
 		seenFields = 0;
+		haveTemp = false;
 		pressureMeasured = false;
 		velocityDerived = false;
 	};
@@ -36,6 +37,12 @@ public:
 	 * its sonde carries, so without this there is no way to tell a real reading of
 	 * zero from a field nothing has ever filled in. */
 	unsigned seenFields;
+
+	/* Whether a temperature has ever actually arrived. Separate from seenFields
+	 * because that bitmask is per group: DATA_PTU promises temperature, humidity and
+	 * pressure together, and the iMet-54 sets it for a frame carrying only humidity.
+	 * A consumer asking "is this temperature real" has nothing else to go on. */
+	bool haveTemp;
 
 	/* False when pressure was worked out from altitude rather than read off a
 	 * barometer. Only set for the derivation done in Decoder::run - several of the

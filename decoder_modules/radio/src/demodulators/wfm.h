@@ -277,7 +277,16 @@ namespace demod {
         int getVFOReference() { return ImGui::WaterfallVFO::REF_CENTER; }
         bool getDeempAllowed() { return true; }
         bool getPostProcEnabled() { return true; }
-        int getDefaultDeemphasisMode() { return DEEMP_MODE_50US; }
+        // Off by default, not 50us, because de-emphasis on WFM does not take effect
+        // until the setting is changed by hand: picked up from the config it is
+        // applied but not heard, and choosing None and then 50us again makes it work.
+        // The cause is still being looked for. Until it is found, a fresh config that
+        // starts with it off has the setting agree with what the audio is doing, which
+        // is the lesser of the two wrongs - and one deliberate change puts it back.
+        //
+        // Existing configs keep whatever they already have; this is only the value
+        // written when a demodulator has no saved settings yet.
+        int getDefaultDeemphasisMode() { return DEEMP_MODE_NONE; }
         bool getFMIFNRAllowed() { return true; }
         bool getNBAllowed() { return false; }
         dsp::stream<dsp::stereo_t>* getOutput() { return &demod.out; }
