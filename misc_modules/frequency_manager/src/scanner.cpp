@@ -93,15 +93,6 @@ Scanner::Scanner(FrequencyManagerModule* module) : module(module) {
     signalMarginDb = num("signalMarginDb", 4.0f);
     squelchEnabled = flag("squelchEnabled", false);
     carrierHoldMode = flag("carrierHoldMode", false);
-    if (sc.contains("skipped") && sc["skipped"].is_array()) {
-        for (auto& entry : sc["skipped"]) {
-            if (entry.is_string()) { skipped.insert(entry.get<std::string>()); }
-        }
-    }
-    else {
-        sc["skipped"] = json::array();
-    }
-
     // An earlier default put -120 in the noise floor, an absolute dBFS level, where
     // the rest of the scanner works in dB over the local noise. Every measurement
     // clears -120, so the first channel always looked busy and the scan stopped
@@ -161,14 +152,23 @@ void Scanner::setBookmarks(const std::vector<std::string>& newBookmarks, const s
 }
 
 bool Scanner::isScannable(const std::string& name) const {
-    if (skipped.find(name) != skipped.end()) { return false; }
     auto it = bookmarksMap.find(name);
     if (it == bookmarksMap.end()) { return false; }
+    if (it->second.skip) { return false; }
     // A bookmark tied to a radio that is not loaded cannot be tuned - applyBookmark
     // does nothing for it - so the scan would sit on the previous channel measuring
     // it over and over.
     if (!it->second.vfoName.empty() && !sigpath::vfoManager.vfoExists(it->second.vfoName)) { return false; }
     return true;
+}
+
+std::vector<std::string> Scanner::skippedNames() const {
+    std::vector<std::string> out;
+    for (const auto& name : bookmarks) {
+        auto it = bookmarksMap.find(name);
+        if (it != bookmarksMap.end() && it->second.skip) { out.push_back(name); }
+    }
+    return out;
 }
 
 int Scanner::findScannable(int from, int dir) const {
@@ -496,13 +496,12 @@ void Scanner::drawTransport() {
             ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.3f, 1.0f), "%s", statusMessage.c_str());
             ImGui::PopTextWrapPos();
         }
-        if (!skipped.empty()) {
-            ImGui::Text("%d skipped", (int)skipped.size());
+        int skipCount = (int)skippedNames().size();
+        if (skipCount > 0) {
+            ImGui::Text("%d skipped", skipCount);
             ImGui::SameLine();
-            if (ImGui::Button("Clear##scanner_clear_skipped")) {
-                skipped.clear();
-                saveSetting("skipped", json::array());
-            }
+            if (ImGui::Button("Clear##scanner_clear_skipped") && onClearSkips) { onClearSkips(); }
+            if (ImGui::IsItemHovered()) { style::tooltip("Put every skipped channel in this list back into the scan"); }
         }
         return;
     }
@@ -530,11 +529,8 @@ void Scanner::drawTransport() {
     if (ImGui::IsItemHovered()) { style::tooltip("Move on to the next channel"); }
 
     if (ImGui::Button("Skip this channel##scanner_skip", ImVec2(width, 0))) {
-        if (!currentStation.empty()) {
-            skipped.insert(currentStation);
-            json arr = json::array();
-            for (const auto& name : skipped) { arr.push_back(name); }
-            saveSetting("skipped", arr);
+        if (!currentStation.empty() && onSetSkip) {
+            onSetSkip(currentStation, true);
             step(1);
         }
     }
@@ -713,21 +709,19 @@ void Scanner::drawSettings() {
     }
     ImGui::HelpMarker("Mute the audio while the scan is hopping, so you only hear the channels it stops on.");
 
-    if (!skipped.empty()) {
+    std::vector<std::string> skipList = skippedNames();
+    if (!skipList.empty()) {
         ImGui::Separator();
-        ImGui::Text("Skipped (%d)", (int)skipped.size());
+        ImGui::Text("Skipped (%d)", (int)skipList.size());
+        ImGui::HelpMarker("Channels in this list the scan passes over. Mark them here, from the\n"
+                          "bookmark list, or with \"Skip this channel\" while the scan is on one.");
         std::string unskip;
-        for (const auto& name : skipped) {
+        for (const auto& name : skipList) {
             if (ImGui::SmallButton(("x##scanner_unskip_" + name).c_str())) { unskip = name; }
             ImGui::SameLine();
             ImGui::TextUnformatted(name.c_str());
         }
-        if (!unskip.empty()) {
-            skipped.erase(unskip);
-            json arr = json::array();
-            for (const auto& name : skipped) { arr.push_back(name); }
-            saveSetting("skipped", arr);
-        }
+        if (!unskip.empty() && onSetSkip) { onSetSkip(unskip, false); }
     }
 
     ImGui::TreePop();

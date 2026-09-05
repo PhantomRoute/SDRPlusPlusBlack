@@ -55,6 +55,155 @@ namespace {
         else { snprintf(buf, sizeof buf, "%.1f km", km); }
         return std::string(buf);
     }
+
+    // ---- Where in the atmosphere the sonde is -------------------------------
+    //
+    // A sonde flight crosses one boundary that matters: the tropopause, where the
+    // air stops getting colder with height. Everything below it is the troposphere,
+    // the churning part with the weather in it; above it is the stratosphere, still
+    // and stratified, which is why the balloon's ascent smooths out up there.
+    //
+    // The tropopause is not at a fixed altitude, which is the whole difficulty of
+    // drawing it. It sits near 17 km over the equator and near 8 km over the poles,
+    // because a warm surface drives convection higher, and it moves by a couple of
+    // kilometres with the season and with whichever air mass happens to be overhead.
+    // Printing a constant 11 km and calling it the tropopause would be wrong over
+    // this country about as often as it was right.
+    //
+    // A radiosonde is the instrument the actual answer is measured with, so when the
+    // flight has climbed far enough this uses its own temperature profile and falls
+    // back on latitude only until then.
+
+    // Half the thickness the tropopause is drawn with. It is a layer, not a line -
+    // a kilometre or two where the lapse rate flattens out before it reverses - and
+    // drawing it as a hairline would claim a precision that is not there.
+    const float TROPOPAUSE_HALF_M = 1000.0f;
+
+    struct Atmosphere {
+        float tropopauseM = 11000.0f;
+        // True when tropopauseM came from this flight rather than from latitude.
+        bool measured = false;
+    };
+
+    // Fallback for a flight that has not yet climbed through the boundary. Fitted to
+    // the annual-mean tropopause height by latitude: 16.5 km at the equator, 8.5 km
+    // at the poles, and about 11.5 km at UK latitudes. Smooth, so it misses the sharp
+    // subtropical break near 30 degrees, which is a real feature and not one worth
+    // modelling for a band on a five centimetre plot.
+    float climatologicalTropopauseM(float latDeg) {
+        const double DEG_TO_RAD = 0.017453292519943295;   // not M_PI, see bearingFromOperator
+        double c = cos((double)latDeg * DEG_TO_RAD);
+        return (float)((8.5 + 8.0 * c * c) * 1000.0);
+    }
+
+    // The tropopause read off the flight's own temperature: the coldest point of the
+    // ascent. This is the "cold point" definition rather than the WMO lapse-rate one,
+    // which needs a smoothed profile and a two kilometre lookahead at every level;
+    // for a sonde they land within a few hundred metres of each other, and the cold
+    // point is the one that survives a noisy frame.
+    //
+    // Only the ascent is looked at. On the way down under the parachute the sonde
+    // passes back through the same cold air, and the descent readings are taken in a
+    // fast-falling wake that the sensor was never calibrated for.
+    bool coldPointTropopause(const std::deque<SondeFix>& track, size_t ascentEnd, float& altOut) {
+        // Below this the coldest reading of the flight is as likely to be a surface
+        // inversion on a clear night as anything to do with the tropopause.
+        const float MIN_SEARCH_M = 5000.0f;
+        // How far past the cold point the sonde has to have climbed, and how much
+        // warmer it has to have got, before that minimum is the tropopause. Until
+        // the boundary is crossed the air simply keeps getting colder all the way
+        // up, so the coldest point so far is nothing more than the highest point so
+        // far - marking it would park the label on the balloon for the whole climb,
+        // the same trap the burst marker has to avoid.
+        const float CONFIRM_CLIMB_M = 2000.0f;
+        const float CONFIRM_WARM_C = 2.0f;
+
+        float coldT = 0.0f, coldA = 0.0f;
+        float topA = 0.0f, topT = 0.0f;
+        bool found = false;
+        size_t end = std::min<size_t>(ascentEnd + 1, track.size());
+        for (size_t i = 0; i < end; i++) {
+            const SondeFix& p = track[i];
+            if (!p.haveTemp || p.alt < MIN_SEARCH_M) { continue; }
+            if (!found || p.temp < coldT) { coldT = p.temp; coldA = p.alt; }
+            // The last qualifying point of the ascent, which is also its highest.
+            topA = p.alt;
+            topT = p.temp;
+            found = true;
+        }
+        if (!found) { return false; }
+        if (topA < coldA + CONFIRM_CLIMB_M) { return false; }
+        if (topT < coldT + CONFIRM_WARM_C) { return false; }
+        altOut = coldA;
+        return true;
+    }
+
+    enum { LAYER_TROPOSPHERE = 0, LAYER_TROPOPAUSE, LAYER_STRATOSPHERE, LAYER_COUNT };
+
+    const char* LAYER_NAMES[LAYER_COUNT] = { "Troposphere", "Tropopause", "Stratosphere" };
+    const char* LAYER_BAND_LABELS[LAYER_COUNT] = { "TROPOSPHERE", "TROPOPAUSE", "STRATOSPHERE" };
+
+    // Mid-tone on purpose. The panel has a light theme as well as four dark ones, and
+    // a pale sky blue that looks right on the dark ones washes out to nothing on white.
+    const ImU32 LAYER_COLS[LAYER_COUNT] = {
+        IM_COL32(150, 190, 130, 255),   // troposphere - the green end, where the weather is
+        IM_COL32(90, 195, 195, 255),    // tropopause  - the boundary itself
+        IM_COL32(95, 165, 235, 255),    // stratosphere - thin blue air
+    };
+
+    // The layer colours are used at four strengths - band fill, band label, and the
+    // word under the plot - and only the alpha changes between them.
+    ImU32 withAlpha(ImU32 col, float a) {
+        return (col & ~IM_COL32_A_MASK) | ((ImU32)(a * 255.0f + 0.5f) << IM_COL32_A_SHIFT);
+    }
+
+    int layerAt(float altM, const Atmosphere& atm) {
+        if (altM < atm.tropopauseM - TROPOPAUSE_HALF_M) { return LAYER_TROPOSPHERE; }
+        if (altM < atm.tropopauseM + TROPOPAUSE_HALF_M) { return LAYER_TROPOPAUSE; }
+        return LAYER_STRATOSPHERE;
+    }
+
+    // ---- Plot axes ----------------------------------------------------------
+
+    // Gridline spacing a person would have chosen: 1, 2 or 5 times a power of ten,
+    // whichever first gets the line count down to something readable.
+    float niceAltStepM(float range, int maxLines) {
+        const float STEPS[] = { 50.0f, 100.0f, 200.0f, 500.0f, 1000.0f, 2000.0f,
+                                5000.0f, 10000.0f, 20000.0f };
+        for (float s : STEPS) {
+            if (range / s <= (float)maxLines) { return s; }
+        }
+        return 20000.0f;
+    }
+
+    double niceTimeStepMs(double spanMs, int maxTicks) {
+        const double STEPS[] = { 60e3, 300e3, 600e3, 900e3, 1800e3, 3600e3, 7200e3 };
+        for (double s : STEPS) {
+            if (spanMs / s <= (double)maxTicks) { return s; }
+        }
+        return 7200e3;
+    }
+
+    // Short enough to sit under a gridline without crowding the next one.
+    std::string fmtGridAlt(float m) {
+        char buf[32];
+        if (fabsf(m) < 1000.0f) { snprintf(buf, sizeof buf, "%.0f", m); }
+        else {
+            double km = m / 1000.0;
+            if (fabs(km - floor(km + 0.5)) < 0.05) { snprintf(buf, sizeof buf, "%.0fk", km); }
+            else { snprintf(buf, sizeof buf, "%.1fk", km); }
+        }
+        return std::string(buf);
+    }
+
+    // Time since the sonde was tuned, as minutes until that gets silly and then h:mm.
+    std::string fmtElapsed(double ms) {
+        int totalMin = (int)(ms / 60000.0 + 0.5);
+        char buf[32];
+        if (totalMin < 60) { snprintf(buf, sizeof buf, "%dm", totalMin); }
+        else { snprintf(buf, sizeof buf, "%d:%02d", totalMin / 60, totalMin % 60); }
+        return std::string(buf);
+    }
 }
 
 RadiosondeDecoderModule::RadiosondeDecoderModule(std::string name) {
@@ -300,6 +449,8 @@ void RadiosondeDecoderModule::sondeDataHandler(SondeFullData* data, void* ctx) {
         fix.lat = data->lat;
         fix.lon = data->lon;
         fix.alt = data->alt;
+        fix.temp = data->temp;
+        fix.haveTemp = data->haveTemp;
         _this->track.push_back(fix);
         while (_this->track.size() > MAX_TRACK) { _this->track.pop_front(); }
 
@@ -983,9 +1134,15 @@ void RadiosondeDecoderModule::drawTelemetry() {
 void RadiosondeDecoderModule::drawTrack() {
     ImGui::SectionHeader("FLIGHT");
 
-    float height = ImGui::GetTextLineHeight() * 5.0f;
+    // Taller than the line alone needs. The layer bands are only worth drawing if
+    // there is room to write their names inside them, and the altitude gridlines
+    // that make the bands mean anything need space between them.
+    float height = ImGui::GetTextLineHeight() * 7.0f;
     float width = ImGui::GetContentRegionAvail().x;
     if (width < 32.0f) { return; }
+
+    float lineH = ImGui::GetTextLineHeight();
+    float pad = 4.0f * style::uiScale;
 
     ImVec2 boxMin = ImGui::GetCursorScreenPos();
     ImVec2 boxMax = ImVec2(boxMin.x + width, boxMin.y + height);
@@ -994,12 +1151,13 @@ void RadiosondeDecoderModule::drawTrack() {
     draw->AddRectFilled(boxMin, boxMax, ImGui::GetColorU32(ImGuiCol_FrameBg));
 
     long long firstTime = 0, lastTime = 0;   // milliseconds, see SondeFix::time
-    float lowest = 0.0f, highest = 0.0f;
+    float lowest = 0.0f, highest = 0.0f, range = 0.0f;
     size_t count = 0;
     double span = 0.0;                       // milliseconds covered by the plot
     long long burstTime = 0;                 // when the highest point was reached
     float lastAlt = 0.0f;
     bool haveBurst = false;
+    Atmosphere atmo;
 
     // Snapshot under the lock, draw outside it. A two hour flight is thousands of
     // points and there are only a few hundred pixels to put them in, so it is taken
@@ -1018,9 +1176,11 @@ void RadiosondeDecoderModule::drawTrack() {
             lowest = highest = track.front().alt;
             burstTime = track.front().time;
             lastAlt = track.back().alt;
-            for (const auto& p : track) {
+            size_t burstIdx = 0;
+            for (size_t i = 0; i < count; i++) {
+                const SondeFix& p = track[i];
                 if (p.alt < lowest) { lowest = p.alt; }
-                if (p.alt > highest) { highest = p.alt; burstTime = p.time; }
+                if (p.alt > highest) { highest = p.alt; burstTime = p.time; burstIdx = i; }
             }
 
             // The highest point is only the burst once the sonde has come down from
@@ -1031,8 +1191,23 @@ void RadiosondeDecoderModule::drawTrack() {
             const float BURST_CONFIRM_DROP_M = 250.0f;
             haveBurst = (lastAlt < highest - BURST_CONFIRM_DROP_M);
 
+            // Where the boundary sits for this flight. Measured off the temperature
+            // profile once the climb has gone far enough past the cold point to prove
+            // where it was, and taken from latitude until then - which is the state
+            // the plot is in for the first part of every flight. burstIdx is the top
+            // of the climb whether or not the burst is confirmed yet, so it is the
+            // right place to stop looking either way.
+            float measuredM = 0.0f;
+            if (coldPointTropopause(track, burstIdx, measuredM)) {
+                atmo.tropopauseM = measuredM;
+                atmo.measured = true;
+            }
+            else {
+                atmo.tropopauseM = climatologicalTropopauseM(track.back().lat);
+            }
+
             span = (double)(lastTime - firstTime);   // milliseconds
-            float range = highest - lowest;
+            range = highest - lowest;
             // A second of track and a metre of climb before there is anything worth
             // drawing a line between.
             if (span > 1000.0 && range > 1.0f) {
@@ -1051,6 +1226,118 @@ void RadiosondeDecoderModule::drawTrack() {
     // Amber for the fall, so the two halves of the flight read apart at a glance
     // instead of having to be inferred from the slope.
     const ImU32 descentCol = IM_COL32(255, 170, 60, 255);
+
+    // Everything below is painted back to front: the atmosphere, then the grid it is
+    // measured against, then the flight through it.
+    if (count >= 2 && range > 1.0f) {
+        // Unclamped on purpose. A boundary the flight has not reached yet lands off
+        // the top of the box, and the difference between "off the top" and "at the
+        // top" is the difference between drawing no stratosphere and drawing one that
+        // fills the plot.
+        auto yRaw = [&](float alt) {
+            return boxMax.y - (((alt - lowest) / range) * height);
+        };
+
+        float yStrat = yRaw(atmo.tropopauseM + TROPOPAUSE_HALF_M);
+        float yTrop = yRaw(atmo.tropopauseM - TROPOPAUSE_HALF_M);
+
+        // Each band tinted with its own colour rather than a neutral grey, so the
+        // stripe on the plot and the word underneath are recognisably the same thing.
+        // The colours are mid-tone for the same reason they are elsewhere - at these
+        // alphas they lighten the four dark themes and darken the light one, which no
+        // near-white or near-black tint manages in both directions.
+        //
+        // The tropopause gets the strongest tint of the three despite being the
+        // thinnest band. It is the one boundary on the plot that means anything, and
+        // at a typical 25 km range it is only a few pixels high, so a tint pitched to
+        // look right on the tall bands would disappear entirely on this one.
+        float sTop = boxMin.y, sBot = std::min<float>(yStrat, boxMax.y);
+        if (sBot > sTop) {
+            draw->AddRectFilled(ImVec2(boxMin.x, sTop), ImVec2(boxMax.x, sBot),
+                                withAlpha(LAYER_COLS[LAYER_STRATOSPHERE], 0.10f));
+        }
+        float tTop = std::max<float>(yStrat, boxMin.y), tBot = std::min<float>(yTrop, boxMax.y);
+        if (tBot > tTop) {
+            draw->AddRectFilled(ImVec2(boxMin.x, tTop), ImVec2(boxMax.x, tBot),
+                                withAlpha(LAYER_COLS[LAYER_TROPOPAUSE], 0.22f));
+            // Edges, so a band this thin reads as a zone with two boundaries rather
+            // than as a smudge in the background. At a nine pixel band the fill alone
+            // is ambiguous with a gridline; the edges are what make it deliberate.
+            draw->AddLine(ImVec2(boxMin.x, tTop), ImVec2(boxMax.x, tTop),
+                          withAlpha(LAYER_COLS[LAYER_TROPOPAUSE], 0.5f), style::uiScale);
+            draw->AddLine(ImVec2(boxMin.x, tBot), ImVec2(boxMax.x, tBot),
+                          withAlpha(LAYER_COLS[LAYER_TROPOPAUSE], 0.5f), style::uiScale);
+        }
+        // The troposphere is left as the bare frame background. It is where the flight
+        // starts and most of the plot usually is, and shading it too would only cost
+        // the contrast the other two are read against.
+
+        // Each name goes on the middle of its band - but a band is routinely thinner
+        // than the text, and requiring the name to fit inside meant the tropopause,
+        // two kilometres of a twenty-five kilometre plot, was the one layer never
+        // labelled. It is also the only one worth labelling, since the other two are
+        // just "above" and "below" it.
+        //
+        // So the text is allowed to overhang into its neighbours. That reads correctly
+        // for what this is - an annotation on a boundary, which belongs across the
+        // boundary rather than squeezed between it. What it must not do is land on
+        // another label, so they are placed in order of importance and one that would
+        // collide with an earlier one is dropped instead of overprinting it.
+        //
+        // Faint on purpose. These are a background the flight is read against, and at
+        // anything stronger the words compete with the line for the eye - which is
+        // exactly backwards, since the line is the data and this is the scenery.
+        float placedY[LAYER_COUNT];
+        int placedCount = 0;
+        auto bandLabel = [&](int layer, float top, float bot) {
+            if (bot <= top) { return; }   // not in shot at this altitude range
+            const char* text = LAYER_BAND_LABELS[layer];
+            ImVec2 sz = ImGui::CalcTextSize(text);
+            if (sz.x + pad * 3.0f > width) { return; }
+            float y = (top + bot - lineH) * 0.5f;
+            y = std::min<float>(std::max<float>(y, boxMin.y), boxMax.y - lineH);
+            for (int i = 0; i < placedCount; i++) {
+                if (fabsf(y - placedY[i]) < lineH) { return; }
+            }
+            placedY[placedCount++] = y;
+            draw->AddText(ImVec2(boxMax.x - sz.x - pad, y),
+                          withAlpha(LAYER_COLS[layer], 0.38f), text);
+        };
+        bandLabel(LAYER_TROPOPAUSE, tTop, tBot);
+        bandLabel(LAYER_STRATOSPHERE, sTop, sBot);
+        bandLabel(LAYER_TROPOSPHERE, std::max<float>(yTrop, boxMin.y), boxMax.y);
+
+        // Altitude grid. Without it the bands are three coloured stripes with no
+        // scale attached, and the question they exist to answer - how high is that -
+        // still has to be read off the number underneath.
+        const ImU32 gridCol = ImGui::GetColorU32(ImGuiCol_Text, 0.09f);
+        const ImU32 gridTextCol = ImGui::GetColorU32(ImGuiCol_TextDisabled, 0.85f);
+        float altStep = niceAltStepM(range, 5);
+        for (float a = ceilf(lowest / altStep) * altStep; a <= highest; a += altStep) {
+            float y = yRaw(a);
+            if (y < boxMin.y + lineH || y > boxMax.y - 1.0f) { continue; }
+            draw->AddLine(ImVec2(boxMin.x, y), ImVec2(boxMax.x, y), gridCol, style::uiScale);
+            draw->AddText(ImVec2(boxMin.x + pad, y - lineH), gridTextCol, fmtGridAlt(a).c_str());
+        }
+
+        // Time grid, labelled underneath the box rather than inside it. The descent
+        // ends in the bottom right corner, which is exactly where an inside label
+        // would sit.
+        if (span > 1000.0) {
+            double timeStep = niceTimeStepMs(span, 4);
+            for (double t = timeStep; t <= span; t += timeStep) {
+                float x = boxMin.x + (float)((t / span) * width);
+                if (x > boxMax.x - 1.0f) { break; }
+                draw->AddLine(ImVec2(x, boxMin.y), ImVec2(x, boxMax.y), gridCol, style::uiScale);
+                std::string lbl = fmtElapsed(t);
+                ImVec2 sz = ImGui::CalcTextSize(lbl.c_str());
+                // Centred on its line, except where that would hang off either end.
+                float lx = std::min<float>(std::max<float>(x - sz.x * 0.5f, boxMin.x), boxMax.x - sz.x);
+                draw->AddText(ImVec2(lx, boxMax.y + pad), gridTextCol, lbl.c_str());
+            }
+            draw->AddText(ImVec2(boxMin.x, boxMax.y + pad), gridTextCol, "T+0");
+        }
+    }
 
     if (points.size() >= 2) {
         const ImU32 ascentCol = ImGui::GetColorU32(ImGuiCol_PlotLines);
@@ -1091,12 +1378,43 @@ void RadiosondeDecoderModule::drawTrack() {
     }
 
     draw->AddRect(boxMin, boxMax, ImGui::GetColorU32(ImGuiCol_Border));
-    ImGui::Dummy(ImVec2(width, height));
+    // The extra line is the room the time labels were drawn into.
+    ImGui::Dummy(ImVec2(width, height + lineH + pad));
 
     if (count < 2) {
         ImGui::TextDisabled("Altitude will plot here once it has a fix");
+        return;
     }
-    else if (haveBurst) {
+
+    // Which layer it is in now. This is what the bands are drawn for, and it is worth
+    // saying in words as well: a balloon spends a long time near a boundary, and
+    // reading a dot against a tint is not the same as being told.
+    int layer = layerAt(lastAlt, atmo);
+    ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(LAYER_COLS[layer]), "%s",
+                       LAYER_NAMES[layer]);
+    if (ImGui::IsItemHovered()) {
+        if (atmo.measured) {
+            style::tooltip("This sonde measured the tropopause at %s: that is the coldest air\n"
+                              "it flew through, and above it the temperature stopped falling.\n"
+                              "Below is the troposphere, which is where the weather is; above\n"
+                              "it is the stratosphere, still and layered, which is why the\n"
+                              "climb steadies out up there.",
+                              fmtAltitude(atmo.tropopauseM).c_str());
+        }
+        else {
+            style::tooltip("The tropopause is estimated at %s from latitude alone, because this\n"
+                              "flight has not yet climbed far enough past its coldest point to\n"
+                              "have measured it. The real height moves by a couple of kilometres\n"
+                              "with the season and the air mass, so the bands are approximate\n"
+                              "until the sonde has been through them.",
+                              fmtAltitude(atmo.tropopauseM).c_str());
+        }
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("- tropopause %s%s", atmo.measured ? "" : "~",
+                        fmtAltitude(atmo.tropopauseM).c_str());
+
+    if (haveBurst) {
         ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(descentCol), "Burst %s",
                            fmtAltitude(highest).c_str());
         if (ImGui::IsItemHovered()) {

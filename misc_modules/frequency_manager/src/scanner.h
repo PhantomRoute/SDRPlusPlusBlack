@@ -5,6 +5,7 @@
 #include <deque>
 #include <map>
 #include <set>
+#include <functional>
 #include <cmath>
 #include <imgui.h>
 #include <module.h>
@@ -33,6 +34,19 @@ public:
 
     bool isScanning() const { return state != SCAN_IDLE; }
     State getState() const { return state; }
+
+    // Whether a channel is one the scan will actually stop on. Public because the
+    // bookmark list colours its rows by it, and having the list work the rule out
+    // for itself is how the two end up disagreeing.
+    bool isScannable(const std::string& name) const;
+
+    // How the scanner asks for a channel's skip flag to be changed. The flag lives
+    // on the bookmark now, so only the frequency manager can write and save it;
+    // these are set by the module at construction. Both may be empty, and every
+    // call site checks - the scanner has to keep working if it is ever used
+    // without a manager behind it.
+    std::function<void(const std::string&, bool)> onSetSkip;
+    std::function<void()> onClearSkips;
 
     // The level a channel has to beat to count as busy.
     float getTriggerLevel() const { return noiseFloor + signalMarginDb; }
@@ -66,7 +80,6 @@ private:
     float signalMarginDb = 4.0f;   // how far over the floor a channel has to be
     bool squelchEnabled = false;
     bool carrierHoldMode = false;
-    std::set<std::string> skipped; // channels the user has told the scan to pass over
 
     // ---- Scan state
     State state = SCAN_IDLE;
@@ -111,8 +124,10 @@ private:
     void gotoStation(size_t index);
     void step(int dir);
     void enterState(State newState);
-    bool isScannable(const std::string& name) const;
     int findScannable(int from, int dir) const;
+    // The channels in the current list that are marked skip, worked out from the
+    // bookmarks themselves rather than kept as a second copy that can go stale.
+    std::vector<std::string> skippedNames() const;
     void setMuted(bool muted);
     void logHit();
     float historyAverage() const;

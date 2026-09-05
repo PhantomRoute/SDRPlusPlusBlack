@@ -13,6 +13,7 @@
 #include <gui/dialogs/dialog_box.h>
 #include <fstream>
 #include <unordered_map>
+#include <set>
 #include "utils/wstr.h"
 #include "frequency_manager.h"
 #include "scanner.h"
@@ -107,10 +108,106 @@ public:
         scannerTickHandler.ctx = this;
         scannerTickHandler.handler = scannerTick;
 
+        // The skip flag lives on the bookmark, so the scanner asks rather than
+        // keeps its own copy. Bound here rather than passed to the constructor
+        // because the scanner is a member and is built before this body runs.
+        scanner.onSetSkip = [this](const std::string& bmName, bool skip) { setBookmarkSkip(bmName, skip); };
+        scanner.onClearSkips = [this]() { clearBookmarkSkips(); };
+
+        migrateScannerSkipList();
+
         gui::menu.registerEntry(name, menuHandler, this, NULL);
         gui::waterfall.onFFTRedraw.bindHandler(&fftRedrawHandler);
         gui::waterfall.onInputProcess.bindHandler(&inputHandler);
         gui::mainWindow.onWaterfallDrawn.bindHandler(&scannerTickHandler);
+    }
+
+    // Skip used to be a set of bookmark names under "scanner", shared by every list.
+    // Moving it onto the bookmark fixes two things that set could not express - two
+    // lists with a channel of the same name, and a bookmark moved between lists - but
+    // anyone upgrading has a set of channels they have already told the scan to leave
+    // alone, and silently un-skipping all of them would be a poor way to arrive.
+    //
+    // So: carry them across once, by name, into every list that has a bookmark of that
+    // name, then delete the old key so this never runs again. Matching by name across
+    // all lists is the same rule the old set used, which makes this migration exactly
+    // as right - and as wrong - as the behaviour it replaces, and no more surprising.
+    void migrateScannerSkipList() {
+        config.acquire();
+        if (!config.conf.contains("scanner") || !config.conf["scanner"].is_object() ||
+            !config.conf["scanner"].contains("skipped") || !config.conf["scanner"]["skipped"].is_array()) {
+            config.release();
+            return;
+        }
+
+        std::set<std::string> old;
+        for (auto& entry : config.conf["scanner"]["skipped"]) {
+            if (entry.is_string()) { old.insert(entry.get<std::string>()); }
+        }
+        config.conf["scanner"].erase("skipped");
+
+        int carried = 0;
+        if (!old.empty() && config.conf.contains("lists") && config.conf["lists"].is_object()) {
+            for (auto& [listName, list] : config.conf["lists"].items()) {
+                if (!list.contains("bookmarks") || !list["bookmarks"].is_object()) { continue; }
+                for (auto& [bmName, bm] : list["bookmarks"].items()) {
+                    if (!bm.is_object()) { continue; }
+                    if (old.count(bmName)) {
+                        bm["skip"] = true;
+                        carried++;
+                    }
+                }
+            }
+        }
+        config.release(true);
+        if (carried) {
+            flog::info("Frequency manager: moved {0} skipped channel(s) from the scanner onto their bookmarks", carried);
+        }
+    }
+
+    // Writes just the one key, rather than going through saveByName.
+    //
+    // saveByName rewrites the whole list, and on the way it turns each bookmark's mode
+    // index back into a demod id through the radio module - so saving a list while no
+    // radio is loaded writes -1 over every mode in it. That is a trap the existing Add
+    // and Edit buttons already sit next to, but they at least only fire when someone is
+    // working in this panel. Skip is reachable from the scanner, so pointing it at the
+    // same code would have widened the hole rather than left it where it was.
+    //
+    // Touching one boolean also means a skip toggle cannot damage anything else in the
+    // list, whatever else is or is not loaded at the time.
+    void setBookmarkSkip(const std::string& bmName, bool skip) {
+        auto it = bookmarks.find(bmName);
+        if (it == bookmarks.end() || it->second.skip == skip) { return; }
+        it->second.skip = skip;
+        writeSkipFlags();
+    }
+
+    // Only the list being worked on. The scanner scans one list at a time, so "clear
+    // the skips" means the ones it is about to scan - reaching into every other list
+    // would undo work the operator cannot even see from here.
+    void clearBookmarkSkips() {
+        bool changed = false;
+        for (auto& [bmName, bm] : bookmarks) {
+            if (bm.skip) { bm.skip = false; changed = true; }
+        }
+        if (changed) { writeSkipFlags(); }
+    }
+
+    // Only ever writes "skip", and only onto bookmarks the file already has. A name in
+    // memory but not on disk cannot happen through any path here, and if it ever does,
+    // inventing a bookmark with nothing in it but a skip flag would be worse than
+    // leaving it alone.
+    void writeSkipFlags() {
+        if (selectedListName.empty()) { return; }
+        config.acquire();
+        if (config.conf["lists"].contains(selectedListName)) {
+            json& stored = config.conf["lists"][selectedListName]["bookmarks"];
+            for (auto& [bmName, bm] : bookmarks) {
+                if (stored.contains(bmName)) { stored[bmName]["skip"] = bm.skip; }
+            }
+        }
+        config.release(true);
     }
 
     // The menu handler only runs while the Frequency Manager section is expanded,
@@ -203,15 +300,11 @@ public:
                 bookmark["name"] = name;
                 bookmark["frequency"] = bm.frequency;
                 bookmark["bandwidth"] = bm.bandwidth;
-                if (bm.modeIndex < 0) {
-                    bookmark["mode"] = "Unspecified";
-                } else if (radio) {
-                    DemodID demodId = radio->getDemodByIndex(bm.modeIndex);
-                    bookmark["mode"] = demodModeList.count(demodId) ?
-                        demodModeList[demodId] : "Unknown";
-                } else {
-                    bookmark["mode"] = "Unknown";
-                }
+                // Off the bookmark's own id. Reporting it through modeIndex meant a
+                // mode the loaded radio does not list came back as NFM, and with no
+                // radio at all every bookmark came back "Unspecified" whatever it was.
+                bookmark["mode"] = radio ? demodModeName(bm.demodId) : "Unknown";
+                bookmark["mode_id"] = bm.demodId;
                 bookmark["mode_index"] = bm.modeIndex;
                 bookmark["vfo"] = bm.vfoName;
                 bookmark["vfo_available"] = bm.vfoName.empty() || sigpath::vfoManager.vfoExists(bm.vfoName);
@@ -245,16 +338,21 @@ public:
             try {
                 double frequency = std::stod(freqStr);
                 double bandwidth = std::stod(bwStr);
-                int modeIndex = 0;
+                // A DemodID, by name or by number. demodModeListRev is keyed name to
+                // id, so the named form was always giving an id here - it only looked
+                // like an index because the default mode list has them in the same
+                // order, which makes the two identical by coincidence rather than by
+                // design. Now it is an id on both branches and says so.
+                int demodId = 0;
                 auto radio = (RadioModuleInterface *)core::moduleManager.getInterface(gui::waterfall.selectedVFO, "RadioModuleInterface");
                 if (radio) {
                     updateModeList(radio);
                 }
                 try {
-                    modeIndex = std::stoi(modeStr);
+                    demodId = std::stoi(modeStr);
                 } catch (...) {
                     if (demodModeListRev.find(modeStr) != demodModeListRev.end()) {
-                        modeIndex = demodModeListRev[modeStr];
+                        demodId = demodModeListRev[modeStr];
                     } else {
                         return json{{"error", "unknown mode: " + modeStr}}.dump();
                     }
@@ -262,7 +360,8 @@ public:
                 FrequencyBookmark fbm;
                 fbm.frequency = frequency;
                 fbm.bandwidth = bandwidth;
-                fbm.modeIndex = modeIndex;
+                setBookmarkMode(fbm, demodId, radio);
+                int modeIndex = fbm.modeIndex;
                 fbm.selected = false;
                 fbm.vfoName = gui::waterfall.selectedVFO;
                 bookmarks[bmName] = fbm;
@@ -468,8 +567,11 @@ private:
         // will drive; only fall back to the selected VFO for a legacy bookmark.
         std::string vfo = editedBookmark.vfoName.empty() ? gui::waterfall.selectedVFO : editedBookmark.vfoName;
         auto radio = (RadioModuleInterface*)core::moduleManager.getInterface(vfo, "RadioModuleInterface");
-        if (radio == nullptr || editedBookmark.modeIndex < 0) { return; }
-        if (radio->getDemodByIndex(editedBookmark.modeIndex) != RADIO_DEMOD_NFM) { return; }
+        // The radio is still needed to draw the rows, but whether this bookmark is
+        // NFM is now answered by the bookmark, not by indexing into the radio's list -
+        // which got it wrong for any mode that list does not happen to carry.
+        if (radio == nullptr) { return; }
+        if (editedBookmark.demodId != RADIO_DEMOD_NFM) { return; }
 
         // Showing the rows is what makes this bookmark one that carries tone
         // settings, so the flag is set here rather than waiting for the round trip
@@ -608,7 +710,15 @@ private:
             ImGui::TableSetColumnIndex(1);
             ImGui::SetNextItemWidth(200);
 
-            ImGui::Combo(("##freq_manager_edit_mode" + name).c_str(), &editedBookmark.modeIndex, demodModeListTxt.c_str());
+            // The combo hands back a position in the loaded radio's mode list. The
+            // stored id has to be brought along with it, or picking a mode here would
+            // look right until the next save wrote the old one back.
+            if (ImGui::Combo(("##freq_manager_edit_mode" + name).c_str(), &editedBookmark.modeIndex, demodModeListTxt.c_str())) {
+                auto radio = (RadioModuleInterface *)core::moduleManager.getInterface(gui::waterfall.selectedVFO, "RadioModuleInterface");
+                if (radio != nullptr && editedBookmark.modeIndex >= 0) {
+                    editedBookmark.demodId = (int)radio->getDemodByIndex(editedBookmark.modeIndex);
+                }
+            }
 
             drawToneRows();
 
@@ -711,6 +821,115 @@ private:
         return open;
     }
 
+    // Moving bookmarks between lists.
+    //
+    // The move is done on the stored json and not on the in-memory bookmarks, which
+    // matters more than it looks: saveByName turns a mode index back into a demod id
+    // through the radio module, so a list saved while no radio is loaded writes -1
+    // for every mode. Reading the bookmark's json and writing it into the other list
+    // moves it exactly as it sits on disk - tones, notes, skip flag and all, including
+    // any key a future version adds that this code has never heard of.
+    bool moveDialog() {
+        gui::mainWindow.lockWaterfallControls = true;
+
+        std::string id = "Move to list##freq_manager_move_popup_" + name;
+        ImGui::OpenPopup(id.c_str());
+
+        bool open = true;
+        std::vector<std::string> names;
+        for (auto& [bmName, bm] : bookmarks) {
+            if (bm.selected) { names.push_back(bmName); }
+        }
+
+        if (ImGui::BeginPopup(id.c_str(), ImGuiWindowFlags_NoResize)) {
+            ImGui::Text("Moving %d bookmark%s out of \"%s\"", (int)names.size(),
+                        names.size() == 1 ? "" : "s", selectedListName.c_str());
+            ImGui::Separator();
+
+            for (const auto& listName : listNames) {
+                if (listName == selectedListName) { continue; }
+                if (ImGui::RadioButton((listName + "##freq_manager_move_target_" + name).c_str(),
+                                       moveTargetList == listName)) {
+                    moveTargetList = listName;
+                }
+            }
+
+            // Worked out live rather than on the button press, so the warning is
+            // there to read before committing to it rather than reported afterwards.
+            int clashes = 0;
+            if (!moveTargetList.empty()) {
+                config.acquire();
+                const json& target = config.conf["lists"][moveTargetList]["bookmarks"];
+                for (const auto& bmName : names) {
+                    if (target.contains(bmName)) { clashes++; }
+                }
+                config.release();
+            }
+
+            if (clashes > 0) {
+                ImGui::Separator();
+                ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.3f, 1.0f), "%d already in that list by name", clashes);
+                ImGui::Checkbox(("Replace them##freq_manager_move_overwrite_" + name).c_str(), &moveOverwrite);
+                if (ImGui::IsItemHovered()) {
+                    style::tooltip("Off, the ones that clash stay where they are and the rest move.\n"
+                                   "On, the bookmark in the other list is overwritten and lost.");
+                }
+            }
+
+            ImGui::Separator();
+            if (moveTargetList.empty()) { style::beginDisabled(); }
+            if (ImGui::Button("Move")) {
+                open = false;
+                int moved = 0, leftBehind = 0;
+                moveBookmarksToList(names, moveTargetList, moveOverwrite, moved, leftBehind);
+                if (leftBehind > 0) {
+                    ImGui::InsertNotification({ ImGuiToastType_Warning, 5000,
+                                                "Moved %d to \"%s\". %d left here - already in that list by name.",
+                                                moved, moveTargetList.c_str(), leftBehind });
+                }
+                else {
+                    ImGui::InsertNotification({ ImGuiToastType_Success, 3000,
+                                                "Moved %d bookmark%s to \"%s\".",
+                                                moved, moved == 1 ? "" : "s", moveTargetList.c_str() });
+                }
+            }
+            if (moveTargetList.empty()) { style::endDisabled(); }
+            ImGui::SameLine();
+            if (ImGui::Button("Cancel")) { open = false; }
+            ImGui::EndPopup();
+        }
+        return open;
+    }
+
+    void moveBookmarksToList(const std::vector<std::string>& names, const std::string& target,
+                             bool overwrite, int& moved, int& leftBehind) {
+        moved = 0;
+        leftBehind = 0;
+        if (target.empty() || target == selectedListName) { return; }
+
+        config.acquire();
+        if (!config.conf["lists"].contains(target)) {
+            config.release();
+            return;
+        }
+        json& src = config.conf["lists"][selectedListName]["bookmarks"];
+        json& dst = config.conf["lists"][target]["bookmarks"];
+        for (const auto& bmName : names) {
+            if (!src.contains(bmName)) { continue; }
+            if (dst.contains(bmName) && !overwrite) { leftBehind++; continue; }
+            dst[bmName] = src[bmName];
+            src.erase(bmName);
+            moved++;
+        }
+        refreshWaterfallBookmarks(false);
+        config.release(true);
+
+        // Reload rather than erase from the map by hand: the ones that stayed behind
+        // have to keep their selection state and the ones that went have to be gone,
+        // and the file is now the only thing that knows which is which.
+        if (moved > 0) { loadByName(selectedListName); }
+    }
+
     bool selectListsDialog() {
         gui::mainWindow.lockWaterfallControls = true;
 
@@ -766,8 +985,9 @@ private:
                 wbm.bookmarkName = bookmarkName;
                 wbm.bookmark.frequency = config.conf["lists"][listName]["bookmarks"][bookmarkName]["frequency"];
                 wbm.bookmark.bandwidth = config.conf["lists"][listName]["bookmarks"][bookmarkName]["bandwidth"];
-                int mode = config.conf["lists"][listName]["bookmarks"][bookmarkName]["mode"];
-                wbm.bookmark.modeIndex = (radio != nullptr) ? radio->getDemodIndex(mode) : -1;
+                setBookmarkMode(wbm.bookmark,
+                                storedDemodId(config.conf["lists"][listName]["bookmarks"][bookmarkName]),
+                                radio);
                 wbm.bookmark.vfoName = config.conf["lists"][listName]["bookmarks"][bookmarkName].value("vfo", "");
                 wbm.bookmark.hasTone = hasTone(config.conf["lists"][listName]["bookmarks"][bookmarkName]);
                 wbm.bookmark.tone = loadTone(config.conf["lists"][listName]["bookmarks"][bookmarkName]);
@@ -906,11 +1126,12 @@ private:
             FrequencyBookmark fbm;
             fbm.frequency = bm["frequency"];
             fbm.bandwidth = bm["bandwidth"];
-            fbm.modeIndex = (radio != nullptr) ? radio->getDemodIndex(bm["mode"]) : -1;
+            setBookmarkMode(fbm, storedDemodId(bm), radio);
             fbm.vfoName = bm.value("vfo", "");
             fbm.hasTone = hasTone(bm);
             fbm.tone = loadTone(bm);
             fbm.notes = bm.value("notes", "");
+            fbm.skip = bm.value("skip", false);
             fbm.selected = false;
             bookmarks[bmName] = fbm;
         }
@@ -983,6 +1204,28 @@ private:
         return t;
     }
 
+    // Sets both halves of a bookmark's mode from the id that actually gets stored, so
+    // the pair cannot drift apart. modeIndex comes out -1 when there is no radio, or
+    // when the radio does not list this mode; that is the honest answer and now costs
+    // nothing, because saving no longer reads it.
+    static void setBookmarkMode(FrequencyBookmark& fbm, int demodId, RadioModuleInterface* radio) {
+        // Nothing anywhere has a meaning for a negative id. A list damaged by the old
+        // save path is full of them, and there is no recovering what they used to be -
+        // but they can at least stop spreading.
+        if (demodId < 0) { demodId = 0; }   // RADIO_DEMOD_NFM
+        fbm.demodId = demodId;
+        fbm.modeIndex = (radio != nullptr) ? radio->getDemodIndex(demodId) : -1;
+    }
+
+    // The mode as the file holds it, or NFM if the file does not say. Guarded rather
+    // than a bare bm["mode"]: on a hand edited or truncated file that expression is a
+    // null json, and converting null to the int getDemodIndex wants throws out of the
+    // middle of loading the list.
+    static int storedDemodId(const json& bm) {
+        if (bm.contains("mode") && bm["mode"].is_number_integer()) { return bm["mode"].get<int>(); }
+        return 0;
+    }
+
     void updateModeList(RadioModuleInterface *radio) {
         demodModeList.clear();
         demodModeListRev.clear();
@@ -996,18 +1239,22 @@ private:
         }
     }
 
+    // Rewrites the whole list from the in-memory bookmarks, so every field it writes
+    // has to be recoverable from them without help. The mode used to be the exception:
+    // it was reconstructed by asking the radio module what modeIndex meant, which made
+    // saving depend on a module that need not be loaded. See FrequencyBookmark::demodId
+    // for what that cost. Nothing here consults the radio any more.
     void saveByName(std::string listName) {
-        auto radio = (RadioModuleInterface *)core::moduleManager.getInterface(gui::waterfall.selectedVFO, "RadioModuleInterface");
         config.acquire();
         config.conf["lists"][listName]["bookmarks"] = json::object();
         for (auto [bmName, bm] : bookmarks) {
             config.conf["lists"][listName]["bookmarks"][bmName]["frequency"] = bm.frequency;
             config.conf["lists"][listName]["bookmarks"][bmName]["bandwidth"] = bm.bandwidth;
-            DemodID demodId = (radio != nullptr) ? radio->getDemodByIndex(bm.modeIndex) : (DemodID)-1;
-            flog::info("bm.modeIndex={}, demodId={}", (int)bm.modeIndex, (int)demodId);
+            int demodId = bm.demodId;
             config.conf["lists"][listName]["bookmarks"][bmName]["mode"] = demodId;
             config.conf["lists"][listName]["bookmarks"][bmName]["vfo"] = bm.vfoName;
             config.conf["lists"][listName]["bookmarks"][bmName]["notes"] = bm.notes;
+            config.conf["lists"][listName]["bookmarks"][bmName]["skip"] = bm.skip;
             if (demodId == RADIO_DEMOD_NFM) {
                 saveTone(config.conf["lists"][listName]["bookmarks"][bmName], bm.tone);
             }
@@ -1132,7 +1379,8 @@ private:
                 _this->editedBookmark.frequency = gui::waterfall.getCenterFrequency() + sigpath::vfoManager.getOffset(gui::waterfall.selectedVFO);
                 _this->editedBookmark.bandwidth = sigpath::vfoManager.getBandwidth(gui::waterfall.selectedVFO);
             }
-            _this->editedBookmark.modeIndex = (radio != nullptr) ? radio->getDemodIndex(radio->getSelectedDemodId()) : -1;
+            setBookmarkMode(_this->editedBookmark,
+                            (radio != nullptr) ? radio->getSelectedDemodId() : 0, radio);
             _this->editedBookmark.vfoName = gui::waterfall.selectedVFO;
             _this->editedBookmark.selected = false;
             // Take the tone the radio is set to right now, so bookmarking a repeater
@@ -1213,12 +1461,35 @@ private:
             for (auto& [name, bm] : _this->bookmarks) {
                 bool vfoMissing = !bm.vfoName.empty() && !sigpath::vfoManager.vfoExists(bm.vfoName);
                 ImGui::TableNextRow();
-                // Mark the channel the scanner is on, so the list says where the
-                // scan is instead of leaving it to be read off the frequency.
+                // The whole list colour coded for the scan, so how it is going to
+                // behave can be read off it at a glance instead of worked out: green
+                // is the channel it is on, blue are the ones queued behind it, red are
+                // the ones it will pass over.
+                //
+                // Red is shown whether or not a scan is running, because it answers a
+                // question asked before pressing start. Blue is not - with the scanner
+                // idle it would colour almost every row and say nothing.
+                //
+                // Alpha rather than opaque fills: these blend with whatever the theme
+                // painted, so the row still reads on the light theme as well as the
+                // four dark ones, and the scanner's own row stays legible on top.
+                bool willScan = _this->scanner.isScannable(name);
                 if (_this->scanner.isScanning() && name == _this->scanner.getCurrentStation()) {
+                    // Still two shades, because "parked on a signal" and "checking
+                    // whether there is one" are different things worth telling apart -
+                    // but both green now, since this is the channel it is on either way.
                     bool listening = (_this->scanner.getState() == Scanner::SCAN_LISTENING);
                     ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1,
-                                           ImGui::ColorConvertFloat4ToU32(listening ? ImVec4(0.15f, 0.45f, 0.2f, 1.0f) : ImVec4(0.4f, 0.33f, 0.1f, 1.0f)));
+                                           ImGui::ColorConvertFloat4ToU32(listening ? ImVec4(0.20f, 0.80f, 0.35f, 0.45f)
+                                                                                    : ImVec4(0.20f, 0.65f, 0.30f, 0.26f)));
+                }
+                else if (!willScan) {
+                    ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1,
+                                           ImGui::ColorConvertFloat4ToU32(ImVec4(0.85f, 0.25f, 0.25f, 0.26f)));
+                }
+                else if (_this->scanner.isScanning()) {
+                    ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1,
+                                           ImGui::ColorConvertFloat4ToU32(ImVec4(0.25f, 0.50f, 0.95f, 0.24f)));
                 }
                 ImGui::TableSetColumnIndex(0);
                 ImVec2 min = ImGui::GetCursorPos();
@@ -1270,7 +1541,14 @@ private:
                     ImGui::SameLine();
                     ImGui::TextColored(ImVec4(1.0f, 0.25f, 0.25f, 1.0f), "X");
                 } else {
-                    ImGui::Text("%s %s", utils::formatFreq(bm.frequency).c_str(), (radio != nullptr) ? demodModeName(radio->getDemodByIndex(bm.modeIndex)).c_str() : "");
+                    ImGui::Text("%s %s", utils::formatFreq(bm.frequency).c_str(), (radio != nullptr) ? demodModeName(bm.demodId).c_str() : "");
+                }
+                // The colour says it too, but only against a theme the operator can
+                // see - and the word is what survives a screenshot, a colour blind
+                // eye, and the row being the one the scanner has turned green.
+                if (bm.skip) {
+                    ImGui::SameLine();
+                    ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.45f, 1.0f), "skip");
                 }
                 // A quiet marker, so that notes can be found without hovering every row
                 // in the list to look for them.
@@ -1286,6 +1564,67 @@ private:
             ImGui::EndTable();
         }
 
+
+        // Organising the selection: which list a channel belongs in, and whether the
+        // scan should bother with it. Both act on the selection, the way Remove and
+        // Edit above do, so there is one way to say "these ones" in this panel.
+        {
+            bool haveSel = !selectedNames.empty();
+            // Nowhere to move to if this is the only list.
+            bool canMove = haveSel && _this->listNames.size() > 1;
+
+            ImGui::BeginTable(("freq_manager_org_table" + _this->name).c_str(), 2);
+            ImGui::TableNextRow();
+
+            ImGui::TableSetColumnIndex(0);
+            if (!canMove) { style::beginDisabled(); }
+            if (ImGui::Button(("Move to list...##_freq_mgr_move_" + _this->name).c_str(), ImVec2(ImGui::GetContentRegionAvail().x, 0))) {
+                _this->moveTargetList = "";
+                _this->moveOverwrite = false;
+                _this->moveOpen = true;
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                style::tooltip("Move the selected bookmarks into another list, keeping everything\n"
+                               "about them - mode, bandwidth, tones, notes and whether they are\n"
+                               "skipped. Select some first; you need more than one list.");
+            }
+            if (!canMove) { style::endDisabled(); }
+
+            ImGui::TableSetColumnIndex(1);
+            // One button, and what it says is what pressing it does. If any of the
+            // selection is still in the scan it offers to take them out; only once
+            // every one of them is out does it offer to put them back.
+            //
+            // With nothing selected the button is disabled anyway, but it still has to
+            // say something, and "Put back in scan" greyed out reads as though there is
+            // something to put back. Default to the other way round.
+            bool anyScanned = selectedNames.empty();
+            for (const auto& n : selectedNames) {
+                auto it = _this->bookmarks.find(n);
+                if (it != _this->bookmarks.end() && !it->second.skip) { anyScanned = true; break; }
+            }
+            if (!haveSel) { style::beginDisabled(); }
+            const char* skipLabel = anyScanned ? "Skip in scan" : "Put back in scan";
+            if (ImGui::Button((std::string(skipLabel) + "##_freq_mgr_skip_" + _this->name).c_str(), ImVec2(ImGui::GetContentRegionAvail().x, 0))) {
+                bool changed = false;
+                for (const auto& n : selectedNames) {
+                    auto it = _this->bookmarks.find(n);
+                    if (it != _this->bookmarks.end() && it->second.skip != anyScanned) {
+                        it->second.skip = anyScanned;
+                        changed = true;
+                    }
+                }
+                if (changed) { _this->writeSkipFlags(); }
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                style::tooltip("Leave the selected channels out of the scan, or put them back.\n"
+                               "Skipped channels stay in the list and can still be tuned by hand -\n"
+                               "the scanner just walks past them. They show red in the list.");
+            }
+            if (!haveSel) { style::endDisabled(); }
+
+            ImGui::EndTable();
+        }
 
         // Step through the list a channel at a time, without having to find the next
         // one and double click it. The arrows read the way the list runs on screen:
@@ -1441,6 +1780,10 @@ private:
 
         if (_this->renameListOpen) {
             _this->renameListOpen = _this->newListDialog();
+        }
+
+        if (_this->moveOpen) {
+            _this->moveOpen = _this->moveDialog();
         }
 
         if (_this->selectListsOpen) {
@@ -1669,7 +2012,7 @@ private:
             if (!hoveredBookmark.bookmark.vfoName.empty() && !sigpath::vfoManager.vfoExists(hoveredBookmark.bookmark.vfoName)) {
                 ImGui::TextColored(ImVec4(1.0f, 0.25f, 0.25f, 1.0f), "Radio \"%s\" is not available", hoveredBookmark.bookmark.vfoName.c_str());
             } else {
-                ImGui::Text("Mode: %s", (radio != nullptr) ? demodModeName(radio->getDemodByIndex(hoveredBookmark.bookmark.modeIndex)).c_str() : "");
+                ImGui::Text("Mode: %s", (radio != nullptr) ? demodModeName(hoveredBookmark.bookmark.demodId).c_str() : "");
             }
             style::endTooltip();
         }
@@ -1716,9 +2059,12 @@ private:
             FrequencyBookmark fbm;
             fbm.frequency = bm["frequency"];
             fbm.bandwidth = bm["bandwidth"];
-            fbm.modeIndex = (radio != nullptr) ? radio->getDemodIndex(bm["mode"]) : -1;
+            // The file says what mode it is, so the mode survives an import made with
+            // no radio loaded rather than arriving as "unknown" and saving as NFM.
+            setBookmarkMode(fbm, storedDemodId(bm), radio);
             fbm.vfoName = bm.value("vfo", "");
             fbm.notes = bm.value("notes", "");
+            fbm.skip = bm.value("skip", false);
             fbm.selected = false;
             bookmarks[_name] = fbm;
         }
@@ -1740,9 +2086,12 @@ private:
     // has already typed up over the years can come in, and the ones in here can go out
     // and be sorted, filtered and printed like any other table.
 
-    static std::string csvModeName(RadioModuleInterface* radio, int modeIndex) {
-        if (radio == nullptr || modeIndex < 0) { return ""; }
-        return demodModeName(radio->getDemodByIndex(modeIndex));
+    // Named modes come out of the table the radio module registers, so with no radio
+    // loaded there is no name to write and the column is left empty rather than filled
+    // with a guess. The id itself is never lost either way - it is what is stored.
+    static std::string csvModeName(RadioModuleInterface* radio, int demodId) {
+        if (radio == nullptr) { return ""; }
+        return demodModeName(demodId);
     }
 
     bool exportBookmarksCsv(const std::string& path, const std::vector<std::string>& names) {
@@ -1765,7 +2114,7 @@ private:
                 n,
                 bmcsv::fmtNumber(bm.frequency),
                 bmcsv::fmtNumber(bm.bandwidth),
-                csvModeName(radio, bm.modeIndex),
+                csvModeName(radio, bm.demodId),
                 bm.vfoName,
                 bmcsv::fmtToneMode(t.mode),
                 bmcsv::fmtNumber(t.ctcssFreq),
@@ -1776,6 +2125,7 @@ private:
                 bmcsv::fmtBool(t.identifyEnabled),
                 bmcsv::fmtBool(t.tailCloseEnabled),
                 bmcsv::encodeToneList(t),
+                bmcsv::fmtBool(bm.skip),
                 bm.notes
             };
             fs << csv::row(f);
@@ -1834,7 +2184,9 @@ private:
         };
 
         auto radio = (RadioModuleInterface*)core::moduleManager.getInterface(gui::waterfall.selectedVFO, "RadioModuleInterface");
-        int defaultModeIndex = (radio != nullptr) ? radio->getDemodIndex(radio->getSelectedDemodId()) : -1;
+        // What a row with no usable mode column falls back to. An id, so a spreadsheet
+        // imported with no radio loaded still lands on something real.
+        int defaultDemodId = (radio != nullptr) ? radio->getSelectedDemodId() : 0;
         bool fileHasTone = col.count("tonemode") || col.count("ctcss") || col.count("dcscode");
 
         for (size_t r = headerRow + 1; r < rows.size(); r++) {
@@ -1854,12 +2206,16 @@ private:
             bmcsv::parseNumber(field(row, "bandwidth"), &fbm.bandwidth);
             fbm.vfoName = field(row, "vfo");
             fbm.notes = field(row, "notes");
+            // A file from somewhere else has no such column, and the default keeps
+            // every channel in the scan - which is the right way round for an import.
+            fbm.skip = bmcsv::parseBool(field(row, "skip"), false);
             fbm.selected = false;
 
+            // demodIdByName reads the file, not the radio, so the mode column is
+            // honoured whether or not a radio module happens to be loaded. It used to
+            // be thrown away in that case and the whole import came in as NFM.
             int demodId = 0;
-            fbm.modeIndex = (radio != nullptr && demodIdByName(field(row, "mode"), &demodId))
-                                ? radio->getDemodIndex((DemodID)demodId)
-                                : defaultModeIndex;
+            setBookmarkMode(fbm, demodIdByName(field(row, "mode"), &demodId) ? demodId : defaultDemodId, radio);
 
             // Only claim the file said something about tones if it actually had a
             // column for them. Otherwise the flag stays false and recalling the
@@ -1924,6 +2280,9 @@ private:
     bool newListOpen = false;
     bool renameListOpen = false;
     bool selectListsOpen = false;
+    bool moveOpen = false;
+    std::string moveTargetList;
+    bool moveOverwrite = false;
 
     bool deleteListOpen = false;
     bool deleteBookmarksOpen = false;
@@ -2025,7 +2384,6 @@ MOD_EXPORT void _INIT_() {
     def["scanner"]["signalMarginDb"] = 4.0f;
     def["scanner"]["squelchEnabled"] = false;
     def["scanner"]["carrierHoldMode"] = false;
-    def["scanner"]["skipped"] = json::array();
 
     config.setPath(std::string(core::getRoot()) + "/frequency_manager_config.json");
     config.load(def);

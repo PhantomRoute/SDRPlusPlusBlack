@@ -35,6 +35,12 @@ struct SondeFix {
     float lat = 0.0f;
     float lon = 0.0f;
     float alt = 0.0f;
+    // The air temperature at this point, kept so the tropopause can be found from
+    // the profile this flight actually measured rather than assumed from a table.
+    // Zero is a real temperature and a common one at altitude, so whether a reading
+    // arrived needs its own flag and cannot be inferred from the value.
+    float temp = 0.0f;
+    bool haveTemp = false;
 };
 
 class RadiosondeDecoderModule : public ModuleManager::Instance {

@@ -25,6 +25,11 @@ namespace bmcsv {
             "tone_mode", "ctcss", "dcs_code", "dcs_invert",
             "tone_squelch", "tone_filter", "tone_identify", "tone_tail_close",
             "tone_list",
+            // Whether the scanner passes over this channel. A column rather than
+            // something left behind on export, because a list is often built and
+            // pruned in a spreadsheet, and "which of these am I not interested in"
+            // is exactly the kind of decision made there.
+            "skip",
             // Last on purpose: it is the one field with no length limit, and a long
             // free text column in the middle pushes everything else off the screen in
             // a spreadsheet.
