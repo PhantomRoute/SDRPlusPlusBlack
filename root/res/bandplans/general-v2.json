@@ -1,0 +1,1083 @@
+{
+    "name": "General v2",
+    "country_name": "International (ITU Region 1)",
+    "country_code": "R1",
+    "author_name": "PhantomRoute",
+    "author_url": "https://github.com/PhantomRoute/SDRPlusPlusBlack",
+    "bands": [
+        {
+            "name": "Naval VLF (MSK)",
+            "type": "utility",
+            "start": 14000.0,
+            "end": 25500.0
+        },
+        {
+            "name": "Time Signals (60 / 68 / 77.5 kHz)",
+            "type": "utility",
+            "start": 59500.0,
+            "end": 81000.0
+        },
+        {
+            "name": "Amateur 2200m",
+            "type": "amateur",
+            "start": 135700.0,
+            "end": 137800.0
+        },
+        {
+            "name": "Longwave Broadcast",
+            "type": "broadcast",
+            "start": 148500.0,
+            "end": 283500.0
+        },
+        {
+            "name": "Aeronautical NDB",
+            "type": "navigation",
+            "start": 283500.0,
+            "end": 472000.0
+        },
+        {
+            "name": "Amateur 630m",
+            "type": "amateur",
+            "start": 472000.0,
+            "end": 479000.0
+        },
+        {
+            "name": "NDB / NAVTEX (490 & 518 kHz)",
+            "type": "navigation",
+            "start": 479000.0,
+            "end": 526500.0
+        },
+        {
+            "name": "Medium Wave Broadcast",
+            "type": "broadcast",
+            "start": 526500.0,
+            "end": 1606500.0
+        },
+        {
+            "name": "Maritime / Fixed (MF)",
+            "type": "marine",
+            "start": 1606500.0,
+            "end": 1800000.0
+        },
+        {
+            "name": "Amateur 160m",
+            "type": "amateur",
+            "start": 1800000.0,
+            "end": 2000000.0
+        },
+        {
+            "name": "Maritime Mobile (MF)",
+            "type": "marine",
+            "start": 2000000.0,
+            "end": 2300000.0
+        },
+        {
+            "name": "Shortwave Broadcast (120m)",
+            "type": "broadcast",
+            "start": 2300000.0,
+            "end": 2495000.0
+        },
+        {
+            "name": "Standard Frequency & Time (2.5 MHz)",
+            "type": "utility",
+            "start": 2495000.0,
+            "end": 2505000.0
+        },
+        {
+            "name": "Maritime / Fixed",
+            "type": "marine",
+            "start": 2505000.0,
+            "end": 2850000.0
+        },
+        {
+            "name": "Aeronautical HF Voice",
+            "type": "aviation",
+            "start": 2850000.0,
+            "end": 3155000.0
+        },
+        {
+            "name": "Fixed / Utility",
+            "type": "utility",
+            "start": 3155000.0,
+            "end": 3200000.0
+        },
+        {
+            "name": "Shortwave Broadcast (90m)",
+            "type": "broadcast",
+            "start": 3200000.0,
+            "end": 3400000.0
+        },
+        {
+            "name": "Aeronautical HF Voice",
+            "type": "aviation",
+            "start": 3400000.0,
+            "end": 3500000.0
+        },
+        {
+            "name": "Amateur 80m",
+            "type": "amateur",
+            "start": 3500000.0,
+            "end": 3800000.0
+        },
+        {
+            "name": "Fixed / Maritime",
+            "type": "marine",
+            "start": 3800000.0,
+            "end": 3900000.0
+        },
+        {
+            "name": "Shortwave Broadcast (75m)",
+            "type": "broadcast",
+            "start": 3900000.0,
+            "end": 4000000.0
+        },
+        {
+            "name": "Maritime Mobile (HF)",
+            "type": "marine",
+            "start": 4000000.0,
+            "end": 4438000.0
+        },
+        {
+            "name": "Fixed / Utility",
+            "type": "utility",
+            "start": 4438000.0,
+            "end": 4650000.0
+        },
+        {
+            "name": "Aeronautical HF Voice",
+            "type": "aviation",
+            "start": 4650000.0,
+            "end": 4750000.0
+        },
+        {
+            "name": "Shortwave Broadcast (60m)",
+            "type": "broadcast",
+            "start": 4750000.0,
+            "end": 4995000.0
+        },
+        {
+            "name": "Standard Frequency & Time (5 MHz)",
+            "type": "utility",
+            "start": 4995000.0,
+            "end": 5005000.0
+        },
+        {
+            "name": "Shortwave Broadcast (60m)",
+            "type": "broadcast",
+            "start": 5005000.0,
+            "end": 5060000.0
+        },
+        {
+            "name": "Fixed / Utility",
+            "type": "utility",
+            "start": 5060000.0,
+            "end": 5351500.0
+        },
+        {
+            "name": "Amateur 60m",
+            "type": "amateur",
+            "start": 5351500.0,
+            "end": 5366500.0
+        },
+        {
+            "name": "Fixed / Utility",
+            "type": "utility",
+            "start": 5366500.0,
+            "end": 5450000.0
+        },
+        {
+            "name": "Aeronautical HF Voice",
+            "type": "aviation",
+            "start": 5450000.0,
+            "end": 5730000.0
+        },
+        {
+            "name": "Fixed / Utility",
+            "type": "utility",
+            "start": 5730000.0,
+            "end": 5900000.0
+        },
+        {
+            "name": "Shortwave Broadcast (49m)",
+            "type": "broadcast",
+            "start": 5900000.0,
+            "end": 6200000.0
+        },
+        {
+            "name": "Maritime Mobile (HF)",
+            "type": "marine",
+            "start": 6200000.0,
+            "end": 6525000.0
+        },
+        {
+            "name": "Aeronautical HF Voice",
+            "type": "aviation",
+            "start": 6525000.0,
+            "end": 6765000.0
+        },
+        {
+            "name": "Fixed / Utility",
+            "type": "utility",
+            "start": 6765000.0,
+            "end": 7000000.0
+        },
+        {
+            "name": "Amateur 40m",
+            "type": "amateur",
+            "start": 7000000.0,
+            "end": 7200000.0
+        },
+        {
+            "name": "Shortwave Broadcast (41m)",
+            "type": "broadcast",
+            "start": 7200000.0,
+            "end": 7450000.0
+        },
+        {
+            "name": "Fixed / Utility",
+            "type": "utility",
+            "start": 7450000.0,
+            "end": 8100000.0
+        },
+        {
+            "name": "Maritime Mobile (HF)",
+            "type": "marine",
+            "start": 8100000.0,
+            "end": 8815000.0
+        },
+        {
+            "name": "Aeronautical HF Voice",
+            "type": "aviation",
+            "start": 8815000.0,
+            "end": 9040000.0
+        },
+        {
+            "name": "Fixed / Utility",
+            "type": "utility",
+            "start": 9040000.0,
+            "end": 9400000.0
+        },
+        {
+            "name": "Shortwave Broadcast (31m)",
+            "type": "broadcast",
+            "start": 9400000.0,
+            "end": 9900000.0
+        },
+        {
+            "name": "Fixed / Utility",
+            "type": "utility",
+            "start": 9900000.0,
+            "end": 9995000.0
+        },
+        {
+            "name": "Standard Frequency & Time (10 MHz)",
+            "type": "utility",
+            "start": 9995000.0,
+            "end": 10005000.0
+        },
+        {
+            "name": "Aeronautical HF Voice",
+            "type": "aviation",
+            "start": 10005000.0,
+            "end": 10100000.0
+        },
+        {
+            "name": "Amateur 30m",
+            "type": "amateur",
+            "start": 10100000.0,
+            "end": 10150000.0
+        },
+        {
+            "name": "Fixed / Utility",
+            "type": "utility",
+            "start": 10150000.0,
+            "end": 11175000.0
+        },
+        {
+            "name": "Aeronautical HF Voice",
+            "type": "aviation",
+            "start": 11175000.0,
+            "end": 11400000.0
+        },
+        {
+            "name": "Fixed / Utility",
+            "type": "utility",
+            "start": 11400000.0,
+            "end": 11600000.0
+        },
+        {
+            "name": "Shortwave Broadcast (25m)",
+            "type": "broadcast",
+            "start": 11600000.0,
+            "end": 12100000.0
+        },
+        {
+            "name": "Fixed / Utility",
+            "type": "utility",
+            "start": 12100000.0,
+            "end": 12230000.0
+        },
+        {
+            "name": "Maritime Mobile (HF)",
+            "type": "marine",
+            "start": 12230000.0,
+            "end": 13200000.0
+        },
+        {
+            "name": "Aeronautical HF Voice",
+            "type": "aviation",
+            "start": 13200000.0,
+            "end": 13360000.0
+        },
+        {
+            "name": "Fixed / Radio Astronomy",
+            "type": "utility",
+            "start": 13360000.0,
+            "end": 13570000.0
+        },
+        {
+            "name": "Shortwave Broadcast (22m)",
+            "type": "broadcast",
+            "start": 13570000.0,
+            "end": 13870000.0
+        },
+        {
+            "name": "Fixed / Utility",
+            "type": "utility",
+            "start": 13870000.0,
+            "end": 14000000.0
+        },
+        {
+            "name": "Amateur 20m",
+            "type": "amateur",
+            "start": 14000000.0,
+            "end": 14350000.0
+        },
+        {
+            "name": "Fixed / Utility",
+            "type": "utility",
+            "start": 14350000.0,
+            "end": 14990000.0
+        },
+        {
+            "name": "Standard Frequency & Time (15 MHz)",
+            "type": "utility",
+            "start": 14990000.0,
+            "end": 15010000.0
+        },
+        {
+            "name": "Aeronautical HF Voice",
+            "type": "aviation",
+            "start": 15010000.0,
+            "end": 15100000.0
+        },
+        {
+            "name": "Shortwave Broadcast (19m)",
+            "type": "broadcast",
+            "start": 15100000.0,
+            "end": 15800000.0
+        },
+        {
+            "name": "Fixed / Utility",
+            "type": "utility",
+            "start": 15800000.0,
+            "end": 16360000.0
+        },
+        {
+            "name": "Maritime Mobile (HF)",
+            "type": "marine",
+            "start": 16360000.0,
+            "end": 17410000.0
+        },
+        {
+            "name": "Fixed / Utility",
+            "type": "utility",
+            "start": 17410000.0,
+            "end": 17480000.0
+        },
+        {
+            "name": "Shortwave Broadcast (16m)",
+            "type": "broadcast",
+            "start": 17480000.0,
+            "end": 17900000.0
+        },
+        {
+            "name": "Aeronautical HF Voice",
+            "type": "aviation",
+            "start": 17900000.0,
+            "end": 17970000.0
+        },
+        {
+            "name": "Fixed / Utility",
+            "type": "utility",
+            "start": 17970000.0,
+            "end": 18068000.0
+        },
+        {
+            "name": "Amateur 17m",
+            "type": "amateur",
+            "start": 18068000.0,
+            "end": 18168000.0
+        },
+        {
+            "name": "Fixed / Utility",
+            "type": "utility",
+            "start": 18168000.0,
+            "end": 18780000.0
+        },
+        {
+            "name": "Maritime Mobile (HF)",
+            "type": "marine",
+            "start": 18780000.0,
+            "end": 18900000.0
+        },
+        {
+            "name": "Shortwave Broadcast (15m)",
+            "type": "broadcast",
+            "start": 18900000.0,
+            "end": 19020000.0
+        },
+        {
+            "name": "Fixed / Utility",
+            "type": "utility",
+            "start": 19020000.0,
+            "end": 19680000.0
+        },
+        {
+            "name": "Maritime Mobile (HF)",
+            "type": "marine",
+            "start": 19680000.0,
+            "end": 19800000.0
+        },
+        {
+            "name": "Fixed / Utility",
+            "type": "utility",
+            "start": 19800000.0,
+            "end": 19990000.0
+        },
+        {
+            "name": "Standard Frequency & Time (20 MHz)",
+            "type": "utility",
+            "start": 19990000.0,
+            "end": 20010000.0
+        },
+        {
+            "name": "Fixed / Utility",
+            "type": "utility",
+            "start": 20010000.0,
+            "end": 21000000.0
+        },
+        {
+            "name": "Amateur 15m",
+            "type": "amateur",
+            "start": 21000000.0,
+            "end": 21450000.0
+        },
+        {
+            "name": "Shortwave Broadcast (13m)",
+            "type": "broadcast",
+            "start": 21450000.0,
+            "end": 21850000.0
+        },
+        {
+            "name": "Fixed / Utility",
+            "type": "utility",
+            "start": 21850000.0,
+            "end": 21924000.0
+        },
+        {
+            "name": "Aeronautical HF Voice",
+            "type": "aviation",
+            "start": 21924000.0,
+            "end": 22000000.0
+        },
+        {
+            "name": "Maritime Mobile (HF)",
+            "type": "marine",
+            "start": 22000000.0,
+            "end": 22855000.0
+        },
+        {
+            "name": "Fixed / Utility",
+            "type": "utility",
+            "start": 22855000.0,
+            "end": 24890000.0
+        },
+        {
+            "name": "Amateur 12m",
+            "type": "amateur",
+            "start": 24890000.0,
+            "end": 24990000.0
+        },
+        {
+            "name": "Standard Frequency & Time (25 MHz)",
+            "type": "utility",
+            "start": 24990000.0,
+            "end": 25010000.0
+        },
+        {
+            "name": "Fixed / Utility",
+            "type": "utility",
+            "start": 25010000.0,
+            "end": 25070000.0
+        },
+        {
+            "name": "Maritime Mobile (HF)",
+            "type": "marine",
+            "start": 25070000.0,
+            "end": 25210000.0
+        },
+        {
+            "name": "Fixed / Utility",
+            "type": "utility",
+            "start": 25210000.0,
+            "end": 25670000.0
+        },
+        {
+            "name": "Shortwave Broadcast (11m)",
+            "type": "broadcast",
+            "start": 25670000.0,
+            "end": 26100000.0
+        },
+        {
+            "name": "Fixed / Utility",
+            "type": "utility",
+            "start": 26100000.0,
+            "end": 26965000.0
+        },
+        {
+            "name": "Citizens Band (CB)",
+            "type": "utility",
+            "start": 26965000.0,
+            "end": 27405000.0
+        },
+        {
+            "name": "Fixed / Utility",
+            "type": "utility",
+            "start": 27405000.0,
+            "end": 28000000.0
+        },
+        {
+            "name": "Amateur 10m",
+            "type": "amateur",
+            "start": 28000000.0,
+            "end": 29700000.0
+        },
+        {
+            "name": "Land Mobile (VHF Low)",
+            "type": "utility",
+            "start": 29700000.0,
+            "end": 47000000.0
+        },
+        {
+            "name": "Broadcast TV Band I",
+            "type": "broadcast",
+            "start": 47000000.0,
+            "end": 50000000.0
+        },
+        {
+            "name": "Amateur 6m",
+            "type": "amateur",
+            "start": 50000000.0,
+            "end": 52000000.0
+        },
+        {
+            "name": "Broadcast TV Band I / Land Mobile",
+            "type": "broadcast",
+            "start": 52000000.0,
+            "end": 68000000.0
+        },
+        {
+            "name": "Land Mobile / Military",
+            "type": "military",
+            "start": 68000000.0,
+            "end": 70000000.0
+        },
+        {
+            "name": "Amateur 4m",
+            "type": "amateur",
+            "start": 70000000.0,
+            "end": 70500000.0
+        },
+        {
+            "name": "Land Mobile",
+            "type": "utility",
+            "start": 70500000.0,
+            "end": 74800000.0
+        },
+        {
+            "name": "Aeronautical Marker Beacon",
+            "type": "navigation",
+            "start": 74800000.0,
+            "end": 75200000.0
+        },
+        {
+            "name": "Land Mobile",
+            "type": "utility",
+            "start": 75200000.0,
+            "end": 87500000.0
+        },
+        {
+            "name": "FM Broadcast",
+            "type": "broadcast",
+            "start": 87500000.0,
+            "end": 108000000.0
+        },
+        {
+            "name": "ILS Localiser",
+            "type": "navigation",
+            "start": 108000000.0,
+            "end": 111975000.0
+        },
+        {
+            "name": "VOR",
+            "type": "navigation",
+            "start": 111975000.0,
+            "end": 117975000.0
+        },
+        {
+            "name": "Airband Voice / ACARS",
+            "type": "aviation",
+            "start": 117975000.0,
+            "end": 137000000.0
+        },
+        {
+            "name": "Weather & LEO Satellites",
+            "type": "satellite",
+            "start": 137000000.0,
+            "end": 138000000.0
+        },
+        {
+            "name": "Military VHF / Land Mobile",
+            "type": "military",
+            "start": 138000000.0,
+            "end": 144000000.0
+        },
+        {
+            "name": "Amateur 2m",
+            "type": "amateur",
+            "start": 144000000.0,
+            "end": 146000000.0
+        },
+        {
+            "name": "Land Mobile / Amateur (Region 2)",
+            "type": "utility",
+            "start": 146000000.0,
+            "end": 148000000.0
+        },
+        {
+            "name": "Mobile-Satellite Uplink",
+            "type": "satellite",
+            "start": 148000000.0,
+            "end": 150050000.0
+        },
+        {
+            "name": "Land Mobile / PMR",
+            "type": "utility",
+            "start": 150050000.0,
+            "end": 156000000.0
+        },
+        {
+            "name": "Marine VHF & AIS",
+            "type": "marine",
+            "start": 156000000.0,
+            "end": 162050000.0
+        },
+        {
+            "name": "Land Mobile / Weather Radio",
+            "type": "utility",
+            "start": 162050000.0,
+            "end": 174000000.0
+        },
+        {
+            "name": "Broadcast TV Band III / DAB",
+            "type": "broadcast",
+            "start": 174000000.0,
+            "end": 223000000.0
+        },
+        {
+            "name": "Land Mobile",
+            "type": "utility",
+            "start": 223000000.0,
+            "end": 225000000.0
+        },
+        {
+            "name": "Military UHF Air",
+            "type": "military",
+            "start": 225000000.0,
+            "end": 240000000.0
+        },
+        {
+            "name": "Military UHF SATCOM",
+            "type": "satellite",
+            "start": 240000000.0,
+            "end": 270000000.0
+        },
+        {
+            "name": "Military UHF Air / Space Ops",
+            "type": "military",
+            "start": 270000000.0,
+            "end": 322000000.0
+        },
+        {
+            "name": "Radio Astronomy / Fixed",
+            "type": "utility",
+            "start": 322000000.0,
+            "end": 328600000.0
+        },
+        {
+            "name": "ILS Glideslope",
+            "type": "navigation",
+            "start": 328600000.0,
+            "end": 335400000.0
+        },
+        {
+            "name": "Military UHF Air",
+            "type": "military",
+            "start": 335400000.0,
+            "end": 380000000.0
+        },
+        {
+            "name": "TETRA / Emergency Services",
+            "type": "utility",
+            "start": 380000000.0,
+            "end": 399900000.0
+        },
+        {
+            "name": "Mobile-Satellite",
+            "type": "satellite",
+            "start": 399900000.0,
+            "end": 400050000.0
+        },
+        {
+            "name": "Standard Frequency & Time Satellite",
+            "type": "utility",
+            "start": 400050000.0,
+            "end": 400150000.0
+        },
+        {
+            "name": "Radiosondes (Weather Balloons)",
+            "type": "utility",
+            "start": 400150000.0,
+            "end": 406000000.0
+        },
+        {
+            "name": "Emergency Beacons (EPIRB/ELT)",
+            "type": "utility",
+            "start": 406000000.0,
+            "end": 406100000.0
+        },
+        {
+            "name": "Fixed / Mobile",
+            "type": "utility",
+            "start": 406100000.0,
+            "end": 410000000.0
+        },
+        {
+            "name": "Land Mobile / PMR",
+            "type": "utility",
+            "start": 410000000.0,
+            "end": 430000000.0
+        },
+        {
+            "name": "Amateur 70cm",
+            "type": "amateur",
+            "start": 430000000.0,
+            "end": 433050000.0
+        },
+        {
+            "name": "ISM 433 / LPD433",
+            "type": "utility",
+            "start": 433050000.0,
+            "end": 434790000.0
+        },
+        {
+            "name": "Amateur 70cm",
+            "type": "amateur",
+            "start": 434790000.0,
+            "end": 440000000.0
+        },
+        {
+            "name": "Land Mobile",
+            "type": "utility",
+            "start": 440000000.0,
+            "end": 446000000.0
+        },
+        {
+            "name": "PMR446",
+            "type": "utility",
+            "start": 446000000.0,
+            "end": 446200000.0
+        },
+        {
+            "name": "Land Mobile",
+            "type": "utility",
+            "start": 446200000.0,
+            "end": 470000000.0
+        },
+        {
+            "name": "Broadcast TV Band IV/V (DTT)",
+            "type": "broadcast",
+            "start": 470000000.0,
+            "end": 694000000.0
+        },
+        {
+            "name": "Mobile 700 MHz (LTE / 5G)",
+            "type": "cellular",
+            "start": 694000000.0,
+            "end": 790000000.0
+        },
+        {
+            "name": "Mobile 800 MHz (LTE)",
+            "type": "cellular",
+            "start": 790000000.0,
+            "end": 862000000.0
+        },
+        {
+            "name": "SRD 868 / Short Range Devices",
+            "type": "utility",
+            "start": 862000000.0,
+            "end": 880000000.0
+        },
+        {
+            "name": "GSM900 Uplink",
+            "type": "cellular",
+            "start": 880000000.0,
+            "end": 915000000.0
+        },
+        {
+            "name": "ISM 915 / SRD",
+            "type": "utility",
+            "start": 915000000.0,
+            "end": 925000000.0
+        },
+        {
+            "name": "GSM900 Downlink",
+            "type": "cellular",
+            "start": 925000000.0,
+            "end": 960000000.0
+        },
+        {
+            "name": "DME / TACAN",
+            "type": "navigation",
+            "start": 960000000.0,
+            "end": 1164000000.0
+        },
+        {
+            "name": "GNSS L5 / E5",
+            "type": "navigation",
+            "start": 1164000000.0,
+            "end": 1215000000.0
+        },
+        {
+            "name": "Radiolocation / GLONASS L2",
+            "type": "navigation",
+            "start": 1215000000.0,
+            "end": 1240000000.0
+        },
+        {
+            "name": "Amateur 23cm",
+            "type": "amateur",
+            "start": 1240000000.0,
+            "end": 1300000000.0
+        },
+        {
+            "name": "Air Surveillance Radar",
+            "type": "navigation",
+            "start": 1300000000.0,
+            "end": 1350000000.0
+        },
+        {
+            "name": "Radiolocation / Military",
+            "type": "military",
+            "start": 1350000000.0,
+            "end": 1400000000.0
+        },
+        {
+            "name": "Radio Astronomy (Hydrogen Line)",
+            "type": "utility",
+            "start": 1400000000.0,
+            "end": 1427000000.0
+        },
+        {
+            "name": "Fixed / Mobile (L-band)",
+            "type": "utility",
+            "start": 1427000000.0,
+            "end": 1518000000.0
+        },
+        {
+            "name": "Inmarsat Downlink",
+            "type": "satellite",
+            "start": 1518000000.0,
+            "end": 1559000000.0
+        },
+        {
+            "name": "GNSS L1 (GPS / Galileo)",
+            "type": "navigation",
+            "start": 1559000000.0,
+            "end": 1610000000.0
+        },
+        {
+            "name": "Iridium",
+            "type": "satellite",
+            "start": 1610000000.0,
+            "end": 1626500000.0
+        },
+        {
+            "name": "Inmarsat Uplink",
+            "type": "satellite",
+            "start": 1626500000.0,
+            "end": 1660500000.0
+        },
+        {
+            "name": "Radio Astronomy / Met Aids",
+            "type": "utility",
+            "start": 1660500000.0,
+            "end": 1710000000.0
+        },
+        {
+            "name": "GSM1800 Uplink",
+            "type": "cellular",
+            "start": 1710000000.0,
+            "end": 1785000000.0
+        },
+        {
+            "name": "Guard Band",
+            "type": "utility",
+            "start": 1785000000.0,
+            "end": 1805000000.0
+        },
+        {
+            "name": "GSM1800 Downlink",
+            "type": "cellular",
+            "start": 1805000000.0,
+            "end": 1880000000.0
+        },
+        {
+            "name": "DECT",
+            "type": "utility",
+            "start": 1880000000.0,
+            "end": 1900000000.0
+        },
+        {
+            "name": "Fixed / Mobile",
+            "type": "utility",
+            "start": 1900000000.0,
+            "end": 1920000000.0
+        },
+        {
+            "name": "UMTS / LTE 2100 Uplink",
+            "type": "cellular",
+            "start": 1920000000.0,
+            "end": 1980000000.0
+        },
+        {
+            "name": "Mobile-Satellite",
+            "type": "satellite",
+            "start": 1980000000.0,
+            "end": 2010000000.0
+        },
+        {
+            "name": "Fixed / Mobile",
+            "type": "utility",
+            "start": 2010000000.0,
+            "end": 2110000000.0
+        },
+        {
+            "name": "UMTS / LTE 2100 Downlink",
+            "type": "cellular",
+            "start": 2110000000.0,
+            "end": 2170000000.0
+        },
+        {
+            "name": "Mobile-Satellite",
+            "type": "satellite",
+            "start": 2170000000.0,
+            "end": 2200000000.0
+        },
+        {
+            "name": "Space Operation (S-band Downlink)",
+            "type": "satellite",
+            "start": 2200000000.0,
+            "end": 2290000000.0
+        },
+        {
+            "name": "Deep Space Research",
+            "type": "satellite",
+            "start": 2290000000.0,
+            "end": 2300000000.0
+        },
+        {
+            "name": "Amateur 13cm / Fixed",
+            "type": "amateur",
+            "start": 2300000000.0,
+            "end": 2400000000.0
+        },
+        {
+            "name": "ISM 2.4 GHz / Wi-Fi / Bluetooth",
+            "type": "utility",
+            "start": 2400000000.0,
+            "end": 2483500000.0
+        },
+        {
+            "name": "Mobile-Satellite",
+            "type": "satellite",
+            "start": 2483500000.0,
+            "end": 2500000000.0
+        },
+        {
+            "name": "Mobile 2600 MHz (LTE)",
+            "type": "cellular",
+            "start": 2500000000.0,
+            "end": 2690000000.0
+        },
+        {
+            "name": "Weather & Air Traffic Radar",
+            "type": "navigation",
+            "start": 2700000000.0,
+            "end": 3100000000.0
+        },
+        {
+            "name": "Amateur 9cm / Radiolocation",
+            "type": "amateur",
+            "start": 3300000000.0,
+            "end": 3400000000.0
+        },
+        {
+            "name": "Mobile 3.5 GHz (5G n78)",
+            "type": "cellular",
+            "start": 3400000000.0,
+            "end": 3800000000.0
+        },
+        {
+            "name": "Wi-Fi 5 GHz (U-NII-1 / 2A)",
+            "type": "utility",
+            "start": 5150000000.0,
+            "end": 5350000000.0
+        },
+        {
+            "name": "Radiolocation / Weather Radar",
+            "type": "navigation",
+            "start": 5350000000.0,
+            "end": 5470000000.0
+        },
+        {
+            "name": "Wi-Fi 5 GHz (U-NII-2C)",
+            "type": "utility",
+            "start": 5470000000.0,
+            "end": 5650000000.0
+        },
+        {
+            "name": "Amateur 6cm",
+            "type": "amateur",
+            "start": 5650000000.0,
+            "end": 5725000000.0
+        },
+        {
+            "name": "ISM 5.8 GHz / Wi-Fi",
+            "type": "utility",
+            "start": 5725000000.0,
+            "end": 5875000000.0
+        }
+    ]
+}

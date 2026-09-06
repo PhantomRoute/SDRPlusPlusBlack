@@ -28,7 +28,12 @@ decoder_modules/mystery_decoder
 decoder_modules/tetra_decoder
 qemu/
 
-/root
+# Only root/modules is build output - the DLLs get dropped in there at runtime.
+# root/res is source: band plans, themes, fonts, icons. Ignoring the whole of
+# root/ meant a new resource file was invisible to git status and to any normal
+# commit, which silently dropped a band plan from a release build.
+/root/modules/*
+!/root/modules/.gitkeep
 /related
 /go
 /android/.gradle
