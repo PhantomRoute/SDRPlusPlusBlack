@@ -96,12 +96,6 @@
             "end": 3155000.0
         },
         {
-            "name": "Fixed / Utility",
-            "type": "utility",
-            "start": 3155000.0,
-            "end": 3200000.0
-        },
-        {
             "name": "Shortwave Broadcast (90m)",
             "type": "broadcast",
             "start": 3200000.0,
@@ -138,12 +132,6 @@
             "end": 4438000.0
         },
         {
-            "name": "Fixed / Utility",
-            "type": "utility",
-            "start": 4438000.0,
-            "end": 4650000.0
-        },
-        {
             "name": "Aeronautical HF Voice",
             "type": "aviation",
             "start": 4650000.0,
@@ -168,34 +156,16 @@
             "end": 5060000.0
         },
         {
-            "name": "Fixed / Utility",
-            "type": "utility",
-            "start": 5060000.0,
-            "end": 5351500.0
-        },
-        {
             "name": "Amateur 60m",
             "type": "amateur",
             "start": 5351500.0,
             "end": 5366500.0
         },
         {
-            "name": "Fixed / Utility",
-            "type": "utility",
-            "start": 5366500.0,
-            "end": 5450000.0
-        },
-        {
             "name": "Aeronautical HF Voice",
             "type": "aviation",
             "start": 5450000.0,
             "end": 5730000.0
-        },
-        {
-            "name": "Fixed / Utility",
-            "type": "utility",
-            "start": 5730000.0,
-            "end": 5900000.0
         },
         {
             "name": "Shortwave Broadcast (49m)",
@@ -216,12 +186,6 @@
             "end": 6765000.0
         },
         {
-            "name": "Fixed / Utility",
-            "type": "utility",
-            "start": 6765000.0,
-            "end": 7000000.0
-        },
-        {
             "name": "Amateur 40m",
             "type": "amateur",
             "start": 7000000.0,
@@ -232,12 +196,6 @@
             "type": "broadcast",
             "start": 7200000.0,
             "end": 7450000.0
-        },
-        {
-            "name": "Fixed / Utility",
-            "type": "utility",
-            "start": 7450000.0,
-            "end": 8100000.0
         },
         {
             "name": "Maritime Mobile (HF)",
@@ -252,22 +210,10 @@
             "end": 9040000.0
         },
         {
-            "name": "Fixed / Utility",
-            "type": "utility",
-            "start": 9040000.0,
-            "end": 9400000.0
-        },
-        {
             "name": "Shortwave Broadcast (31m)",
             "type": "broadcast",
             "start": 9400000.0,
             "end": 9900000.0
-        },
-        {
-            "name": "Fixed / Utility",
-            "type": "utility",
-            "start": 9900000.0,
-            "end": 9995000.0
         },
         {
             "name": "Standard Frequency & Time (10 MHz)",
@@ -288,34 +234,16 @@
             "end": 10150000.0
         },
         {
-            "name": "Fixed / Utility",
-            "type": "utility",
-            "start": 10150000.0,
-            "end": 11175000.0
-        },
-        {
             "name": "Aeronautical HF Voice",
             "type": "aviation",
             "start": 11175000.0,
             "end": 11400000.0
         },
         {
-            "name": "Fixed / Utility",
-            "type": "utility",
-            "start": 11400000.0,
-            "end": 11600000.0
-        },
-        {
             "name": "Shortwave Broadcast (25m)",
             "type": "broadcast",
             "start": 11600000.0,
             "end": 12100000.0
-        },
-        {
-            "name": "Fixed / Utility",
-            "type": "utility",
-            "start": 12100000.0,
-            "end": 12230000.0
         },
         {
             "name": "Maritime Mobile (HF)",
@@ -342,22 +270,10 @@
             "end": 13870000.0
         },
         {
-            "name": "Fixed / Utility",
-            "type": "utility",
-            "start": 13870000.0,
-            "end": 14000000.0
-        },
-        {
             "name": "Amateur 20m",
             "type": "amateur",
             "start": 14000000.0,
             "end": 14350000.0
-        },
-        {
-            "name": "Fixed / Utility",
-            "type": "utility",
-            "start": 14350000.0,
-            "end": 14990000.0
         },
         {
             "name": "Standard Frequency & Time (15 MHz)",
@@ -378,22 +294,10 @@
             "end": 15800000.0
         },
         {
-            "name": "Fixed / Utility",
-            "type": "utility",
-            "start": 15800000.0,
-            "end": 16360000.0
-        },
-        {
             "name": "Maritime Mobile (HF)",
             "type": "marine",
             "start": 16360000.0,
             "end": 17410000.0
-        },
-        {
-            "name": "Fixed / Utility",
-            "type": "utility",
-            "start": 17410000.0,
-            "end": 17480000.0
         },
         {
             "name": "Shortwave Broadcast (16m)",
@@ -408,22 +312,10 @@
             "end": 17970000.0
         },
         {
-            "name": "Fixed / Utility",
-            "type": "utility",
-            "start": 17970000.0,
-            "end": 18068000.0
-        },
-        {
             "name": "Amateur 17m",
             "type": "amateur",
             "start": 18068000.0,
             "end": 18168000.0
-        },
-        {
-            "name": "Fixed / Utility",
-            "type": "utility",
-            "start": 18168000.0,
-            "end": 18780000.0
         },
         {
             "name": "Maritime Mobile (HF)",
@@ -438,34 +330,16 @@
             "end": 19020000.0
         },
         {
-            "name": "Fixed / Utility",
-            "type": "utility",
-            "start": 19020000.0,
-            "end": 19680000.0
-        },
-        {
             "name": "Maritime Mobile (HF)",
             "type": "marine",
             "start": 19680000.0,
             "end": 19800000.0
         },
         {
-            "name": "Fixed / Utility",
-            "type": "utility",
-            "start": 19800000.0,
-            "end": 19990000.0
-        },
-        {
             "name": "Standard Frequency & Time (20 MHz)",
             "type": "utility",
             "start": 19990000.0,
             "end": 20010000.0
-        },
-        {
-            "name": "Fixed / Utility",
-            "type": "utility",
-            "start": 20010000.0,
-            "end": 21000000.0
         },
         {
             "name": "Amateur 15m",
@@ -480,12 +354,6 @@
             "end": 21850000.0
         },
         {
-            "name": "Fixed / Utility",
-            "type": "utility",
-            "start": 21850000.0,
-            "end": 21924000.0
-        },
-        {
             "name": "Aeronautical HF Voice",
             "type": "aviation",
             "start": 21924000.0,
@@ -496,12 +364,6 @@
             "type": "marine",
             "start": 22000000.0,
             "end": 22855000.0
-        },
-        {
-            "name": "Fixed / Utility",
-            "type": "utility",
-            "start": 22855000.0,
-            "end": 24890000.0
         },
         {
             "name": "Amateur 12m",
@@ -516,22 +378,10 @@
             "end": 25010000.0
         },
         {
-            "name": "Fixed / Utility",
-            "type": "utility",
-            "start": 25010000.0,
-            "end": 25070000.0
-        },
-        {
             "name": "Maritime Mobile (HF)",
             "type": "marine",
             "start": 25070000.0,
             "end": 25210000.0
-        },
-        {
-            "name": "Fixed / Utility",
-            "type": "utility",
-            "start": 25210000.0,
-            "end": 25670000.0
         },
         {
             "name": "Shortwave Broadcast (11m)",
@@ -540,22 +390,10 @@
             "end": 26100000.0
         },
         {
-            "name": "Fixed / Utility",
-            "type": "utility",
-            "start": 26100000.0,
-            "end": 26965000.0
-        },
-        {
             "name": "Citizens Band (CB)",
             "type": "utility",
             "start": 26965000.0,
             "end": 27405000.0
-        },
-        {
-            "name": "Fixed / Utility",
-            "type": "utility",
-            "start": 27405000.0,
-            "end": 28000000.0
         },
         {
             "name": "Amateur 10m",
@@ -744,18 +582,6 @@
             "end": 399900000.0
         },
         {
-            "name": "Mobile-Satellite",
-            "type": "satellite",
-            "start": 399900000.0,
-            "end": 400050000.0
-        },
-        {
-            "name": "Standard Frequency & Time Satellite",
-            "type": "utility",
-            "start": 400050000.0,
-            "end": 400150000.0
-        },
-        {
             "name": "Radiosondes (Weather Balloons)",
             "type": "utility",
             "start": 400150000.0,
@@ -766,12 +592,6 @@
             "type": "utility",
             "start": 406000000.0,
             "end": 406100000.0
-        },
-        {
-            "name": "Fixed / Mobile",
-            "type": "utility",
-            "start": 406100000.0,
-            "end": 410000000.0
         },
         {
             "name": "Land Mobile / PMR",
@@ -900,12 +720,6 @@
             "end": 1427000000.0
         },
         {
-            "name": "Fixed / Mobile (L-band)",
-            "type": "utility",
-            "start": 1427000000.0,
-            "end": 1518000000.0
-        },
-        {
             "name": "Inmarsat Downlink",
             "type": "satellite",
             "start": 1518000000.0,
@@ -960,12 +774,6 @@
             "end": 1900000000.0
         },
         {
-            "name": "Fixed / Mobile",
-            "type": "utility",
-            "start": 1900000000.0,
-            "end": 1920000000.0
-        },
-        {
             "name": "UMTS / LTE 2100 Uplink",
             "type": "cellular",
             "start": 1920000000.0,
@@ -976,12 +784,6 @@
             "type": "satellite",
             "start": 1980000000.0,
             "end": 2010000000.0
-        },
-        {
-            "name": "Fixed / Mobile",
-            "type": "utility",
-            "start": 2010000000.0,
-            "end": 2110000000.0
         },
         {
             "name": "UMTS / LTE 2100 Downlink",
