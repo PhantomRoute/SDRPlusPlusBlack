@@ -1411,8 +1411,19 @@ void RadiosondeDecoderModule::drawTrack() {
         }
     }
     ImGui::SameLine();
-    ImGui::TextDisabled("- tropopause %s%s", atmo.measured ? "" : "~",
-                        fmtAltitude(atmo.tropopauseM).c_str());
+    // Not "- tropopause 14.00 km" after the layer name, which is what this said first.
+    // In the troposphere and the stratosphere it read as a second layer name stuck on
+    // the end of the first, and in the tropopause it read as the same word twice:
+    // "Tropopause - tropopause 14.00 km". The altitude belongs to the boundary either
+    // way, so name it that, and say something useful instead while actually crossing it.
+    if (layer == LAYER_TROPOPAUSE) {
+        ImGui::TextDisabled("- crossing it now, %s%s", atmo.measured ? "" : "~",
+                            fmtAltitude(atmo.tropopauseM).c_str());
+    }
+    else {
+        ImGui::TextDisabled("- boundary at %s%s", atmo.measured ? "" : "~",
+                            fmtAltitude(atmo.tropopauseM).c_str());
+    }
 
     if (haveBurst) {
         ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(descentCol), "Burst %s",
