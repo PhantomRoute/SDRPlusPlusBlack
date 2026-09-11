@@ -689,7 +689,8 @@ int sdrpp_main(int argc, char* argv[]) {
     defConfig["moduleInstances"]["Radio"] = "radio";
 
     defConfig["moduleInstances"]["Frequency Manager"] = "frequency_manager";
-    defConfig["moduleInstances"]["WebSDR View"] = "websdr_view";
+    defConfig["moduleInstances"]["WebSDR View"]["module"] = "websdr_view";
+    defConfig["moduleInstances"]["WebSDR View"]["enabled"] = false;
     defConfig["moduleInstances"]["Recorder"] = "recorder";
     defConfig["moduleInstances"]["Rigctl Server"] = "rigctl_server";
     defConfig["moduleInstances"]["Noise Reduction logmmse"]["module"] = "noise_reduction_logmmse";
@@ -697,7 +698,7 @@ int sdrpp_main(int argc, char* argv[]) {
     defConfig["moduleInstances"]["Signal ID"]["module"] = "signal_id";
     defConfig["moduleInstances"]["Signal ID"]["enabled"] = true;
     defConfig["moduleInstances"]["FT8/FT4 Decoder"]["module"] = "ft8_decoder";
-    defConfig["moduleInstances"]["FT8/FT4 Decoder"]["enabled"] = true;
+    defConfig["moduleInstances"]["FT8/FT4 Decoder"]["enabled"] = false;
     defConfig["moduleInstances"]["Radiosonde"]["module"] = "radiosonde_decoder";
     defConfig["moduleInstances"]["Radiosonde"]["enabled"] = false;
     defConfig["moduleInstances"]["VHF Digital Modes"]["module"] = "ch_extravhf_decoder";

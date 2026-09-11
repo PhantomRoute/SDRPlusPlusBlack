@@ -32,6 +32,10 @@ namespace style {
     // directly - one direct call and the switch only works in most of the program,
     // which is worse than not having it.
     void tooltip(const char* fmt, ...);
+    // Whether tooltip() and beginTooltip() will show anything: the user's setting, and
+    // never with Big controls on, where a tap would pop up the tooltip of whatever it
+    // pressed. HelpMarker's (?) answers to showTooltips alone - tapping one is asking.
+    bool tooltipsActive();
 
     // The same for the few that need more than a line of text - a separator, several
     // paragraphs, a colour. beginTooltip returns false when tooltips are off, and

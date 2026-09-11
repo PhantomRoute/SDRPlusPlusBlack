@@ -8,6 +8,7 @@
 #include "utils/wstr.h"
 #include "brown/imgui-notify/tahoma.h"
 #include "gui/brown/imgui-notify/imgui_notify.h"
+#include <gui/menus/display.h>
 
 namespace style {
     ImFont* notificationFont;
@@ -93,8 +94,16 @@ namespace style {
 
     bool showTooltips = true;
 
+    // Big controls means a touch screen, and there a tap leaves the pointer resting on
+    // whatever was tapped - so every button pressed also threw up its tooltip over the
+    // top of the thing it had just changed. showTooltips itself is left alone, so
+    // turning Big controls off brings them back the way the user had them.
+    bool tooltipsActive() {
+        return showTooltips && !displaymenu::phoneLayout;
+    }
+
     void tooltip(const char* fmt, ...) {
-        if (!showTooltips) { return; }
+        if (!tooltipsActive()) { return; }
         va_list args;
         va_start(args, fmt);
         ImGui::SetTooltipV(fmt, args);
@@ -102,7 +111,7 @@ namespace style {
     }
 
     bool beginTooltip() {
-        if (!showTooltips) { return false; }
+        if (!tooltipsActive()) { return false; }
         ImGui::BeginTooltip();
         return true;
     }

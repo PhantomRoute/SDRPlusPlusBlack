@@ -344,7 +344,7 @@ namespace displaymenu {
             core::configManager.conf["smallScreen"] = phoneLayout;
             core::configManager.release(true);
         }
-        ImGui::HelpMarker("Taller menu rows, fatter scrollbars and a shorter frequency readout,\nfor touch screens and small displays.");
+        ImGui::HelpMarker("Taller menu rows, fatter scrollbars and a shorter frequency readout,\nfor touch screens and small displays. Tooltips on controls are turned\noff, because a tap would open them; the (?) marks still work.");
 
         ImGui::LeftLabel("Layout");
         if (ImGui::RadioButton("Default ##_sdrpp", transcieverLayout == TRAL_NONE)) {
@@ -399,10 +399,16 @@ namespace displaymenu {
             core::configManager.conf["showTooltips"] = style::showTooltips;
             core::configManager.release(true);
         }
+        if (phoneLayout) {
+            // Big controls keeps control tooltips off whatever this says, and a tooltip
+            // here would pop up over the checkbox on every tap - the very thing it is
+            // off for. So say what is going on in the menu itself.
+            ImGui::TextDisabled("Big controls is on: only the (?) marks are shown.");
+        }
         // Its own explanation is the one that has to survive the switch being off, or
         // there is no way to find out what turned everything off - so it is drawn
         // directly rather than through the helper it controls.
-        if (ImGui::IsItemHovered()) {
+        else if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("The explanations that appear when you rest the pointer on a control,\n"
                               "and the (?) marks beside them. Worth leaving on until the program is\n"
                               "familiar; turning it off is for when they are in the way.");
