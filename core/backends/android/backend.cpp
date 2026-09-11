@@ -13,6 +13,7 @@
 #include <EGL/egl.h>
 #include <GLES3/gl3.h>
 #include <stdint.h>
+#include <cstdio>
 #include <gui/icons.h>
 #include <gui/style.h>
 #include <gui/menus/theme.h>
@@ -37,10 +38,40 @@ namespace backend {
     // Forward declaration
     int ShowSoftKeyboardInput();
     int PollUnicodeChars();
+    std::string callStringGetter(const std::string &methodName);
+
+    // Density, font scale and screen width from MainActivity, for the Auto interface size.
+    void readDisplayMetrics() {
+        try {
+            float density = 0.0f, fontScale = 0.0f;
+            int widthPx = 0;
+            std::string metrics = callStringGetter("getDisplayMetricsStr");
+            if (sscanf(metrics.c_str(), "%f %f %d", &density, &fontScale, &widthPx) != 3) {
+                flog::warn("Could not read display metrics from '{0}'", metrics);
+                return;
+            }
+            if (density > 0.0f) { displaymenu::displayDensity = density; }
+            if (fontScale > 0.0f) { displaymenu::fontScale = fontScale; }
+            if (widthPx > 0) { displaymenu::screenWidthPx = widthPx; }
+            flog::info("Display density {0}, font scale {1}, width {2} px: Auto interface size {3}",
+                       displaymenu::displayDensity, displaymenu::fontScale, displaymenu::screenWidthPx, displaymenu::autoUiScale());
+        }
+        catch (const std::exception& e) {
+            flog::warn("Could not read display metrics: {0}", e.what());
+        }
+    }
 
     void doPartialInit() {
         std::string root = std::string(core::getRoot());
         backend::init();
+        // Changing Android's display size or font size recreates the activity, which
+        // lands here. An Auto scale has to be worked out again before the fonts are
+        // rebuilt, or it keeps the size from before the change.
+        readDisplayMetrics();
+        core::configManager.acquire();
+        float configuredScale = core::configManager.conf["uiScale"];
+        core::configManager.release();
+        style::uiScale = displaymenu::resolveUiScale(configuredScale);
         style::loadFonts(root + "/res"); // TODO: Don't hardcode, use config
         icons::load(root + "/res");
         // false: a re-init after the activity was recreated, not the user picking a
@@ -626,11 +657,7 @@ extern "C" {
         char* cacheDirPath = new char[cacheDir.size() + 1];
         strcpy(cacheDirPath, cacheDir.c_str());
 
-        float displayDensity = atof(backend::getDisplayDensityStr().c_str());
-        flog::info("Display density: %f", displayDensity);
-        if (displayDensity != 0.0f) {
-            displaymenu::displayDensity = displayDensity;
-        }
+        backend::readDisplayMetrics();
 
         char* dummy[] = { "", "-r", rootpath, "-x", cacheDirPath };
         sdrpp_main(5, dummy);

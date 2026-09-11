@@ -20,8 +20,18 @@ namespace displaymenu {
     std::string getColorMapName();
     bool setColorMapByName(const std::string& name);
     extern bool phoneLayout;
+    // uiScale in the config is either a fixed scale or UI_SCALE_AUTO, which asks for one
+    // worked out from the device on every start. resolveUiScale turns either into the
+    // number to draw with.
+    static const float UI_SCALE_AUTO = 0.0f;
+    float autoUiScale();
+    float resolveUiScale(float configured);
 #ifdef __ANDROID__
+    // Filled in by the Android backend before sdrpp_main runs, and again whenever the
+    // activity is recreated.
     extern float displayDensity;
+    extern float fontScale;
+    extern int screenWidthPx;
 #endif
     extern Event<ImGuiContext *> onDisplayDraw;
     extern bool showBattery;

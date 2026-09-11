@@ -47,7 +47,35 @@ namespace displaymenu {
 
 #ifdef __ANDROID__
     float displayDensity = 1.0;  // 1.0 = 160 dpi. 3.5 = kinda high dpi etc. Coincides with good default scale
+    float fontScale = 1.0f;      // Android's font size setting; 1.0 is the default
+    int screenWidthPx = 0;       // the long side, since the app runs in landscape
+
+    // Fewest unscaled pixels Auto will leave across the screen. A judgement, not a
+    // measurement: enough that big text on a small phone doesn't push the layout off
+    // the edge, low enough that a raised font size still does something on a phone.
+    static const float MIN_AUTO_LAYOUT_WIDTH = 640.0f;
 #endif
+
+    float autoUiScale() {
+#ifdef __ANDROID__
+        // Android's density is 1.0 at 160 dpi, which is the size ImGui's 16 px font was
+        // drawn for, and it already includes the user's "display size" setting.
+        // fontScale is their "font size" setting - the one people raise when they
+        // can't read the screen. ImGui can't grow the text on its own, so it grows
+        // everything.
+        float scale = displayDensity * fontScale;
+        if (screenWidthPx > 0) {
+            scale = std::min(scale, screenWidthPx / MIN_AUTO_LAYOUT_WIDTH);
+        }
+        return std::clamp(scale, 0.5f, 8.0f);
+#else
+        return 1.0f;
+#endif
+    }
+
+    float resolveUiScale(float configured) {
+        return (configured == UI_SCALE_AUTO) ? autoUiScale() : configured;
+    }
     bool snrSmoothing = false;
     int snrSmoothingSpeed = 20;
 
@@ -197,42 +225,42 @@ namespace displaymenu {
         // Define and load UI scales
 
         std::vector<float> scales = {0.25f, 0.5f, 0.66f, 0.75f, 0.9f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f, 2.5f, 3.0f, 4.0f};
-        bool hasNativeScale = false;
 #ifdef __ANDROID__
-        for (int i = 0; i < scales.size(); i++) {
-            float scale = scales[i];
-            if (scale == displayDensity) {
-                hasNativeScale = true;
-            }
-        }
-        if (!hasNativeScale) {
-            uiScales.define(displayDensity, std::to_string((int)(displayDensity * 100)) + "% (native)", displayDensity);
-        }
+        // Auto replaces the "(native)" entry that used to hold the density. That was
+        // the same number, but saved on the first start and never looked at again.
+        uiScales.define(UI_SCALE_AUTO, "Auto (" + std::to_string((int)roundf(autoUiScale() * 100)) + "%)", UI_SCALE_AUTO);
 #endif
         for (int i = 0; i < scales.size(); i++) {
             float scale = scales[i];
             uiScales.define(scale, std::to_string((int)(scale * 100)) + "%", scale);
         }
 
-        // style::uiScale comes straight out of the config with no validation, so it need
-        // not be one of the scales offered above. A hand edit will do it, and so will a
-        // config carried over from Android, where the device's native density is defined
-        // into this list and on the desktop is not. valueId() throws on a value it cannot
-        // find, and nothing here catches it: the program died in the middle of startup
-        // with no window and nothing in the log after the colormaps to say why.
-        if (!(style::uiScale >= 0.1f && style::uiScale <= 8.0f)) {
-            flog::warn("uiScale of {0} is out of range, using 1.0", style::uiScale);
-            style::uiScale = 1.0f;
+        float configuredScale = core::configManager.conf["uiScale"];
+        if (configuredScale == UI_SCALE_AUTO && uiScales.valueExists(UI_SCALE_AUTO)) {
+            // style::uiScale already holds what Auto worked out, which is rarely one
+            // of the fixed steps - it must not be snapped to one below.
+            uiScaleId = uiScales.valueId(UI_SCALE_AUTO);
         }
-        if (!uiScales.valueExists(style::uiScale)) {
-            int nearest = 0;
-            for (int i = 1; i < uiScales.size(); i++) {
-                if (fabsf(uiScales.value(i) - style::uiScale) < fabsf(uiScales.value(nearest) - style::uiScale)) { nearest = i; }
+        else {
+            // style::uiScale comes straight out of the config with no validation, so it
+            // need not be one of the scales offered above - a hand edit will do it.
+            // valueId() throws on a value it cannot find, and nothing here catches it:
+            // the program died in the middle of startup with no window and nothing in
+            // the log after the colormaps to say why.
+            if (!(style::uiScale >= 0.1f && style::uiScale <= 8.0f)) {
+                flog::warn("uiScale of {0} is out of range, using 1.0", style::uiScale);
+                style::uiScale = 1.0f;
             }
-            flog::warn("uiScale of {0} is not one of the offered scales, using {1}", style::uiScale, uiScales.value(nearest));
-            style::uiScale = uiScales.value(nearest);
+            if (!uiScales.valueExists(style::uiScale)) {
+                int nearest = 0;
+                for (int i = 1; i < uiScales.size(); i++) {
+                    if (fabsf(uiScales.value(i) - style::uiScale) < fabsf(uiScales.value(nearest) - style::uiScale)) { nearest = i; }
+                }
+                flog::warn("uiScale of {0} is not one of the offered scales, using {1}", style::uiScale, uiScales.value(nearest));
+                style::uiScale = uiScales.value(nearest);
+            }
+            uiScaleId = uiScales.valueId(style::uiScale);
         }
-        uiScaleId = uiScales.valueId(style::uiScale);
     }
 
     void setWaterfallShown(bool shown) {
@@ -403,6 +431,11 @@ namespace displaymenu {
             core::configManager.release(true);
             restartRequired = true;
         }
+#ifdef __ANDROID__
+        ImGui::HelpMarker("Auto follows this device's screen density and Android's font size\n"
+                          "setting, and is worked out again on every start. Pick a percentage\n"
+                          "to fix the size instead.");
+#endif
 
         ImGui::SectionHeader("SPECTRUM");
 

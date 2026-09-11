@@ -589,6 +589,14 @@ class MainActivity : NativeActivity(), SensorEventListener {
         return this.density.toString();
     }
 
+    // "density fontScale widthPx" for the Auto interface size. Read fresh on each call
+    // so a changed display size or font size is picked up. Width is the long side: the
+    // activity is forced to landscape but may not have turned yet when this is asked.
+    fun getDisplayMetricsStr(): String {
+        val dm = resources.displayMetrics
+        return "${dm.density} ${resources.configuration.fontScale} ${maxOf(dm.widthPixels, dm.heightPixels)}"
+    }
+
 
     public override fun onResume() {
         // Hide bars again

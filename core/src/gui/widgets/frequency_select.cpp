@@ -22,8 +22,11 @@ bool isInArea(ImVec2 val, ImVec2 min, ImVec2 max) {
 FrequencySelect::FrequencySelect() {
 }
 
+// The phone layout drops digits to save width. It was 9, which topped out at
+// 999.999.999 Hz - anything on 23 cm or above could not be shown or tuned. 10 reaches
+// 9.999 GHz, past the top of every common SDR.
 static int getNumberOfDigits() {
-    return displaymenu::phoneLayout ? 9 : 12;
+    return displaymenu::phoneLayout ? 10 : 12;
 }
 
 void FrequencySelect::init() {
@@ -55,6 +58,18 @@ void FrequencySelect::incrementDigit(int i) {
     if (i < 0) {
         return;
     }
+    // If this digit and every one above it is a 9, the carry has nowhere to go and
+    // the readout wrapped to zero: one step up from 999.999.999 landed on 0 Hz.
+    // Stay put instead, the way decrementDigit refuses to go below zero.
+    bool carryOverflows = true;
+    for (int j = 0; j <= i; j++) {
+        if (digits[j] != 9) {
+            carryOverflows = false;
+            break;
+        }
+    }
+    if (carryOverflows) { return; }
+
     if (digits[i] < 9) {
         digits[i]++;
     }
@@ -108,6 +123,15 @@ void FrequencySelect::draw() {
     ImVec2 digitSz = ImGui::CalcTextSize("0");
     ImVec2 commaSz = ImGui::CalcTextSize(".");
     widgetPos.y = window->Pos.y + cursorPos.y - ((digitSz.y / 2.0f) - ceilf(15 * style::uiScale) - 5);
+
+    // Toggling the phone layout changes the digit count, and the digits are stored by
+    // position, so 145 MHz laid out in 12 digits read back as 145 kHz in 9. Split the
+    // frequency out again, and lay out hit boxes for the new count.
+    if (shownDigits != getNumberOfDigits()) {
+        shownDigits = getNumberOfDigits();
+        setFrequency(frequency);
+        lastWidgetPos = ImVec2(-1, -1);
+    }
 
     if (widgetPos.x != lastWidgetPos.x || widgetPos.y != lastWidgetPos.y) {
         lastWidgetPos = widgetPos;
@@ -226,7 +250,7 @@ void FrequencySelect::draw() {
         }
         digitHovered = hovered;
 
-        if (isInArea(mousePos, digitTopMins[0], digitBottomMaxs[11])) {
+        if (isInArea(mousePos, digitTopMins[0], digitBottomMaxs[getNumberOfDigits() - 1])) {
             bool shortcutKey = io.ConfigMacOSXBehaviors ? (io.KeyMods == ImGuiKeyModFlags_Super) : (io.KeyMods == ImGuiKeyModFlags_Ctrl);
             bool ctrlOnly = (io.KeyMods == ImGuiKeyModFlags_Ctrl);
             bool shiftOnly = (io.KeyMods == ImGuiKeyModFlags_Shift);

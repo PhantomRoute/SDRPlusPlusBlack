@@ -27,6 +27,7 @@ private:
 
     ImVec2 widgetPos;
     ImVec2 lastWidgetPos;
+    int shownDigits = 0;
 
     int digits[12];
     ImVec2 digitBottomMins[12];

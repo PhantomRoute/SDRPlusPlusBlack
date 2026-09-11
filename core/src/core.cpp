@@ -712,7 +712,7 @@ int sdrpp_main(int argc, char* argv[]) {
 
     // Themes
 #ifdef __ANDROID__
-    defConfig["uiScale"] = displaymenu::displayDensity;
+    defConfig["uiScale"] = displaymenu::UI_SCALE_AUTO;
 #else
     defConfig["uiScale"] = 1.0f;
 #endif
@@ -858,7 +858,21 @@ int sdrpp_main(int argc, char* argv[]) {
     }
 
     // Load UI scaling
-    style::uiScale = core::configManager.conf["uiScale"];
+#ifdef __ANDROID__
+    // Before Auto existed the first start saved the density here, and nothing looked at
+    // the device again: changing Android's display size or font size did nothing. A
+    // value still exactly equal to the density is that snapshot, not a choice, so it
+    // goes back to Auto.
+    if (core::configManager.conf["uiScale"].is_number()) {
+        float stored = core::configManager.conf["uiScale"].get<float>();
+        float diff = stored - displaymenu::displayDensity;
+        if (stored != displaymenu::UI_SCALE_AUTO && diff > -0.001f && diff < 0.001f) {
+            flog::info("uiScale {0} is the saved device density, switching it to Auto", stored);
+            core::configManager.conf["uiScale"] = displaymenu::UI_SCALE_AUTO;
+        }
+    }
+#endif
+    style::uiScale = displaymenu::resolveUiScale(core::configManager.conf["uiScale"]);
 
     core::configManager.release(true);
 
