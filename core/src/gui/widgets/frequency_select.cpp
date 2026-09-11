@@ -29,6 +29,14 @@ static int getNumberOfDigits() {
     return displaymenu::phoneLayout ? 10 : 12;
 }
 
+// Whether a dot follows digit i. Counted from the right, because that is where the
+// Hz, kHz and MHz boundaries are. Counting from the left only lined up while the
+// digit count was a multiple of three: with 10 digits, 183 MHz read 018.300.000.0.
+static bool separatorAfter(int i) {
+    int n = getNumberOfDigits();
+    return i < n - 1 && (n - 1 - i) % 3 == 0;
+}
+
 void FrequencySelect::init() {
     for (int i = 0; i < getNumberOfDigits(); i++) {
         digits[i] = 0;
@@ -48,7 +56,7 @@ void FrequencySelect::onPosChange() {
         digitTopMaxs[i] = ImVec2(widgetPos.x + (i * digitWidth) + commaOffset + digitWidth, widgetPos.y + (digitHeight / 2));
         digitBottomMaxs[i] = ImVec2(widgetPos.x + (i * digitWidth) + commaOffset + digitWidth, widgetPos.y + digitHeight);
 
-        if ((i + 1) % 3 == 0 && i < (getNumberOfDigits()-1)) {
+        if (separatorAfter(i)) {
             commaOffset += commaSz.x;
         }
     }
@@ -156,7 +164,7 @@ void FrequencySelect::draw() {
         snprintf(buf, sizeof buf, "%d", digits[i]);
         window->DrawList->AddText(ImVec2(widgetPos.x + (i * digitWidth) + commaOffset, widgetPos.y),
                                   zeros ? disabledColor : textColor, buf);
-        if ((i + 1) % 3 == 0 && i < getNumberOfDigits()-1) {
+        if (separatorAfter(i)) {
             commaOffset += commaSz.x;
             window->DrawList->AddText(ImVec2(widgetPos.x + (i * digitWidth) + commaOffset + textOffset, widgetPos.y),
                                       zeros ? disabledColor : textColor, ".");

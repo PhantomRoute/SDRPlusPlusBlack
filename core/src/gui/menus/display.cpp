@@ -50,10 +50,12 @@ namespace displaymenu {
     float fontScale = 1.0f;      // Android's font size setting; 1.0 is the default
     int screenWidthPx = 0;       // the long side, since the app runs in landscape
 
-    // Fewest unscaled pixels Auto will leave across the screen. A judgement, not a
-    // measurement: enough that big text on a small phone doesn't push the layout off
-    // the edge, low enough that a raised font size still does something on a phone.
-    static const float MIN_AUTO_LAYOUT_WIDTH = 640.0f;
+    // Fewest unscaled pixels Auto will leave across the screen: the width of the top
+    // bar, which is the widest thing that can't wrap. Measured with the phone layout at
+    // 100%, it needs 833 px to leave the SNR meter its 100 px minimum; everything in it
+    // scales with uiScale, so that holds at any scale. The rest is margin. 640 was a
+    // guess, and at 300% on a phone it pushed the SNR meter off the right-hand edge.
+    static const float MIN_AUTO_LAYOUT_WIDTH = 860.0f;
 #endif
 
     float autoUiScale() {
