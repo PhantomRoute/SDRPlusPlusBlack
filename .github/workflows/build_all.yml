@@ -591,42 +591,6 @@ jobs:
 
 
 
-    build_debian_bullseye_amd64:
-        if: ${{ !contains(github.ref_name, 'windows') && !contains(github.ref_name, 'macos') }}
-        runs-on: ubuntu-latest
-
-        steps:
-        - uses: actions/checkout@v4
-
-        - name: Create Docker Image
-          run: cd $GITHUB_WORKSPACE/docker_builds/debian_bullseye && docker build . --tag sdrpp_build
-
-        - name: Run Container
-          run: docker run --name build -v $GITHUB_WORKSPACE:/root/SDRPlusPlus --env BUILD_NO="-$GITHUB_RUN_NUMBER" sdrpp_build /root/do_build.sh
-
-        - name: Recover Deb Archive
-          working-directory: ${{runner.workspace}}
-          run: docker cp build:/root/SDRPlusPlus/sdrpp_debian_amd64.deb ./sdrpp_debian_bullseye_amd64.deb
-
-        - name: Save Deb Archive
-          uses: actions/upload-artifact@v4
-          with:
-              name: sdrpp_debian_bullseye_amd64
-              path: ${{runner.workspace}}/sdrpp_debian_bullseye_amd64.deb
-
-        - name: Update Nightly
-          if: github.ref == 'refs/heads/master'
-          # A dozen of these jobs clobber the same release within a couple of
-          # minutes of each other, and the tag lookup occasionally 404s under
-          # that - reported by gh as a bare "release not found". One retry.
-          run: |
-            gh release upload rolling ${{runner.workspace}}/sdrpp_debian_bullseye_amd64.deb -R ${{github.repository}} --clobber || {
-              echo "upload failed, retrying once in 15s"
-              sleep 15
-              gh release upload rolling ${{runner.workspace}}/sdrpp_debian_bullseye_amd64.deb -R ${{github.repository}} --clobber
-            }
-
-
     build_debian_bookworm:
         if: ${{ !contains(github.ref_name, 'windows') && !contains(github.ref_name, 'macos') }}
         runs-on: ubuntu-latest
@@ -869,76 +833,6 @@ jobs:
               echo "upload failed, retrying once in 15s"
               sleep 15
               gh release upload rolling ${{runner.workspace}}/sdrpp_debian_sid_aarch64.deb -R ${{github.repository}} --clobber
-            }
-
-    build_ubuntu_focal_amd64:
-        if: ${{ !contains(github.ref_name, 'windows') && !contains(github.ref_name, 'macos') }}
-        runs-on: ubuntu-latest
-
-        steps:
-        - uses: actions/checkout@v4
-        
-        - name: Create Docker Image
-          run: cd $GITHUB_WORKSPACE/docker_builds/ubuntu_focal && docker build . --tag sdrpp_build
-
-        - name: Run Container
-          run: docker run --name build -v $GITHUB_WORKSPACE:/root/SDRPlusPlus --env BUILD_NO="-$GITHUB_RUN_NUMBER" sdrpp_build /root/do_build.sh
-
-        - name: Recover Deb Archive
-          working-directory: ${{runner.workspace}}
-          run: docker cp build:/root/SDRPlusPlus/sdrpp_debian_amd64.deb ./sdrpp_ubuntu_focal_amd64.deb
-
-        - name: Save Deb Archive
-          uses: actions/upload-artifact@v4
-          with:
-              name: sdrpp_ubuntu_focal_amd64
-              path: ${{runner.workspace}}/sdrpp_ubuntu_focal_amd64.deb
-
-        - name: Update Nightly
-          if: github.ref == 'refs/heads/master'
-          # A dozen of these jobs clobber the same release within a couple of
-          # minutes of each other, and the tag lookup occasionally 404s under
-          # that - reported by gh as a bare "release not found". One retry.
-          run: |
-            gh release upload rolling ${{runner.workspace}}/sdrpp_ubuntu_focal_amd64.deb -R ${{github.repository}} --clobber || {
-              echo "upload failed, retrying once in 15s"
-              sleep 15
-              gh release upload rolling ${{runner.workspace}}/sdrpp_ubuntu_focal_amd64.deb -R ${{github.repository}} --clobber
-            }
-
-    build_ubuntu_focal_aarch64:
-        if: ${{ !contains(github.ref_name, 'windows') && !contains(github.ref_name, 'macos') }}
-        runs-on: ubuntu-24.04-arm
-
-        steps:
-        - uses: actions/checkout@v4
-        
-        - name: Create Docker Image
-          run: cd $GITHUB_WORKSPACE/docker_builds/ubuntu_focal && docker build . --tag sdrpp_build
-
-        - name: Run Container
-          run: docker run --name build -v $GITHUB_WORKSPACE:/root/SDRPlusPlus --env BUILD_NO="-$GITHUB_RUN_NUMBER" sdrpp_build /root/do_build.sh
-
-        - name: Recover Deb Archive
-          working-directory: ${{runner.workspace}}
-          run: docker cp build:/root/SDRPlusPlus/sdrpp_debian_amd64.deb ./sdrpp_ubuntu_focal_aarch64.deb
-
-        - name: Save Deb Archive
-          uses: actions/upload-artifact@v4
-          with:
-              name: sdrpp_ubuntu_focal_aarch64
-              path: ${{runner.workspace}}/sdrpp_ubuntu_focal_aarch64.deb
-
-        - name: Update Nightly
-          if: github.ref == 'refs/heads/master'
-          # A dozen of these jobs clobber the same release within a couple of
-          # minutes of each other, and the tag lookup occasionally 404s under
-          # that - reported by gh as a bare "release not found". One retry.
-          run: |
-            gh release upload rolling ${{runner.workspace}}/sdrpp_ubuntu_focal_aarch64.deb -R ${{github.repository}} --clobber || {
-              echo "upload failed, retrying once in 15s"
-              sleep 15
-              gh release upload rolling ${{runner.workspace}}/sdrpp_ubuntu_focal_aarch64.deb -R ${{github.repository}} --clobber
             }
 
     build_ubuntu_noble:
