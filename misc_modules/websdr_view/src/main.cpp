@@ -277,7 +277,10 @@ public:
 
     std::vector<std::shared_ptr<SingleReceiver>> receivers;
     int receiveDuration = 15;
-    bool visible = true;
+    // Off until asked for: this puts a panel along the bottom of the window, which is
+    // not something to hand someone who has never opened this module. Anyone who
+    // turns it on has it remembered.
+    bool visible = false;
 
 private:
     void menuHandler() {

@@ -40,21 +40,23 @@ namespace demod {
         void showMenu() override {
             float menuWidth = ImGui::GetContentRegionAvail().x;
             ImGui::LeftLabel("AGC Attack");
-            ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());
-            if (ImGui::SliderFloat(("##_radio_lsb_agc_attack_" + name).c_str(), &agcAttack, 1.0f, 200.0f)) {
+            ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX() - (32.0f * style::uiScale));
+            if (agcTimeSlider("##_radio_lsb_agc_attack_" + name, agcAttack, 5.0f, 1000.0f)) {
                 demod.setAGCAttack(agcAttack / getIFSampleRate());
                 _config->acquire();
                 _config->conf[name][getName()]["agcAttack"] = agcAttack;
                 _config->release(true);
             }
+            ImGui::HelpMarker("How fast the gain comes down when a signal gets louder. Short keeps sudden peaks in check.");
             ImGui::LeftLabel("AGC Decay");
-            ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());
-            if (ImGui::SliderFloat(("##_radio_lsb_agc_decay_" + name).c_str(), &agcDecay, 0.1f, 20.0f)) {
+            ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX() - (32.0f * style::uiScale));
+            if (agcTimeSlider("##_radio_lsb_agc_decay_" + name, agcDecay, 50.0f, 10000.0f)) {
                 demod.setAGCDecay(agcDecay / getIFSampleRate());
                 _config->acquire();
                 _config->conf[name][getName()]["agcDecay"] = agcDecay;
                 _config->release(true);
             }
+            ImGui::HelpMarker("How fast the gain comes back up in the gaps. Long stops the noise being pumped up between words; never faster than the attack.");
         }
 
         void setBandwidth(double bandwidth) override { demod.setBandwidth(bandwidth); }

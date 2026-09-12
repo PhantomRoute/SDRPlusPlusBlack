@@ -19,7 +19,7 @@ namespace dsp::demod {
             _samplerate = samplerate;
             
             xlator.init(NULL, tone, samplerate);
-            agc.init(NULL, 1.0, agcAttack, agcDecay, 10e6, 10.0, INFINITY);
+            agc.init(NULL, 1.0, agcAttack, agcDecay, 10e6, loop::AUDIO_AGC_CEILING, INFINITY);
 
             if constexpr (std::is_same_v<T, float>) {
                 agc.out.free();

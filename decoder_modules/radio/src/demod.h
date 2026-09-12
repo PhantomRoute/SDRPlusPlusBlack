@@ -5,7 +5,25 @@
 #include <config.h>
 #include <utils/event.h>
 #include <gui/style.h>
+#include <algorithm>
+#include <string>
 
+
+// The AGC is set by a rate: its coefficient is rate / sample rate, which is a one pole
+// time constant of 1/rate seconds. As a number on a slider that means nothing to a
+// listener, and the same number lands on a different time in each mode because the IF
+// sample rates differ - 50 is 20 ms in AM but not in CW. So the slider works in
+// milliseconds and converts. The config still holds the rate, so settings saved before
+// this still load, and the DSP call is unchanged.
+inline bool agcTimeSlider(const std::string& id, float& rate, float minMs, float maxMs) {
+    float ms = (rate > 0.0f) ? (1000.0f / rate) : maxMs;
+    ms = std::clamp(ms, minMs, maxMs);
+    if (ImGui::SliderFloat(id.c_str(), &ms, minMs, maxMs, "%.0f ms", ImGuiSliderFlags_Logarithmic)) {
+        rate = 1000.0f / std::clamp(ms, minMs, maxMs);
+        return true;
+    }
+    return false;
+}
 
 enum DeemphasisMode {
     DEEMP_MODE_22US,

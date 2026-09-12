@@ -4,6 +4,13 @@
 #include <cmath>
 
 namespace dsp::loop {
+    // Ceiling the look-ahead limiter holds audio AGC output to, as a multiple of the
+    // 1.0 set point. A little above it, so ordinary peaks pass untouched and only a
+    // gain that wound up during a pause gets pulled back. The demodulators passed
+    // 10.0, so far above the set point that the limiter could not engage until the
+    // audio was already ten times too loud.
+    inline constexpr float AUDIO_AGC_CEILING = 1.5f;
+
     template <class T>
     class AGC : public Processor<T, T> {
         using base_type = Processor<T, T>;
@@ -137,8 +144,17 @@ namespace dsp::loop {
                     gain = 1.0f;
                 }
 
-                // If clipping is detected look ahead and correct
-                if (false && inAmp*gain > _maxOutputAmp) {
+                // If the gain wound up while the signal was quiet, the moment it comes
+                // back the output would be far above the set point until the loop
+                // catches up - heard as a blast at the start of every over. Look ahead
+                // at the rest of the buffer and take the gain straight down to what its
+                // loudest sample needs.
+                //
+                // This was disabled in 2022 (a5c544cd, "removed forced gain guard"),
+                // which is what let AM and SSB overshoot the set point by 12-26x after
+                // a pause. Measured on speech-shaped audio, re-enabling it with the
+                // output ceilings below holds the peak at 1.1-1.4x instead.
+                if (inAmp*gain > _maxOutputAmp) {
                     float maxAmp = 0;
                     for (int j = i; j < count; j++) {
                         if constexpr (std::is_same_v<T, complex_t>) {
