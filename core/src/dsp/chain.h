@@ -162,11 +162,26 @@ namespace dsp {
         stream<T>* out;
 
     private:
+        // The enabled block immediately before this one, which is what a block being
+        // enabled must read from.
+        //
+        // This used to return the FIRST enabled block in the chain instead of the
+        // nearest one behind, so in any chain of three or more the block switched on
+        // last was wired straight to the front of the chain and everything between was
+        // silently cut out of the path - still flagged enabled, still shown in the
+        // menu, no longer doing anything. The radio's audio chain is resampler ->
+        // de-emphasis -> tone detector, plus whatever blocks other modules insert, so
+        // whether de-emphasis was actually in the path came down to the order things
+        // happened to be enabled in at startup. That is the "de-emphasis reads 50us
+        // after a restart but sounds like None, until you change it by hand" bug: on a
+        // fresh start the noise reduction block was enabled last and took its input
+        // from the resampler; changing the setting re-enabled de-emphasis, which put
+        // it back in front of the noise reduction.
         Processor<T, T>* blockBefore(Processor<T, T>* block) {
-            // TODO: This is wrong and must be fixed when I get more time
+            Processor<T, T>* last = NULL;
             for (auto& ln : links) {
-                if (ln == block) { return NULL; }
-                if (states[ln]) { return ln; }
+                if (ln == block) { return last; }
+                if (states[ln]) { last = ln; }
             }
             return NULL;
         }

@@ -1,5 +1,7 @@
 #pragma once
 #include "../processor.h"
+#include <algorithm>
+#include <cmath>
 
 namespace dsp::loop {
     template <class T>
@@ -21,7 +23,7 @@ namespace dsp::loop {
             _initGain = initGain;
             _startEnvelope = 0;
             _frozen.store(false);
-            amp = _setPoint / _initGain;
+            amp = startingAmp();
             base_type::init(in);
         }
 
@@ -74,12 +76,23 @@ namespace dsp::loop {
         void reset() {
             assert(base_type::_block_init);
             std::lock_guard<std::recursive_mutex> lck(base_type::ctrlMtx);
-            amp = _setPoint / _initGain;
+            amp = startingAmp();
             _startEnvelope  =0;
         }
 
         void setFrozen(bool b) {
             _frozen.store(b);
+        }
+
+        // Where the tracked amplitude starts, which decides the gain of the first
+        // samples. The demodulators pass an initial gain of INFINITY, which put this at
+        // zero and so started every reset - and every demodulator or AGC mode change -
+        // at the maximum gain, a full _maxGain blast of amplified noise before the loop
+        // pulled it back. Starting at the set point means starting at unity gain and
+        // adapting from there.
+        float startingAmp() const {
+            if (!(_initGain > 0.0f) || !std::isfinite(_initGain)) { return _setPoint; }
+            return _setPoint / _initGain;
         }
 
         inline int process(int count, T* in, T* out) {
@@ -88,6 +101,18 @@ namespace dsp::loop {
                 std::copy(in, in + count, out);
                 return count;
             }
+            // The release must never outrun the attack. Gain rises while the signal is
+            // quiet and comes back down when it returns, so a decay faster than the
+            // attack winds the gain up between words and then cannot pull it back:
+            // the audio comes back far too loud and stays there. The two are set by
+            // separate sliders - AM's attack runs 1..200 and its decay 1..20, both
+            // divided by the sample rate - so the low end of the attack slider put the
+            // loop into exactly that state, which is the "moving the attack slider
+            // makes it get louder and louder" bug. Held here rather than in the
+            // setters so the values the user chose are still what the menu shows.
+            const float decay = std::min<float>(_decay, _attack);
+            const float invDecay = 1.0f - decay;
+
             for (int i = 0; i < count; i++) {
                 // Get signal amplitude
                 float inAmp, gain = 1.0;
@@ -101,7 +126,7 @@ namespace dsp::loop {
                 // Update average amplitude
                 if (inAmp != 0.0f) {
                     if (!_frozen.load()) {
-                        auto namp = (inAmp > amp) ? ((amp * _invAttack) + (inAmp * _attack)) : ((amp * _invDecay) + (inAmp * _decay));
+                        auto namp = (inAmp > amp) ? ((amp * _invAttack) + (inAmp * _attack)) : ((amp * invDecay) + (inAmp * decay));
                         if (!isnan(namp)) {
                             amp = namp;
                             gain = std::min<float>(_setPoint / amp, _maxGain);
