@@ -80,6 +80,16 @@ namespace dsp::demod {
             audioAgc.setDecay(decay);
         }
 
+        // Hold time before the gain is allowed to rise after the signal drops, in
+        // samples at this demodulator's rate. Applied to both AGCs so it does not
+        // matter which mode is in use.
+        void setAGCHang(int samples) {
+            assert(base_type::_block_init);
+            std::lock_guard<std::recursive_mutex> lck(base_type::ctrlMtx);
+            carrierAgc.setHang(samples);
+            audioAgc.setHang(samples);
+        }
+
         void setDCBlockRate(double rate) {
             assert(base_type::_block_init);
             std::lock_guard<std::recursive_mutex> lck(base_type::ctrlMtx);

@@ -1,5 +1,6 @@
 
 #include <gui/menus/display.h>
+#include <gui/widgets/snr_chart.h>
 #include <imgui.h>
 #include <gui/gui.h>
 #include <core.h>
@@ -135,6 +136,8 @@ namespace displaymenu {
     }
 
     void init() {
+        snrchart::init();
+
         if (core::configManager.conf.contains("showFFT")) {
             showFFT = core::configManager.conf["showFFT"];
         }
@@ -321,9 +324,9 @@ namespace displaymenu {
     }
 
     // This menu is one long list of switches with nothing to say which of them
-    // belong together. The headers break it into the four things it actually covers:
-    // the window layout, what the spectrum looks like, what it costs to run, and
-    // what the keyboard and mouse do.
+    // belong together. The headers break it into the things it actually covers: the
+    // window layout, the panels along the bottom, what the spectrum looks like, what
+    // it costs to run, and what the keyboard and mouse do.
     void draw(void* ctx) {
         ImGui::SectionHeader("LAYOUT");
 
@@ -369,30 +372,6 @@ namespace displaymenu {
         }
         ImGui::HelpMarker("Stops the sections of this menu being dragged into a different order.");
 
-        {
-            // The strip below the spectrum can also be resized by dragging its top
-            // edge, but that handle sits next to the spectrum/waterfall splitter and
-            // the two are easy to confuse - and if either is dragged somewhere awkward
-            // the other becomes hard to reach. This one is always here and always
-            // works, which is what a layout control has to be.
-            int pct = (int)(bottomWindowFrac * 100.0f + 0.5f);
-            ImGui::LeftLabel("Bottom panel height");
-            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-            if (ImGui::SliderInt("##_sdrpp_bottomwin_h", &pct,
-                                 (int)(BOTTOM_WINDOW_MIN_FRAC * 100.0f),
-                                 (int)(BOTTOM_WINDOW_MAX_FRAC * 100.0f), "%d%%")) {
-                bottomWindowFrac = (float)pct / 100.0f;
-                if (bottomWindowFrac < BOTTOM_WINDOW_MIN_FRAC) { bottomWindowFrac = BOTTOM_WINDOW_MIN_FRAC; }
-                if (bottomWindowFrac > BOTTOM_WINDOW_MAX_FRAC) { bottomWindowFrac = BOTTOM_WINDOW_MAX_FRAC; }
-                gui::mainWindow.updateBottomWindowLayout();
-                core::configManager.acquire();
-                core::configManager.conf["bottomWindowHeight"] = bottomWindowFrac;
-                core::configManager.release(true);
-            }
-            ImGui::HelpMarker("How much of the window the audio waterfall and anything else along the\n"
-                              "bottom gets. The same edge can be dragged directly; this is here so the\n"
-                              "layout can always be put back whatever state it has got into.");
-        }
 
         if (ImGui::Checkbox("Show tooltips##_sdrpp", &style::showTooltips)) {
             core::configManager.acquire();
@@ -444,6 +423,44 @@ namespace displaymenu {
                           "setting, and is worked out again on every start. Pick a percentage\n"
                           "to fix the size instead.");
 #endif
+
+        // Everything that lives in the strip along the bottom of the window: how much
+        // room it gets, and the panels that can be put in it.
+        ImGui::SectionHeader("PANELS");
+
+        {
+            // The strip below the spectrum can also be resized by dragging its top
+            // edge, but that handle sits next to the spectrum/waterfall splitter and
+            // the two are easy to confuse - and if either is dragged somewhere awkward
+            // the other becomes hard to reach. This one is always here and always
+            // works, which is what a layout control has to be.
+            int pct = (int)(bottomWindowFrac * 100.0f + 0.5f);
+            ImGui::LeftLabel("Bottom panel height");
+            // Room left for the (?) after it, which a full-width slider pushed off the edge.
+            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - (32.0f * style::uiScale));
+            if (ImGui::SliderInt("##_sdrpp_bottomwin_h", &pct,
+                                 (int)(BOTTOM_WINDOW_MIN_FRAC * 100.0f),
+                                 (int)(BOTTOM_WINDOW_MAX_FRAC * 100.0f), "%d%%")) {
+                bottomWindowFrac = (float)pct / 100.0f;
+                if (bottomWindowFrac < BOTTOM_WINDOW_MIN_FRAC) { bottomWindowFrac = BOTTOM_WINDOW_MIN_FRAC; }
+                if (bottomWindowFrac > BOTTOM_WINDOW_MAX_FRAC) { bottomWindowFrac = BOTTOM_WINDOW_MAX_FRAC; }
+                gui::mainWindow.updateBottomWindowLayout();
+                core::configManager.acquire();
+                core::configManager.conf["bottomWindowHeight"] = bottomWindowFrac;
+                core::configManager.release(true);
+            }
+            ImGui::HelpMarker("How much of the window the audio waterfall and anything else along the\n"
+                              "bottom gets. The same edge can be dragged directly; this is here so the\n"
+                              "layout can always be put back whatever state it has got into.");
+        }
+
+        bool snrChartShown = snrchart::isShown();
+        if (ImGui::Checkbox("SNR chart##_sdrpp_snr_chart", &snrChartShown)) {
+            snrchart::setShown(snrChartShown);
+        }
+        ImGui::HelpMarker("The selected VFO's signal to noise ratio over the last minute, in dB,\n"
+                          "as a panel along the bottom. Useful for seeing whether a change -\n"
+                          "an antenna, a filter, noise reduction - actually helped.");
 
         ImGui::SectionHeader("SPECTRUM");
 

@@ -28,10 +28,14 @@ namespace demod {
             if (config->conf[name][getName()].contains("carrierAgc")) {
                 carrierAgc = config->conf[name][getName()]["carrierAgc"];
             }
+            if (config->conf[name][getName()].contains("agcHang")) {
+                agcHang = config->conf[name][getName()]["agcHang"];
+            }
             config->release();
 
             // Define structure
             demod.init(input, carrierAgc ? dsp::demod::AM<dsp::stereo_t>::AGCMode::CARRIER : dsp::demod::AM<dsp::stereo_t>::AGCMode::AUDIO, bandwidth, agcAttack / getIFSampleRate(), agcDecay / getIFSampleRate(), 100.0 / getIFSampleRate(), getIFSampleRate());
+            demod.setAGCHang(hangSamples());
         }
 
         void start() { demod.start(); }
@@ -58,6 +62,16 @@ namespace demod {
                 _config->release(true);
             }
             ImGui::HelpMarker("How fast the gain comes back up in the gaps. Long stops the noise being pumped up between words; never faster than the attack.");
+            ImGui::LeftLabel("AGC Hang");
+            ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX() - (32.0f * style::uiScale));
+            if (ImGui::SliderFloat(("##_radio_am_agc_hang_" + name).c_str(), &agcHang, 0.0f, 2000.0f, "%.0f ms")) {
+                agcHang = std::clamp<float>(agcHang, 0.0f, 2000.0f);
+                demod.setAGCHang(hangSamples());
+                _config->acquire();
+                _config->conf[name][getName()]["agcHang"] = agcHang;
+                _config->release(true);
+            }
+            ImGui::HelpMarker("How long the gain holds after the signal drops before it starts coming back up. Stops the static swelling in the pauses between words. 0 turns it off.");
             if (ImGui::Checkbox(("Carrier AGC##_radio_am_carrier_agc_" + name).c_str(), &carrierAgc)) {
                 demod.setAGCMode(carrierAgc ? dsp::demod::AM<dsp::stereo_t>::AGCMode::CARRIER : dsp::demod::AM<dsp::stereo_t>::AGCMode::AUDIO);
                 _config->acquire();
@@ -101,7 +115,11 @@ namespace demod {
 
         float agcAttack = 50.0f;
         float agcDecay = 5.0f;
+        // Milliseconds. Long enough to hold through the pause between words.
+        float agcHang = 500.0f;
         bool carrierAgc = false;
+
+        int hangSamples() { return (int)((agcHang / 1000.0f) * getIFSampleRate()); }
 
         std::string name;
     };

@@ -85,6 +85,21 @@ namespace dsp::loop {
             std::lock_guard<std::recursive_mutex> lck(base_type::ctrlMtx);
             amp = startingAmp();
             _startEnvelope  =0;
+            _hangLeft = 0;
+        }
+
+        // How many samples the gain is held for after the signal drops, before the
+        // decay is allowed to start raising it. 0, the default, is no hang at all.
+        //
+        // Without it the gain starts climbing the moment a word ends, so the static
+        // in every pause swells up and the next word lands on a gain that has run
+        // away. Holding it through a short gap - the length of a pause in speech -
+        // keeps the gaps as quiet as the speech around them.
+        void setHang(int samples) {
+            assert(base_type::_block_init);
+            std::lock_guard<std::recursive_mutex> lck(base_type::ctrlMtx);
+            _hangSamples = std::max<int>(0, samples);
+            _hangLeft = std::min<int>(_hangLeft, _hangSamples);
         }
 
         void setFrozen(bool b) {
@@ -133,7 +148,20 @@ namespace dsp::loop {
                 // Update average amplitude
                 if (inAmp != 0.0f) {
                     if (!_frozen.load()) {
-                        auto namp = (inAmp > amp) ? ((amp * _invAttack) + (inAmp * _attack)) : ((amp * invDecay) + (inAmp * decay));
+                        float namp;
+                        if (inAmp > amp) {
+                            // Louder: follow it up, and start the hang over again.
+                            namp = (amp * _invAttack) + (inAmp * _attack);
+                            _hangLeft = _hangSamples;
+                        }
+                        else if (_hangLeft > 0) {
+                            // Quieter, but still inside the hang: hold the gain.
+                            _hangLeft--;
+                            namp = amp;
+                        }
+                        else {
+                            namp = (amp * invDecay) + (inAmp * decay);
+                        }
                         if (!isnan(namp)) {
                             amp = namp;
                             gain = std::min<float>(_setPoint / amp, _maxGain);
@@ -202,6 +230,8 @@ namespace dsp::loop {
         int   _startEnvelope;
         int   _totalEnvelopeLength = 4800; // length of start envelope, circa 1/10 of second. This is needed to reduce clicks when e.g. switching SSB/AM
         std::atomic_bool _frozen;
+        int   _hangSamples = 0;
+        int   _hangLeft = 0;
 
         float amp = 1.0;
 

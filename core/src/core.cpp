@@ -579,9 +579,10 @@ int sdrpp_main(int argc, char* argv[]) {
     // loaded as it stands, so nobody's arrangement gets rearranged under them.
     //
     // Ordered by what a new user needs in the order they need it: the signal path
-    // first, from the radio in to the audio out, then the things touched while
-    // actually operating, then appearance, then the optional decoders, and last the
-    // two that are set once and forgotten.
+    // first, in the order the signal actually flows - the source, the demodulator,
+    // the audio out, and the noise reduction that works on that audio - then the
+    // things touched while actually operating, then appearance, then the optional
+    // decoders, and last the two that are set once and forgotten.
     defConfig["menuElements"] = json::array();
     auto& menuElements = defConfig["menuElements"];
     std::vector<std::pair<const char*, bool>> openState = {
@@ -589,6 +590,7 @@ int sdrpp_main(int argc, char* argv[]) {
         { "Source", true },
         { "Radio", true },
         { "Audio", false },
+        { "Noise Reduction logmmse", false },
         { "Recorder", false },
         // Operating
         { "Frequency Manager", false },
@@ -597,10 +599,9 @@ int sdrpp_main(int argc, char* argv[]) {
         // Appearance
         { "Display", true },
         { "Theme", false },
-        // Optional processing and decoders. A panel that is not in this list still
-        // appears, but at the bottom and expanded, below the two that are meant to
-        // be last - which is where the shipped decoders were landing.
-        { "Noise Reduction logmmse", false },
+        // Optional decoders. A panel that is not in this list still appears, but at
+        // the bottom and expanded, below the two that are meant to be last - which
+        // is where the shipped decoders were landing.
         { "FT8/FT4 Decoder", false },
         { "Radiosonde", false },
         { "VHF Digital Modes", false },
