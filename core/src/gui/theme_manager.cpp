@@ -174,6 +174,7 @@ void ThemeManager::initCustomColors() {
             { "FFTGridColor", "Spectrum grid lines", &fftGridColor, fftGridColor },
             { "FFTBorderColor", "Border around the spectrum and waterfall", &fftBorderColor, fftBorderColor },
             { "FFTHoldColor", "Peak hold trace", &fftHoldColor, fftHoldColor },
+            { "FFTMinHoldColor", "Min hold trace", &fftMinHoldColor, fftMinHoldColor },
             { "FFTCenterMarkerColor", "Centre frequency marker", &fftCenterMarkerColor, fftCenterMarkerColor },
         } },
         { "VFOs and squelch", {

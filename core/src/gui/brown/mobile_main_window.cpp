@@ -2643,36 +2643,39 @@ void MobileMainWindow::init() {
     getConfig("glSleepTime", glSleepTime);
 
 
-    displaymenu::onDisplayDraw.bindHandler(&displayDrawHandler);
-    mwedit = menuWidth;
-    displayDrawHandler.handler = [](ImGuiContext *ctx, void *data) {
-
-        // These are emitted at the very end of the display menu, so without a header
-        // of their own they fell under whichever section happened to be last - which
-        // is "KEYBOARD AND MOUSE", and none of them is a keyboard or a mouse setting.
-        ImGui::SectionHeader("PANELS");
-
-        if (ImGui::Checkbox("Show mic spectrum##_sdrpp", &displaymenu::showMicHistogram)) {
+    displaymenu::onPanelsDraw.bindHandler(&panelsDrawHandler);
+    panelsDrawHandler.ctx = this;
+    panelsDrawHandler.handler = [](ImGuiContext *ctx, void *data) {
+        MobileMainWindow *_this = (MobileMainWindow *) data;
+        if (ImGui::Checkbox("Mic spectrum##_sdrpp", &displaymenu::showMicHistogram)) {
             core::configManager.acquire();
             core::configManager.conf["showMicHistogram"] = displaymenu::showMicHistogram;
             core::configManager.release(true);
         }
-        if (ImGui::IsItemHovered()) {
-            style::tooltip("The spectrum of your microphone, in a panel along the bottom next to\n"
-                              "the audio waterfall. Opens the microphone and runs the transmit audio\n"
-                              "chain for as long as it is on.");
-        }
+        ImGui::HelpMarker("The spectrum of your microphone, in a panel along the bottom next to\n"
+                          "the audio waterfall. Opens the microphone and runs the transmit audio\n"
+                          "chain for as long as it is on.");
 
-        MobileMainWindow *_this = (MobileMainWindow *) data;
-        if (ImGui::Checkbox("Show Audio Waterfall##_sdrpp", &_this->drawAudioWaterfall)) {
+        if (ImGui::Checkbox("Audio waterfall##_sdrpp", &_this->drawAudioWaterfall)) {
             setConfig("showAudioWaterfall", _this->drawAudioWaterfall);
         }
-        if (ImGui::IsItemHovered()) {
-            style::tooltip("A spectrum and waterfall of the demodulated audio, in a strip along the\n"
-                           "bottom. Useful for seeing CTCSS tones, hum and where a filter is\n"
-                           "cutting. Drag its top edge to resize it, and the line under its\n"
-                           "frequency scale to trade spectrum against waterfall.");
-        }
+        ImGui::HelpMarker("A spectrum and waterfall of the demodulated audio, in a strip along the\n"
+                          "bottom. Useful for seeing CTCSS tones, hum and where a filter is\n"
+                          "cutting. Drag its top edge to resize it, and the line under its\n"
+                          "frequency scale to trade spectrum against waterfall.");
+    };
+
+    displaymenu::onDisplayDraw.bindHandler(&displayDrawHandler);
+    mwedit = menuWidth;
+    displayDrawHandler.handler = [](ImGuiContext *ctx, void *data) {
+
+        // Emitted at the very end of the display menu, so these need a header of their
+        // own or they fall under "KEYBOARD AND MOUSE". What is left here is sizing: the
+        // panel switches that used to share this block moved into PANELS, where there
+        // were two sections of that name.
+        ImGui::SectionHeader("SIZES");
+
+        MobileMainWindow *_this = (MobileMainWindow *) data;
         // Was "Wheel Width", which under a keyboard and mouse heading read as a
         // setting for the scroll wheel. It is the tuning knob in the transceiver
         // layout.
@@ -2781,6 +2784,7 @@ void MobileMainWindow::end() {
 
     pvt->end();
     displaymenu::onDisplayDraw.unbindHandler(&displayDrawHandler);
+    displaymenu::onPanelsDraw.unbindHandler(&panelsDrawHandler);
     MainWindow::end();
     qsoPanel.reset();
     cwPanel.reset();

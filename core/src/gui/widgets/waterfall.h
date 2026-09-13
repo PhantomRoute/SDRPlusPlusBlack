@@ -165,6 +165,17 @@ namespace ImGui {
 
         void setFFTHold(bool hold);
         void setFFTHoldSpeed(float speed);
+        // The lowest level each frequency has sat at - the floor under a signal that
+        // comes and goes. The mirror of peak hold: it follows the spectrum down at once
+        // and creeps back up at the given speed, so the floor keeps up with conditions.
+        void setFFTMinHold(bool hold);
+        void setFFTMinHoldSpeed(float speed);
+        // Persistence: where the trace has been lately, kept as a fading glow under the
+        // live trace. A signal that only appears now and then shows as a faint shape
+        // where it keeps turning up, which the live trace alone shows for a moment.
+        void setFFTPersistence(bool enabled);
+        // Fraction of the glow lost every spectrum frame.
+        void setFFTPersistenceSpeed(float speed);
 
         void setFFTSmoothing(bool enabled);
         void setFFTSmoothingSpeed(float speed);
@@ -361,6 +372,7 @@ namespace ImGui {
         float* rawFFTs = NULL;
         float* latestFFT = NULL;
         float* latestFFTHold = NULL;
+        float* latestFFTMin = NULL;
         float* smoothingBuf = NULL;
         int currentFFTLine = 0;
         int fftLines = 0;
@@ -391,6 +403,23 @@ namespace ImGui {
 
         bool fftHold = false;
         float fftHoldSpeed = 0.3f;
+        bool fftMinHold = false;
+        float fftMinHoldSpeed = 0.3f;
+        bool fftPersistence = false;
+        float fftPersistenceDecay = 0.025f;
+        // Hits per pixel of the spectrum area, row 0 at the top of the dB range. Written
+        // by pushFFT and read by drawFFT, both under buf_mtx.
+        std::vector<float> persistHits;
+        int persistW = 0;
+        int persistH = 0;
+        float persistMin = 0.0f;
+        float persistMax = 0.0f;
+        GLuint persistTexture = 0;
+        int persistTexW = 0;
+        int persistTexH = 0;
+        std::vector<uint8_t> persistPixels;
+        void updatePersistence();
+        void drawPersistence(ImGuiWindow* window);
 
         bool fftSmoothing = false;
         float fftSmoothingAlpha = 0.5;

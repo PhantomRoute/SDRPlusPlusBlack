@@ -144,6 +144,7 @@ public:
 
     ImVec4 waterfallBg = ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
     ImVec4 fftHoldColor = ImVec4(0.0f, 1.0f, 0.75f, 1.0f);
+    ImVec4 fftMinHoldColor = ImVec4(1.0f, 0.6f, 0.2f, 1.0f);
     ImVec4 squelchColor = ImVec4(1.0f, 0.0f, 0.0f, 1.0f);
     ImVec4 clearColor = ImVec4(0.0666f, 0.0666f, 0.0666f, 1.0f);
 

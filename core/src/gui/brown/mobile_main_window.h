@@ -109,6 +109,7 @@ public:
     float audioWaterfallSplitFrac = 0.0f;
     int lastAudioWaterfallHeight = 0;
     EventHandler<ImGuiContext*> displayDrawHandler;
+    EventHandler<ImGuiContext*> panelsDrawHandler;
     int cwAudioFrequency = 600;
     int cwWPM = 18;
     int txOffset = 0;       // for digital modes / audio player

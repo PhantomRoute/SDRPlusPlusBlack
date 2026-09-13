@@ -171,6 +171,7 @@ namespace ImGui {
         lastWidgetSize.y = 0;
         latestFFT = new float[dataWidth];
         latestFFTHold = new float[dataWidth];
+        latestFFTMin = new float[dataWidth];
         waterfallFb = new uint32_t[1];
         tempDataForUpdateWaterfallFb = new float[1];
 
@@ -224,6 +225,7 @@ namespace ImGui {
 
         ImU32 trace = ImGui::GetColorU32(ImGuiCol_PlotLines, gui::themeManager.fftTraceIntensity);
         ImU32 traceHold = ImGui::ColorConvertFloat4ToU32(gui::themeManager.fftHoldColor);
+        ImU32 traceMin = ImGui::ColorConvertFloat4ToU32(gui::themeManager.fftMinHoldColor);
         ImU32 fill = ImGui::GetColorU32(ImGuiCol_PlotLines, gui::themeManager.fftFillIntensity);
         ImU32 text = ImGui::GetColorU32(ImGuiCol_Text);
         ImU32 grid = ImGui::ColorConvertFloat4ToU32(gui::themeManager.fftGridColor);
@@ -262,6 +264,9 @@ namespace ImGui {
         // Data
         if (displaymenu::showFFT) {
             if (latestFFT != NULL && fftLines != 0) {
+                // First, so the fill and the live trace draw over the glow.
+                drawPersistence(window);
+
                 int fillStyle = gui::themeManager.fftFillStyle;
                 int traceStyle = gui::themeManager.fftTraceStyle;
                 float fillIntensity = gui::themeManager.fftFillIntensity;
@@ -317,6 +322,22 @@ namespace ImGui {
                     bPos = std::clamp<double>(bPos, fftAreaMin.y + 1, fftAreaMax.y);
                     window->DrawList->AddLine(ImVec2(fftAreaMin.x + i - 1, roundf(aPos)),
                                               ImVec2(fftAreaMin.x + i, roundf(bPos)), traceHold, 1.0);
+                }
+            }
+
+            // Min hold. Dashed, so where it runs close to the live trace or the peak
+            // hold the three can still be told apart without relying on colour.
+            if (fftMinHold && latestFFT != NULL && latestFFTMin != NULL && fftLines != 0) {
+                for (int i = 1; i < dataWidth; i++) {
+                    if (((i / 4) % 2) != 0) { continue; }
+                    // Not yet filled in since the last reset: nothing to draw there.
+                    if (latestFFTMin[i - 1] > 999.0f || latestFFTMin[i] > 999.0f) { continue; }
+                    double aPos = fftAreaMax.y - ((latestFFTMin[i - 1] - fftMin) * scaleFactor);
+                    double bPos = fftAreaMax.y - ((latestFFTMin[i] - fftMin) * scaleFactor);
+                    aPos = std::clamp<double>(aPos, fftAreaMin.y + 1, fftAreaMax.y);
+                    bPos = std::clamp<double>(bPos, fftAreaMin.y + 1, fftAreaMax.y);
+                    window->DrawList->AddLine(ImVec2(fftAreaMin.x + i - 1, roundf(aPos)),
+                                              ImVec2(fftAreaMin.x + i, roundf(bPos)), traceMin, 1.0);
                 }
             }
         }
@@ -1206,6 +1227,12 @@ namespace ImGui {
         }
         latestFFTHold = new float[dataWidth];
 
+        // Reallocate min hold FFT
+        if (latestFFTMin != NULL) {
+            delete[] latestFFTMin;
+        }
+        latestFFTMin = new float[dataWidth];
+
         // Reallocate smoothing buffer
         if (fftSmoothing) {
             if (smoothingBuf) { delete[] smoothingBuf; }
@@ -1229,6 +1256,7 @@ namespace ImGui {
         for (int i = 0; i < dataWidth; i++) {
             latestFFT[i] = -1000.0f; // Hide everything
             latestFFTHold[i] = -1000.0f;
+            latestFFTMin[i] = 1000.0f; // Above anything real, so the first frame replaces it
         }
         updateAreaRects();
 
@@ -1436,6 +1464,15 @@ namespace ImGui {
                 latestFFTHold[i] = std::max<float>(latestFFT[i], latestFFTHold[i] - fftHoldSpeed);
             }
         }
+
+        // Min hold: drop straight to anything lower, creep back up otherwise
+        if (fftMinHold && latestFFT != NULL && latestFFTMin != NULL && fftLines != 0) {
+            for (int i = 1; i < dataWidth; i++) {
+                latestFFTMin[i] = std::min<float>(latestFFT[i], latestFFTMin[i] + fftMinHoldSpeed);
+            }
+        }
+
+        updatePersistence();
 
         buf_mtx.unlock();
     }
@@ -1701,6 +1738,121 @@ namespace ImGui {
 
     void WaterFall::setFFTHoldSpeed(float speed) {
         fftHoldSpeed = speed;
+    }
+
+    void WaterFall::setFFTMinHold(bool hold) {
+        fftMinHold = hold;
+        if (fftMinHold && latestFFTMin) {
+            for (int i = 0; i < dataWidth; i++) {
+                latestFFTMin[i] = 1000.0f;
+            }
+        }
+    }
+
+    void WaterFall::setFFTMinHoldSpeed(float speed) {
+        fftMinHoldSpeed = speed;
+    }
+
+    void WaterFall::setFFTPersistence(bool enabled) {
+        MEASURE_LOCK_GUARD(buf_mtx);
+        fftPersistence = enabled;
+        // Start clean either way: switching it back on should not bring back a glow
+        // from whatever was on screen the last time.
+        persistHits.clear();
+        persistW = 0;
+        persistH = 0;
+    }
+
+    void WaterFall::setFFTPersistenceSpeed(float speed) {
+        fftPersistenceDecay = std::clamp<float>(speed, 0.0005f, 1.0f);
+    }
+
+    // Called from pushFFT, with buf_mtx held, once per new spectrum line.
+    void WaterFall::updatePersistence() {
+        if (!fftPersistence || latestFFT == NULL || fftLines == 0 || dataWidth <= 0 || fftHeight <= 1) { return; }
+        float range = fftMax - fftMin;
+        if (range <= 0.0f) { return; }
+
+        // The hits are stored against screen rows, so a different size or dB range makes
+        // every one of them mean a different level. Start again rather than smear.
+        if (dataWidth != persistW || fftHeight != persistH || fftMin != persistMin || fftMax != persistMax) {
+            persistW = dataWidth;
+            persistH = fftHeight;
+            persistMin = fftMin;
+            persistMax = fftMax;
+            persistHits.assign((size_t)persistW * (size_t)persistH, 0.0f);
+        }
+
+        float keep = 1.0f - fftPersistenceDecay;
+        for (float& v : persistHits) { v *= keep; }
+
+        int prevRow = -1;
+        for (int x = 0; x < persistW; x++) {
+            float norm = std::clamp<float>((latestFFT[x] - fftMin) / range, 0.0f, 1.0f);
+            int row = (int)(((1.0f - norm) * (float)(persistH - 1)) + 0.5f);
+            // Joined to the previous column's point, so a steep edge leaves a line and
+            // not a scatter of separate dots.
+            int a = row;
+            int b = row;
+            if (prevRow >= 0) {
+                a = std::min<int>(row, prevRow);
+                b = std::max<int>(row, prevRow);
+            }
+            for (int r = a; r <= b; r++) {
+                persistHits[((size_t)r * (size_t)persistW) + (size_t)x] += 1.0f;
+            }
+            prevRow = row;
+        }
+    }
+
+    // Called from drawFFT, on the GL thread, with buf_mtx held.
+    void WaterFall::drawPersistence(ImGuiWindow* window) {
+        if (!fftPersistence || persistHits.empty() || persistW != dataWidth || persistH != fftHeight) { return; }
+
+        if (persistTexture == 0) {
+            glGenTextures(1, &persistTexture);
+        }
+
+        // Brightness on a log scale against what a point hit on every frame builds up
+        // to. A signal seen once in a while still shows; a steady one tops out instead
+        // of washing out everything around it.
+        float full = 1.0f / std::max<float>(fftPersistenceDecay, 0.0005f);
+        float logFull = log1p(full);
+        ImVec4 col = ImGui::GetStyleColorVec4(ImGuiCol_PlotLines);
+        uint8_t cr = (uint8_t)(std::clamp<float>(col.x, 0.0f, 1.0f) * 255.0f);
+        uint8_t cg = (uint8_t)(std::clamp<float>(col.y, 0.0f, 1.0f) * 255.0f);
+        uint8_t cb = (uint8_t)(std::clamp<float>(col.z, 0.0f, 1.0f) * 255.0f);
+
+        size_t count = persistHits.size();
+        persistPixels.resize(count * 4);
+        for (size_t i = 0; i < count; i++) {
+            float v = persistHits[i];
+            float alpha = (v < 0.02f) ? 0.0f : std::clamp<float>(log1p(v) / logFull, 0.0f, 1.0f);
+            uint8_t* px = &persistPixels[i * 4];
+            px[0] = cr;
+            px[1] = cg;
+            px[2] = cb;
+            px[3] = (uint8_t)(alpha * 255.0f);
+        }
+
+        glBindTexture(GL_TEXTURE_2D, persistTexture);
+        if (persistTexW != persistW || persistTexH != persistH) {
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, persistW, persistH, 0, GL_RGBA, GL_UNSIGNED_BYTE, persistPixels.data());
+            persistTexW = persistW;
+            persistTexH = persistH;
+        }
+        else {
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, persistW, persistH, GL_RGBA, GL_UNSIGNED_BYTE, persistPixels.data());
+        }
+
+        // The same rows the trace is drawn on: the top of the dB range sits one pixel
+        // under fftAreaMin, the bottom on fftAreaMax.
+        ImVec2 topLeft(fftAreaMin.x, fftAreaMin.y + 1.0f);
+        window->DrawList->AddImage((void*)(intptr_t)persistTexture, topLeft,
+                                   ImVec2(topLeft.x + (float)persistW, topLeft.y + (float)persistH));
     }
 
     void WaterFall::setFFTSmoothing(bool enabled) {
@@ -1990,6 +2142,9 @@ namespace ImGui {
 
     WaterFall::~WaterFall() {
         glDeleteTextures(WATERFALL_NUMBER_OF_SECTIONS, waterfallTexturesIds);
+        if (persistTexture != 0) {
+            glDeleteTextures(1, &persistTexture);
+        }
         if (rawFFTs) {
             free(rawFFTs);
         }
@@ -1998,6 +2153,9 @@ namespace ImGui {
         }
         if (latestFFTHold != NULL) {
             delete[] latestFFTHold;
+        }
+        if (latestFFTMin != NULL) {
+            delete[] latestFFTMin;
         }
         if (smoothingBuf) { delete[] smoothingBuf; }
 

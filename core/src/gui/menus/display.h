@@ -34,6 +34,9 @@ namespace displaymenu {
     extern int screenWidthPx;
 #endif
     extern Event<ImGuiContext *> onDisplayDraw;
+    // Fired inside the PANELS section, so panels owned elsewhere - the transceiver
+    // window's mic spectrum and audio waterfall - are switched on next to the core's.
+    extern Event<ImGuiContext *> onPanelsDraw;
     extern bool showBattery;
     extern bool detectSignals;
     extern bool showFFT;

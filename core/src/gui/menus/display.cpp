@@ -1,6 +1,8 @@
 
 #include <gui/menus/display.h>
 #include <gui/widgets/snr_chart.h>
+#include <gui/widgets/occupancy_panel.h>
+#include <gui/widgets/iq_plot_panel.h>
 #include <imgui.h>
 #include <gui/gui.h>
 #include <core.h>
@@ -38,11 +40,16 @@ namespace displaymenu {
     bool restartRequired = false;
     bool fftHold = false;
     int fftHoldSpeed = 60;
+    bool fftMinHold = false;
+    int fftMinHoldSpeed = 10;
+    bool fftPersistence = false;
+    int fftPersistenceSpeed = 5;
     bool fftSmoothing = false;
     int fftSmoothingSpeed = 100;
     bool phoneLayout = false;
 
     Event<ImGuiContext *> onDisplayDraw;
+    Event<ImGuiContext *> onPanelsDraw;
 
     TranscieverLayout transcieverLayout = TRAL_NONE;
 
@@ -131,12 +138,16 @@ namespace displaymenu {
 
     void updateFFTSpeeds() {
         gui::waterfall.setFFTHoldSpeed((float)fftHoldSpeed / ((float)fftRate * 10.0f));
+        gui::waterfall.setFFTMinHoldSpeed((float)fftMinHoldSpeed / ((float)fftRate * 10.0f));
+        gui::waterfall.setFFTPersistenceSpeed((float)fftPersistenceSpeed / ((float)fftRate * 10.0f));
         gui::waterfall.setFFTSmoothingSpeed(std::min<float>((float)fftSmoothingSpeed / (float)(fftRate * 10.0f), 1.0f));
         gui::waterfall.setSNRSmoothingSpeed(std::min<float>((float)snrSmoothingSpeed / (float)(fftRate * 10.0f), 1.0f));
     }
 
     void init() {
         snrchart::init();
+        occupancy::init();
+        iqplot::init();
 
         if (core::configManager.conf.contains("showFFT")) {
             showFFT = core::configManager.conf["showFFT"];
@@ -218,6 +229,12 @@ namespace displaymenu {
         fftHold = core::configManager.conf["fftHold"];
         fftHoldSpeed = core::configManager.conf["fftHoldSpeed"];
         gui::waterfall.setFFTHold(fftHold);
+        fftMinHold = core::configManager.conf["fftMinHold"];
+        fftMinHoldSpeed = core::configManager.conf["fftMinHoldSpeed"];
+        gui::waterfall.setFFTMinHold(fftMinHold);
+        fftPersistence = core::configManager.conf["fftPersistence"];
+        fftPersistenceSpeed = core::configManager.conf["fftPersistenceSpeed"];
+        gui::waterfall.setFFTPersistence(fftPersistence);
         fftSmoothing = core::configManager.conf["fftSmoothing"];
         fftSmoothingSpeed = core::configManager.conf["fftSmoothingSpeed"];
         gui::waterfall.setFFTSmoothing(fftSmoothing);
@@ -462,6 +479,30 @@ namespace displaymenu {
                           "as a panel along the bottom. Useful for seeing whether a change -\n"
                           "an antenna, a filter, noise reduction - actually helped.");
 
+        bool occupancyShown = occupancy::isShown();
+        if (ImGui::Checkbox("Occupancy##_sdrpp_occupancy", &occupancyShown)) {
+            occupancy::setShown(occupancyShown);
+        }
+        ImGui::HelpMarker("How much of the time each part of the visible spectrum is in use, as bars along the bottom. A channel counts as busy while it is more than the number of dB beside this above the noise floor. Zooming, panning or retuning starts the count again.");
+        ImGui::SameLine();
+        {
+            // Wide enough for two digits and the step buttons, like the speeds below.
+            float thresholdWidth = ImGui::CalcTextSize("88").x + (ImGui::GetFrameHeight() * 2.0f) +
+                                   (ImGui::GetStyle().ItemInnerSpacing.x * 2.0f) + (ImGui::GetStyle().FramePadding.x * 2.0f);
+            ImGui::SetNextItemWidth(thresholdWidth);
+            int threshold = occupancy::getThresholdDb();
+            if (ImGui::InputInt("dB##_sdrpp_occupancy_threshold", &threshold)) {
+                occupancy::setThresholdDb(threshold);
+            }
+        }
+
+        bool iqPlotShown = iqplot::isShown();
+        if (ImGui::Checkbox("IQ plot##_sdrpp_iq_plot", &iqPlotShown)) {
+            iqplot::setShown(iqPlotShown);
+        }
+        ImGui::HelpMarker("The raw I samples against Q, as a panel along the bottom. A cloud off centre is a DC offset, an ellipse is IQ imbalance, and squared-off edges are clipping. Shows the samples after SDR++'s own DC blocking, when that is on.");
+        onPanelsDraw.emit(GImGui);
+
         ImGui::SectionHeader("SPECTRUM");
 
         // Each of these three is a switch plus the speed it runs at. Filling the rest
@@ -487,6 +528,40 @@ namespace displaymenu {
             updateFFTSpeeds();
             core::configManager.acquire();
             core::configManager.conf["fftHoldSpeed"] = fftHoldSpeed;
+            core::configManager.release(true);
+        }
+
+        if (ImGui::Checkbox("Min hold##_sdrpp", &fftMinHold)) {
+            gui::waterfall.setFFTMinHold(fftMinHold);
+            core::configManager.acquire();
+            core::configManager.conf["fftMinHold"] = fftMinHold;
+            core::configManager.release(true);
+        }
+        ImGui::HelpMarker("A dashed trace at the lowest level each frequency has sat at: the real noise floor under signals that come and go. The number is how fast it creeps back up.");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(speedWidth);
+        if (ImGui::InputInt("##sdrpp_fft_min_hold_speed", &fftMinHoldSpeed)) {
+            fftMinHoldSpeed = std::max<int>(fftMinHoldSpeed, 1);
+            updateFFTSpeeds();
+            core::configManager.acquire();
+            core::configManager.conf["fftMinHoldSpeed"] = fftMinHoldSpeed;
+            core::configManager.release(true);
+        }
+
+        if (ImGui::Checkbox("Persistence##_sdrpp", &fftPersistence)) {
+            gui::waterfall.setFFTPersistence(fftPersistence);
+            core::configManager.acquire();
+            core::configManager.conf["fftPersistence"] = fftPersistence;
+            core::configManager.release(true);
+        }
+        ImGui::HelpMarker("A fading glow under the trace showing where it has been lately, brightest where a signal keeps turning up. The number is how fast it fades.");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(speedWidth);
+        if (ImGui::InputInt("##sdrpp_fft_persistence_speed", &fftPersistenceSpeed)) {
+            fftPersistenceSpeed = std::max<int>(fftPersistenceSpeed, 1);
+            updateFFTSpeeds();
+            core::configManager.acquire();
+            core::configManager.conf["fftPersistenceSpeed"] = fftPersistenceSpeed;
             core::configManager.release(true);
         }
 

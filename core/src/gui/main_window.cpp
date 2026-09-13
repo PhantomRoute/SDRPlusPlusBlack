@@ -1426,9 +1426,14 @@ void MainWindow::addBottomWindow(std::string name, std::function<void()> drawFun
 void MainWindow::updateBottomWindowLayout() {
     auto fullWidth = gui::waterfall.fftAreaMax.x - gui::waterfall.fftAreaMin.x;
     auto fullHeight = ImGui::GetIO().DisplaySize.y;
+    // Shared between the panels actually showing. It used to be a fifth of the width
+    // each however many there were, so one or two panels sat squeezed against the left
+    // with most of the strip empty beside them - and a panel with a frequency axis had
+    // no room for its labels. Nobody has every panel on at once; the ones that are on
+    // get the room.
     int nWindows = bottomWindows.size();
-    if (nWindows < 5) {
-        nWindows = 5;
+    if (nWindows < 1) {
+        nWindows = 1;
     }
     auto size = fullWidth / nWindows;
     // Start at the left edge of the FFT area, not at x=0. The width already came

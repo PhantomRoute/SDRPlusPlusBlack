@@ -558,6 +558,10 @@ int sdrpp_main(int argc, char* argv[]) {
     defConfig["colorMap"] = "Classic";
     defConfig["fftHold"] = false;
     defConfig["fftHoldSpeed"] = 60;
+    defConfig["fftMinHold"] = false;
+    defConfig["fftMinHoldSpeed"] = 10;
+    defConfig["fftPersistence"] = false;
+    defConfig["fftPersistenceSpeed"] = 5;
     defConfig["fftSmoothing"] = false;
     defConfig["fftSmoothingSpeed"] = 100;
     defConfig["snrSmoothing"] = false;
