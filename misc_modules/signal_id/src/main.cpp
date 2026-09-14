@@ -184,6 +184,10 @@ private:
         double peakSpacing = 0.0; // average gap between them, when there are two or more
         float crestDb = 0.0f;     // peak above the average across the occupied width
         double balance = 0.0;     // -1 all below the peak, 0 even, +1 all above
+        // Whether the signal was actually up when this was taken. measure() finds a
+        // peak in noise as readily as in a signal, so a frame taken between
+        // transmissions is valid and describes nothing.
+        bool on = false;
     };
 
     // ---- Peak hold. A signal that transmits in bursts is gone before the numbers
@@ -223,6 +227,9 @@ private:
     bool shownValid = false;
     double lastSettle = 0.0;
     int profileIdx = 1; // remembered so the label does not flap across a threshold
+    double settledOnFraction = 0.0; // share of the settling window the signal was up
+    double settledPeak = 0.0;       // median peak over those frames
+    double settledMiddle = 0.0;     // median middle of the -26 dB edges over them
     bool coarse = false;
 
     // ---- Timing. On or off is decided per frame, then turned into how long the
@@ -258,6 +265,7 @@ private:
         double centre = 0.0;
         float level = 0.0f;
         double width = 0.0;
+        bool on = false;
     };
     static constexpr double TREND_WINDOW = 10.0;
     std::deque<Trend> trend;
@@ -280,6 +288,43 @@ private:
     // last set rather than blanking between transmissions, so without this there is
     // nothing to say whether what is on screen is a second old or ten minutes.
     double lastValidTime = 0.0;
+
+    // Whether the radio was running last frame, so stopping and starting it can be
+    // noticed. Nothing is measured while it is stopped: the waterfall keeps its last
+    // spectrum on screen, and measuring that over and over made a stopped radio
+    // report a signal that was still on and still drifting.
+    bool wasRunning = false;
+    // When the history was last fed. A gap - the panel collapsed, the radio stopped -
+    // leaves nothing measured in between, and a burst edge taken before the gap and
+    // one taken after it are not the two ends of one burst.
+    double lastTick = 0.0;
+
+    // ---- Following. Holds the VFO at the same place on the signal while the signal
+    // moves, so a drifting carrier stays where it was tuned instead of sliding out of
+    // the filter. It moves the VFO by however far the signal moved, never onto the
+    // signal's peak, because where the VFO belongs on a signal depends on the mode:
+    // on the carrier for AM, below the voice for USB, and so on. Whoever pressed the
+    // button has already put it where it sounds right.
+    //
+    // Only offered for a signal that is up almost all the time. Between transmissions
+    // there is nothing to follow, and a signal that is mostly off has moved by an
+    // unknown amount by the time it comes back.
+    static constexpr double FOLLOW_MIN_DUTY = 0.8;
+    // Lower than the figure to start, so a signal sitting right on 80% does not stop
+    // following the moment it dips to 79.
+    static constexpr double FOLLOW_KEEP_DUTY = 0.7;
+    // How long it may go without a usable position before following gives up.
+    static constexpr double FOLLOW_LOST = 5.0;
+    bool following = false;
+    std::string followVfo;
+    bool followByPeak = true;     // the peak for a carrier, the middle of the edges otherwise
+    double followRef = 0.0;       // where the signal was last seen
+    double followOffset = 0.0;    // tuning frequency minus the signal's position
+    double followStart = 0.0;     // tuning frequency when it started
+    double followExpect = 0.0;    // tuning frequency as following last left it
+    double followLastGood = 0.0;
+    std::string followStopReason;
+    double followStopTime = -1000.0;
 
     // What was true of the signal under the VFO: how often it transmitted, for how
     // long, how far it drifted. Moving the VFO makes all of it wrong.
@@ -305,6 +350,7 @@ private:
 
     // The Reset button: that, and the picture with it.
     void resetAll() {
+        if (following) { stopFollowing("you pressed Reset"); }
         forgetSignalHistory();
         hold.clear();
         holdWidth = 0;
@@ -324,15 +370,16 @@ private:
         return medianScratch[k];
     }
 
-    void settle(double now) {
+    // Returns true when the shown set was refreshed.
+    bool settle(double now) {
         while (!history.empty() && (now - history.front().first) > SETTLE_WINDOW) {
             history.pop_front();
         }
-        if ((now - lastSettle) < SETTLE_PERIOD) { return; }
+        if ((now - lastSettle) < SETTLE_PERIOD) { return false; }
         lastSettle = now;
         // Nothing new to settle: keep showing the last set rather than blanking the
         // panel, which would be another thing flashing on and off.
-        if (history.empty()) { return; }
+        if (history.empty()) { return false; }
 
         shown = history.back().second;
         shown.centre = medianOf([](const Measurement& m) { return m.centre; });
@@ -384,17 +431,76 @@ private:
         if (!coarse && shown.binsAcross < 6) { coarse = true; }
         else if (coarse && shown.binsAcross >= 10) { coarse = false; }
 
+        // Where the signal is, for following, from only the frames where it was up.
+        // The medians above take in frames between transmissions too, where the
+        // "centre" is wherever the noise happened to peak.
+        int onCount = 0;
+        medianScratch.clear();
+        for (const auto& entry : history) {
+            if (!entry.second.on) { continue; }
+            onCount++;
+            medianScratch.push_back(entry.second.centre);
+        }
+        settledOnFraction = (double)onCount / (double)history.size();
+        if (onCount > 0) {
+            size_t k = medianScratch.size() / 2;
+            std::nth_element(medianScratch.begin(), medianScratch.begin() + k, medianScratch.end());
+            settledPeak = medianScratch[k];
+            medianScratch.clear();
+            for (const auto& entry : history) {
+                if (entry.second.on) { medianScratch.push_back((entry.second.occLeft + entry.second.occRight) / 2.0); }
+            }
+            std::nth_element(medianScratch.begin(), medianScratch.begin() + k, medianScratch.end());
+            settledMiddle = medianScratch[k];
+        }
+
         shownValid = true;
+        return true;
     }
 
     void tick() {
         double now = ImGui::GetTime();
-        if (!enabled || (now - lastPanelDraw) > 1.0) { return; }
+        if (!enabled) { return; }
+
+        // Stopping the radio leaves the last spectrum on the waterfall, and it stays
+        // there however long the radio is off. Measuring it went on reporting a
+        // signal that was up, and one that was drifting, since the peak hold was
+        // still settling onto that last frame. Nothing is measured until the radio
+        // runs again, and what was gathered before the stop is dropped when it does:
+        // a signal's history does not carry across a gap nothing was watched through.
+        bool running = gui::mainWindow.sdrIsRunning();
+        if (running != wasRunning) {
+            wasRunning = running;
+            if (!running && following) { stopFollowing("the radio stopped"); }
+            // Kept while frozen, since holding the numbers still is what Freeze is for.
+            if (!frozen) { forgetSignalHistory(); }
+            hold.clear();
+            holdWidth = 0;
+        }
+        if (!running) { return; }
+
+        // Following carries on with the menu collapsed, since the whole point is not
+        // having to watch it. Everything else stops once nobody is looking.
+        if (!following && (now - lastPanelDraw) > 1.0) { return; }
         if (frozen) { return; }
+
+        // A gap since the last frame measured - the menu was collapsed - means a
+        // transition half seen before it and half after is not a burst or a gap of
+        // that length, and the rhythm lost the onsets in between.
+        if (lastTick > 0.0 && (now - lastTick) > 1.0) {
+            lastEdge = 0.0;
+            wasOn = false;
+            onsetTimes.clear();
+        }
+        lastTick = now;
 
         int dataWidth = 0;
         float* data = gui::waterfall.acquireLatestFFT(dataWidth);
         if (data == NULL) { return; }
+        if (dataWidth <= 0) {
+            gui::waterfall.releaseLatestFFT();
+            return;
+        }
 
         double span = gui::waterfall.getViewBandwidth();
         double centre = gui::waterfall.getViewOffset() + gui::waterfall.getCenterFrequency();
@@ -409,12 +515,15 @@ private:
         // numbers stay, because they are about the piece of spectrum on screen and
         // moving the VFO across it does not make any of them untrue.
         {
-            double vfoFreq = 0.0, vfoBw = 0.0;
-            ImU32 vfoColor = 0;
-            if (vfoInfo(vfoFreq, vfoBw, vfoColor)) {
+            double vfoFreq = 0.0;
+            if (tuneFreq(vfoFreq)) {
                 double moved = fabs(vfoFreq - measuredFreq);
-                // Half a channel width, so nudging about inside the signal - or the
-                // Tune to it button below - is not a move.
+                double vfoBw = 0.0, unused = 0.0;
+                ImU32 vfoColor = 0;
+                vfoInfo(unused, vfoBw, vfoColor);
+                // Half a channel width, so nudging about inside the signal is not a
+                // move. Following moves measuredFreq along with the VFO, so its own
+                // steps never add up to one either.
                 bool retuned = (gui::waterfall.selectedVFO != measuredVfo) ||
                                (moved > std::max<double>(vfoBw * 0.5, span / (double)dataWidth));
                 if (retuned) {
@@ -424,6 +533,13 @@ private:
                     measuredVfo = gui::waterfall.selectedVFO;
                     measuredFreq = vfoFreq;
                     if (resetOnRetune) { forgetSignalHistory(); }
+                    else {
+                        // The timing rows may run on across a retune; the drift may
+                        // not. Measured across one it is the size of the retune,
+                        // divided by ten seconds, and reported as the signal moving.
+                        trend.clear();
+                        history.clear();
+                    }
                 }
             }
         }
@@ -450,15 +566,16 @@ private:
 
         // Whether the signal is up right now is a question about this frame, not
         // about the hold, so it is answered before the hold is measured.
-        float liveSnr = liveSignalToNoise(data, dataWidth, span, centre);
+        bool on = liveSignalUp(data, dataWidth, span, centre);
 
         // Everything below reads the hold, not the waterfall's own buffer.
         gui::waterfall.releaseLatestFFT();
 
-        updateTiming(now, liveSnr > 6.0f);
+        updateTiming(now, on);
         measure(hold.data(), dataWidth, span, centre);
 
         if (meas.valid) {
+            meas.on = on && (meas.occupied > 0.0);
             lastValidTime = now;
             history.push_back(std::make_pair(now, meas));
 
@@ -467,12 +584,13 @@ private:
             t.centre = meas.centre;
             t.level = meas.peakDbfs;
             t.width = meas.occupied;
+            t.on = meas.on;
             trend.push_back(t);
             while (!trend.empty() && (now - trend.front().time) > TREND_WINDOW) {
                 trend.pop_front();
             }
         }
-        settle(now);
+        if (settle(now)) { followStep(now); }
 
         // Ten times a second. Fast enough to look live, slow enough that the trace
         // can be read rather than watched.
@@ -637,9 +755,23 @@ private:
         return *kth;
     }
 
-    // The strongest bin near the VFO against the noise floor, from the live frame.
-    float liveSignalToNoise(const float* data, int dataWidth, double span, double viewCentre) {
-        if (data == NULL || dataWidth < 32 || span <= 0.0) { return 0.0f; }
+    // Whether something is up near the VFO in the live frame, as opposed to the
+    // tallest of the noise bins that happen to be there.
+    //
+    // This used to ask for the strongest bin to be 6 dB over the quietest quarter of
+    // the rest. Noise alone clears that nearly every frame: the bins of an FFT are
+    // spread over several dB, the waterfall keeps the loudest bin of each group it
+    // shrinks onto a pixel, and the strongest of a hundred of them sits 10 dB or more
+    // above the quiet quarter. A VFO parked on an empty channel read as a signal "on
+    // all the time", its peak wandered from bin to bin and was reported as drift.
+    //
+    // So the bar is set by how far the noise itself spreads: the strongest bin has to
+    // clear the median of the other bins by two and a half times their interquartile
+    // range, and by 6 dB at the least. Measured on simulated noise across FFT sizes,
+    // zoom levels and search widths, noise alone gets over that in a few percent of
+    // frames at the worst, and mostly never.
+    bool liveSignalUp(const float* data, int dataWidth, double span, double viewCentre) {
+        if (data == NULL || dataWidth < 32 || span <= 0.0) { return false; }
         double hzPerBin = span / (double)dataWidth;
         double viewStart = viewCentre - (span / 2.0);
 
@@ -650,19 +782,43 @@ private:
         // window function puts its worst rubbish. measure() already refuses that; this
         // is what decides whether the signal is on, so without the same refusal an
         // edge artefact off-screen was keying the burst and gap timing.
-        if ((hi - lo) < 4) { return 0.0f; }
+        if ((hi - lo) < 4) { return false; }
 
         float peak = -INFINITY;
         for (int i = lo; i <= hi; i++) {
             if (data[i] > peak) { peak = data[i]; }
         }
-        // The search window is left out of the floor for the same reason measure()
-        // leaves the signal out of its own: this is what decides whether the signal
-        // is on, and a floor that rises along with it never lets it read as on.
-        float noise = quietQuarter(data, dataWidth, lo, hi);
-        if (!std::isfinite(noise)) { noise = quietQuarter(data, dataWidth, 0, -1); }
-        if (!std::isfinite(peak) || !std::isfinite(noise)) { return 0.0f; }
-        return peak - noise;
+        if (!std::isfinite(peak)) { return false; }
+
+        // The noise from outside the search window, for the same reason measure()
+        // leaves the signal out of its own floor: a floor that rises along with the
+        // signal never lets it read as on. All of the view when the window is most
+        // of it.
+        float q25 = 0.0f, q50 = 0.0f, q75 = 0.0f;
+        if (!quartiles(data, dataWidth, lo, hi, q25, q50, q75) &&
+            !quartiles(data, dataWidth, 0, -1, q25, q50, q75)) {
+            return false;
+        }
+        return (peak - q50) > std::max<float>(6.0f, 2.5f * (q75 - q25));
+    }
+
+    // The quartiles of the bins outside skipFrom..skipTo. False when too few are left.
+    bool quartiles(const float* data, int dataWidth, int skipFrom, int skipTo, float& q25, float& q50, float& q75) {
+        scratch.clear();
+        scratch.reserve(dataWidth);
+        for (int i = 0; i < dataWidth; i++) {
+            if (i >= skipFrom && i <= skipTo) { continue; }
+            if (std::isfinite(data[i])) { scratch.push_back(data[i]); }
+        }
+        if (scratch.size() < 16) { return false; }
+        size_t n = scratch.size();
+        std::nth_element(scratch.begin(), scratch.begin() + (n / 2), scratch.end());
+        q50 = scratch[n / 2];
+        std::nth_element(scratch.begin(), scratch.begin() + (n / 4), scratch.begin() + (n / 2));
+        q25 = scratch[n / 4];
+        std::nth_element(scratch.begin() + (n / 2), scratch.begin() + ((3 * n) / 4), scratch.end());
+        q75 = scratch[(3 * n) / 4];
+        return true;
     }
 
     void measure(const float* data, int dataWidth, double span, double viewCentre) {
@@ -715,7 +871,18 @@ private:
         meas.peakDbfs = peak;
         meas.noiseDbfs = noise;
         meas.snr = peak - noise;
-        meas.centre = viewStart + ((double)peakBin * hzPerBin);
+        // Between bins, from the parabola through the peak and its two neighbours.
+        // A whole bin is a coarse step - 50 Hz or more across a normal view - and
+        // following a drifting carrier in whole bins moved the audio in audible jumps.
+        double peakPos = (double)peakBin;
+        if (peakBin > 0 && peakBin < dataWidth - 1) {
+            double a = data[peakBin - 1], b = data[peakBin], c = data[peakBin + 1];
+            double denom = a - (2.0 * b) + c;
+            if (std::isfinite(a) && std::isfinite(c) && denom < 0.0) {
+                peakPos += std::clamp<double>(0.5 * (a - c) / denom, -0.5, 0.5);
+            }
+        }
+        meas.centre = viewStart + (peakPos * hzPerBin);
 
         float floorStop = noise + 3.0f;
         meas.occupied = (double)(rightEdge - leftEdge) * hzPerBin;
@@ -775,15 +942,64 @@ private:
         return s / (double)v.size();
     }
 
-    // Hz per second the peak has moved, or 0 if it is sitting still.
-    double drift() const {
-        if (trend.size() < 8) { return 0.0; }
-        double dt = trend.back().time - trend.front().time;
-        if (dt < 2.0) { return 0.0; }
-        double moved = trend.back().centre - trend.front().centre;
-        // Movement of less than one bin is the measurement's own resolution.
-        if (fabs(moved) < shown.hzPerBin) { return 0.0; }
-        return moved / dt;
+    // Whether the trend still describes the radio as it is. Stopped, it does not -
+    // unless the readings are frozen, which is a request to keep showing them.
+    bool trendLive() const {
+        return frozen || gui::mainWindow.sdrIsRunning();
+    }
+
+    // Hz per second the peak is moving: false when there is not enough to say, true
+    // with 0 when it is sitting still.
+    //
+    // A straight line fitted through every frame the signal was up, not the first
+    // frame compared with the last. The peak of anything wider than a carrier hops
+    // about between bins from one frame to the next, so two single frames ten seconds
+    // apart routinely landed a couple of bins apart and a perfectly still signal was
+    // reported drifting. The frames between transmissions are left out for the same
+    // reason: their "peak" is wherever the noise happened to be highest.
+    bool drift(double& hzPerSec) const {
+        hzPerSec = 0.0;
+        if (!trendLive()) { return false; }
+
+        int n = 0;
+        double first = 0.0, last = 0.0;
+        double sumT = 0.0, sumC = 0.0;
+        for (const auto& t : trend) {
+            if (!t.on) { continue; }
+            if (n == 0) { first = t.time; }
+            last = t.time;
+            sumT += t.time;
+            sumC += t.centre;
+            n++;
+        }
+        if (n < 20 || (last - first) < 3.0) { return false; }
+
+        double meanT = sumT / (double)n, meanC = sumC / (double)n;
+        double sxx = 0.0, sxy = 0.0;
+        for (const auto& t : trend) {
+            if (!t.on) { continue; }
+            sxx += (t.time - meanT) * (t.time - meanT);
+            sxy += (t.time - meanT) * (t.centre - meanC);
+        }
+        if (sxx <= 0.0) { return false; }
+        double slope = sxy / sxx;
+
+        // How far the frames scatter either side of the line.
+        double resid = 0.0;
+        for (const auto& t : trend) {
+            if (!t.on) { continue; }
+            double d = (t.centre - meanC) - (slope * (t.time - meanT));
+            resid += d * d;
+        }
+        resid = sqrt(resid / (double)n);
+
+        // Only a move counts: the line has to travel at least half a bin, which is
+        // about as finely as the peak can be placed between bins, and further than
+        // the frames scatter about it, or the slope is just the scatter leaning one way.
+        double moved = fabs(slope * (last - first));
+        if (moved < std::max<double>(shown.hzPerBin * 0.5, resid * 2.0)) { return true; }
+        hzPerSec = slope;
+        return true;
     }
 
     // The spread of one field across the trend window, as the gap between its tenth
@@ -797,6 +1013,7 @@ private:
     mutable std::vector<double> swingScratch;
     template <class Get>
     bool swingOf(Get get, double& spread) const {
+        if (!trendLive()) { return false; }
         if (trend.size() < 20) { return false; }
         if ((trend.back().time - trend.front().time) < 3.0) { return false; }
 
@@ -840,6 +1057,137 @@ private:
         return true;
     }
 
+    // The frequency the selected VFO is tuned to, as the tuner means it: the point
+    // the mode hangs its reference on, which for USB is the lower edge rather than
+    // the middle. That is what stays put when the channel width changes, so a Match
+    // width does not read as a retune, and it is what tuner::tune() sets.
+    bool tuneFreq(double& freq) const {
+        const std::string& vfoName = gui::waterfall.selectedVFO;
+        if (vfoName.empty()) { return false; }
+        auto it = gui::waterfall.vfos.find(vfoName);
+        if (it == gui::waterfall.vfos.end() || it->second == NULL) { return false; }
+        freq = gui::waterfall.getCenterFrequency() + it->second->generalOffset;
+        return true;
+    }
+
+    // Share of the last twenty seconds or so the signal was up, or -1 until there is
+    // enough of it to say. A few seconds at least: twenty frames is a third of a
+    // second, and a signal that happened to be up for that is not one to follow.
+    double dutyCycle() const {
+        if (samplesTotal < 20) { return -1.0; }
+        if ((ImGui::GetTime() - dutyWindowStart) < 3.0) { return -1.0; }
+        return (double)samplesOn / (double)samplesTotal;
+    }
+
+    // Where the signal is, by whichever measure following settled on when it began.
+    double followPosition() const {
+        return followByPeak ? settledPeak : settledMiddle;
+    }
+
+    // Whether following can start now. When it cannot, why not, in a few words that
+    // fit on the row under the button.
+    bool canFollow(std::string& why) const {
+        double f = 0.0;
+        if (!tuneFreq(f)) { why = "no VFO"; return false; }
+        if (!gui::mainWindow.sdrIsRunning()) { why = "radio stopped"; return false; }
+        if (frozen) { why = "frozen"; return false; }
+        double duty = dutyCycle();
+        if (duty < 0.0 || !shownValid) { why = "measuring..."; return false; }
+        if (duty < FOLLOW_MIN_DUTY) {
+            char buf[64];
+            snprintf(buf, sizeof buf, "needs it on 80%% of the time, now %.0f%%", duty * 100.0);
+            why = buf;
+            return false;
+        }
+        if (settledOnFraction <= 0.0 || shown.occupied <= 0.0) { why = "nothing to follow"; return false; }
+        why.clear();
+        return true;
+    }
+
+    void startFollowing() {
+        double f = 0.0;
+        std::string why;
+        if (!canFollow(why) || !tuneFreq(f)) { return; }
+        // A carrier is followed by its peak, which is the one thing about it that
+        // sits still. Anything flatter has a peak that wanders across its top from
+        // frame to frame, and is followed by the middle of its edges instead. Chosen
+        // once, here, because switching measure part way through would shift the
+        // position by the difference between them and move the VFO for nothing.
+        followByPeak = (shown.crestDb >= 12.0f) || (shown.binsAcross <= 8);
+        followVfo = gui::waterfall.selectedVFO;
+        followRef = followPosition();
+        followOffset = f - followRef;
+        followStart = f;
+        followExpect = f;
+        followLastGood = ImGui::GetTime();
+        followStopReason.clear();
+        following = true;
+    }
+
+    void stopFollowing(const char* reason) {
+        if (!following) { return; }
+        following = false;
+        followStopReason = reason;
+        followStopTime = ImGui::GetTime();
+    }
+
+    // One step of following, each time the settled numbers are refreshed. Works from
+    // those rather than from single frames, so the VFO moves four times a second at
+    // most and never on the strength of one odd frame.
+    void followStep(double now) {
+        if (!following) { return; }
+
+        double f = 0.0;
+        if (gui::waterfall.selectedVFO != followVfo || !tuneFreq(f)) {
+            stopFollowing("the VFO changed");
+            return;
+        }
+        double bin = std::max<double>(shown.hzPerBin, 1.0);
+        // Anything that moved the VFO other than this - a click on the waterfall, the
+        // frequency display, a scanner, rigctl, a mode change - is someone else
+        // deciding where it goes, and fighting them over it helps nobody.
+        if (fabs(f - followExpect) > bin) {
+            stopFollowing("you retuned");
+            return;
+        }
+        double duty = dutyCycle();
+        if (duty >= 0.0 && duty < FOLLOW_KEEP_DUTY) {
+            stopFollowing("the signal is not on often enough");
+            return;
+        }
+
+        // Up for most of the last two seconds, so the position is a real one.
+        bool good = settledOnFraction >= 0.5;
+        double pos = followPosition();
+        // And not a jump. A signal drifts a few hertz a second; a position that moved
+        // by half its width in a quarter of a second is something else - a stronger
+        // neighbour taking over the measurement, or a glitch - and not to be chased.
+        if (good && fabs(pos - followRef) > std::max<double>(shown.occupied * 0.5, bin * 4.0)) { good = false; }
+
+        if (!good) {
+            if ((now - followLastGood) > FOLLOW_LOST) { stopFollowing("lost the signal"); }
+            return;
+        }
+        followLastGood = now;
+        followRef = pos;
+
+        // Some way either side before moving, or the VFO would chase the measurement's
+        // own jitter and warble the audio back and forth for no reason. A peak is
+        // placed between bins and holds still to a fraction of one, so half a bin
+        // is enough and the steps are small. The middle of two edges is only ever
+        // whole or half bins, and a median of it flips between neighbours, so that
+        // waits for a bin and a half.
+        double target = pos + followOffset;
+        if (fabs(target - f) < bin * (followByPeak ? 0.5 : 1.5)) { return; }
+
+        tuner::tune(tuner::TUNER_MODE_NORMAL, followVfo, target);
+        if (!tuneFreq(f)) { return; }
+        followExpect = f;
+        // Where the retune check measures from, so the steps following takes never add
+        // up to what looks like the user tuning away and starting the history over.
+        measuredFreq = f;
+    }
+
     // How the transmissions are spaced, in words. Kept apart from the drawing so the
     // clipboard summary says exactly what the panel says.
     std::string rhythmText() const {
@@ -855,6 +1203,7 @@ private:
     }
 
     const char* stateText() const {
+        if (!trendLive()) { return "radio stopped"; }
         if (samplesTotal < 20) { return "listening..."; }
         double duty = (double)samplesOn / (double)samplesTotal;
         if (duty > 0.97) { return "on all the time"; }
@@ -884,6 +1233,13 @@ private:
                 return std::string(buf);
             }
             return "Frozen. Nothing below changes until you untick it.";
+        }
+        if (!gui::mainWindow.sdrIsRunning()) {
+            if (old > 1.0) {
+                snprintf(buf, sizeof buf, "Radio stopped. Everything below is %s old.", fmtTime(old).c_str());
+                return std::string(buf);
+            }
+            return "Radio stopped.";
         }
         if (old > 2.0) {
             snprintf(buf, sizeof buf, "Nothing to measure here now. Everything below is %s old.",
@@ -924,9 +1280,9 @@ private:
             snprintf(buf, sizeof buf, "  Level swung %.0f dB over ten seconds\n", moved);
             s += buf;
         }
-        double drifting = drift();
-        if (fabs(drifting) >= 1.0) {
-            snprintf(buf, sizeof buf, "  Drifting %+.0f Hz/s\n", drifting);
+        double drifting = 0.0;
+        if (drift(drifting) && drifting != 0.0) {
+            snprintf(buf, sizeof buf, "  Drifting %+.1f Hz/s\n", drifting);
             s += buf;
         }
         s += "  Rhythm: " + rhythmText() + "\n";
@@ -1058,7 +1414,10 @@ private:
             ImGui::TextDisabled("No VFO. Start a radio and tune to the signal.");
         }
 
-        ImGui::Checkbox(("Freeze##_sigid_freeze_" + name).c_str(), &frozen);
+        if (ImGui::Checkbox(("Freeze##_sigid_freeze_" + name).c_str(), &frozen) && frozen) {
+            // Following works from the measurements Freeze stops.
+            stopFollowing("frozen");
+        }
         ImGui::HelpMarker("Stops measuring, so the numbers stay put while you read them.");
         ImGui::SameLine();
         if (ImGui::Button(("Reset##_sigid_reset_" + name).c_str())) { resetAll(); }
@@ -1140,10 +1499,16 @@ private:
         }
         if (ImGui::IsItemHovered()) { style::tooltip("How far the peak sits from the middle of the channel you are listening to"); }
 
-        double drifting = drift();
-        if (fabs(drifting) >= 1.0) { ImGui::Text("Drift     %+.0f Hz/s", drifting); }
-        else { ImGui::Text("Drift     steady"); }
-        if (ImGui::IsItemHovered()) { style::tooltip("Movement of the peak over the last few seconds. Anything under one\nbin of the current resolution counts as steady."); }
+        double drifting = 0.0;
+        if (!drift(drifting)) { ImGui::Text("Drift     -"); }
+        else if (drifting == 0.0) { ImGui::Text("Drift     steady"); }
+        else { ImGui::Text("Drift     %+.1f Hz/s", drifting); }
+        if (ImGui::IsItemHovered()) {
+            style::tooltip("How fast the peak is moving, from a line fitted through the last ten\n"
+                           "seconds of the signal being up. Steady unless it moved half a bin\n"
+                           "and further than the peak hops about on its own. A dash until it has\n"
+                           "been up for a few seconds, and while the radio is stopped.");
+        }
 
         double step = rasterStep(shown.centre, shown.hzPerBin);
         if (step > 0.0) { ImGui::Text("Channels  on the %s grid", fmtWidth(step).c_str()); }
@@ -1158,15 +1523,37 @@ private:
         }
 
         // Acting on the measurement, rather than reading it off and doing it by hand.
-        if (!haveVfo) { style::beginDisabled(); }
+        std::string followWhy;
+        bool followable = canFollow(followWhy);
         float half = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) / 2.0f;
-        if (ImGui::Button(("Tune to it##_sigid_tune_" + name).c_str(), ImVec2(half, 0)) && haveVfo) {
-            tuner::tune(tuner::TUNER_MODE_NORMAL, gui::waterfall.selectedVFO, shown.centre);
+        if (following) {
+            // Lit while it is on, so a glance says the VFO is not going to stay where
+            // it was left.
+            ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+            if (ImGui::Button(("Stop following##_sigid_follow_" + name).c_str(), ImVec2(half, 0))) {
+                stopFollowing("");
+            }
+            ImGui::PopStyleColor();
+        }
+        else {
+            if (!followable) { style::beginDisabled(); }
+            if (ImGui::Button(("Follow it##_sigid_follow_" + name).c_str(), ImVec2(half, 0)) && followable) {
+                startFollowing();
+            }
+            if (!followable) { style::endDisabled(); }
         }
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-            style::tooltip("Put the VFO on the measured centre");
+            style::tooltip("Keep the VFO where it is on the signal while the signal drifts. Tune it\n"
+                           "the way it sounds right first: this moves the VFO by however far the\n"
+                           "signal moves, and never onto the signal's peak.\n"
+                           "Only for a signal that is up at least 80%% of the time - between\n"
+                           "transmissions there is nothing to follow. Stops by itself if you retune,\n"
+                           "if the signal goes for more than a few seconds, or if the radio stops.\n"
+                           "Its steps are a fraction of the resolution at the bottom of this panel for\n"
+                           "a carrier, and a bin or more for a wider signal, so zoom in for finer ones.");
         }
         ImGui::SameLine();
+        if (!haveVfo) { style::beginDisabled(); }
         if (ImGui::Button(("Match width##_sigid_width_" + name).c_str(), ImVec2(ImGui::GetContentRegionAvail().x, 0)) &&
             haveVfo && shown.occupied > 0.0) {
             auto it = gui::waterfall.vfos.find(gui::waterfall.selectedVFO);
@@ -1182,6 +1569,28 @@ private:
             style::tooltip("Set the channel width to the measured -26 dB width. Modes with a fixed\nwidth ignore this.");
         }
         if (!haveVfo) { style::endDisabled(); }
+
+        // What following is doing, or why it cannot. On a row of its own rather than
+        // only in the button's tooltip, because big controls turn tooltips off and a
+        // greyed out button with no reason is a riddle.
+        double tunedTo = 0.0;
+        if (following && tuneFreq(tunedTo)) {
+            double movedBy = tunedTo - followStart;
+            if (fabs(movedBy) < 0.5) { ImGui::Text("Follow    on, not moved yet"); }
+            else { ImGui::Text("Follow    on, moved %s%s", (movedBy > 0.0) ? "+" : "-", fmtWidth(fabs(movedBy)).c_str()); }
+        }
+        else if (!followStopReason.empty() && (ImGui::GetTime() - followStopTime) < 15.0) {
+            ImGui::Text("Follow    stopped: %s", followStopReason.c_str());
+        }
+        else if (followable) {
+            ImGui::Text("Follow    ready");
+        }
+        else {
+            ImGui::TextDisabled("Follow    %s", followWhy.c_str());
+        }
+        if (ImGui::IsItemHovered()) {
+            style::tooltip("How far following has moved the VFO since it started, or why it cannot\nstart yet.");
+        }
 
         // ---- Width and shape
         ImGui::SectionHeader("WIDTH AND SHAPE");
