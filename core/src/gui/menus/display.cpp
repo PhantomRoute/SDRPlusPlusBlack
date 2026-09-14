@@ -483,7 +483,7 @@ namespace displaymenu {
         if (ImGui::Checkbox("Occupancy##_sdrpp_occupancy", &occupancyShown)) {
             occupancy::setShown(occupancyShown);
         }
-        ImGui::HelpMarker("How much of the time each part of the visible spectrum is in use, as bars along the bottom. A channel counts as busy while it is more than the number of dB beside this above the noise floor. Zooming, panning or retuning starts the count again.");
+        ImGui::HelpMarker("How much of the time each part of the visible spectrum is in use, plotted across frequency along the bottom. A channel counts as busy while it is more than the number of dB beside this above the noise floor. Click the plot to tune there. Panning and retuning keep the count; zooming starts it again.");
         ImGui::SameLine();
         {
             // Wide enough for two digits and the step buttons, like the speeds below.
