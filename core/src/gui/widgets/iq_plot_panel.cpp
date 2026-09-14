@@ -89,6 +89,17 @@ namespace {
         // Whether to keep every sample for the scope. Only while its sample view is up:
         // at a few megasamples a second the copy is not free.
         std::atomic<bool> scopeCapture{ false };
+        // Paused: the scope's samples and the envelope stop moving, so the span can still
+        // be changed to look closer or further out at the moment Pause was pressed.
+        std::atomic<bool> frozen{ false };
+
+        // Forgets the scope's samples, so what it shows next time is not joined onto
+        // samples from whenever it last looked.
+        void clearScope() {
+            std::lock_guard<std::mutex> lck(snapMtx);
+            scopeFilled = 0;
+            scopePos = 0;
+        }
 
         // The newest want consecutive samples, oldest first, or as many as there are.
         int scopeSnapshot(std::vector<dsp::complex_t>& out, int want) {
@@ -151,6 +162,7 @@ namespace {
                 pos = (pos + 1) % SNAPSHOT_POINTS;
                 if (filled < SNAPSHOT_POINTS) { filled++; }
             }
+            if (frozen.load(std::memory_order_relaxed)) { return; }
             // Every sample, in order, while the scope wants them.
             if (scopeCapture.load(std::memory_order_relaxed)) {
                 int start = std::max<int>(0, count - SCOPE_RING);
@@ -223,10 +235,31 @@ namespace {
             }
             show();
             setTapEnabled(true);
-            tap.scopeCapture.store(view == IQ_VIEW_SCOPE && span == SPAN_SAMPLES, std::memory_order_relaxed);
+            // Paused, whatever the scope was keeping stays kept, through any switching
+            // between views. Otherwise its samples are dropped when it stops keeping them,
+            // so they are never shown later as if they were current.
+            if (!(paused && haveData)) {
+                bool wantScope = (view == IQ_VIEW_SCOPE && span == SPAN_SAMPLES);
+                bool wasKeeping = tap.scopeCapture.load(std::memory_order_relaxed);
+                tap.scopeCapture.store(wantScope, std::memory_order_relaxed);
+                if (!wantScope && wasKeeping) { tap.clearScope(); }
+            }
+            bool freeze = paused && haveData;
+            if (freeze && !tap.frozen.load(std::memory_order_relaxed)) {
+                // A few blocks can land between the last picture and the freeze; take it
+                // again from exactly what is held, or going back to it later would differ.
+                tap.frozen.store(true, std::memory_order_relaxed);
+                shownKey = -1;
+            }
+            else { tap.frozen.store(freeze, std::memory_order_relaxed); }
 
-            // Paused, everything on screen stays as it was, numbers included.
-            if (paused && haveData) { return; }
+            // Paused, everything on screen stays as it was, numbers included. The scope
+            // is taken again from the held samples when its span or view changes.
+            if (paused && haveData) {
+                int key = (view * 10000) + (span * 1000) + (scopeSpanIdx * 10) + envSpanIdx;
+                if (key != shownKey) { takeScope(); }
+                return;
+            }
 
             double now = ImGui::GetTime();
             if ((now - lastRead) < 0.05) { return; }
@@ -271,10 +304,7 @@ namespace {
             float instantDeg = (float)(asin(std::clamp<double>(corr, -1.0, 1.0)) * 180.0 / IQ_PI);
             phaseErrorDeg = phaseSeeded ? (phaseErrorDeg * 0.95f) + (instantDeg * 0.05f) : instantDeg;
             phaseSeeded = true;
-            if (view == IQ_VIEW_SCOPE) {
-                if (span == SPAN_SAMPLES) { tap.scopeSnapshot(scopePoints, SCOPE_SPANS[scopeSpanIdx]); }
-                else { tap.envelopeSnapshot(envelopePoints, ENVELOPE_SPANS[envSpanIdx], sigpath::iqFrontEnd.getEffectiveSamplerate()); }
-            }
+            takeScope();
 
             // Zoom to what is actually there. Real signals sit far below full scale, so a
             // fixed full-scale plot would show a dot in the middle. Scaled to the 99th
@@ -290,6 +320,13 @@ namespace {
             else if (want > step) { snapped = step * 2.0f; }
             scale = std::min<float>(snapped, 1.0f);
             haveData = true;
+        }
+
+        void takeScope() {
+            shownKey = (view * 10000) + (span * 1000) + (scopeSpanIdx * 10) + envSpanIdx;
+            if (view != IQ_VIEW_SCOPE) { return; }
+            if (span == SPAN_SAMPLES) { tap.scopeSnapshot(scopePoints, SCOPE_SPANS[scopeSpanIdx]); }
+            else { tap.envelopeSnapshot(envelopePoints, ENVELOPE_SPANS[envSpanIdx], sigpath::iqFrontEnd.getEffectiveSamplerate()); }
         }
 
         // The chosen one in the theme's accent colour, so it is clear which is showing.
@@ -458,6 +495,15 @@ namespace {
                     }
                 }
             }
+            bool empty = (span == SPAN_SAMPLES) ? (scopePoints.size() < 2) : (envelopePoints.size() < 2);
+            if (empty && paused) {
+                // Switched to a view that was not keeping anything when Pause was pressed.
+                const char* msg = "Nothing held for this view. Release Pause to capture.";
+                float wrap = std::max<float>(40.0f, w - (12.0f * style::uiScale));
+                ImVec2 ts = ImGui::CalcTextSize(msg, NULL, false, wrap);
+                draw->AddText(ImGui::GetFont(), ImGui::GetFontSize(), ImVec2((plotMin.x + plotMax.x - ts.x) / 2.0f, std::max<float>(plotMin.y, midY - ts.y / 2.0f)),
+                              ImGui::GetColorU32(ImGuiCol_TextDisabled), msg, NULL, wrap);
+            }
             draw->PopClipRect();
 
             ImGui::PushFont(style::tinyFont);
@@ -465,7 +511,7 @@ namespace {
             double sr = sigpath::iqFrontEnd.getEffectiveSamplerate();
             if (span == SPAN_SAMPLES) {
                 if (sr > 0.0) { snprintf(label, sizeof label, "I blue, Q orange  \xC2\xB1%.3g  %.2f ms across%s", range, 1000.0 * (double)scopePoints.size() / sr, paused ? "  paused" : ""); }
-                else { snprintf(label, sizeof label, "I solid, Q orange  \xC2\xB1%.3g", range); }
+                else { snprintf(label, sizeof label, "I blue, Q orange  \xC2\xB1%.3g", range); }
             }
             else {
                 double total = 0.0;
@@ -618,6 +664,7 @@ namespace {
         float shownPeak = 0.0f;
         float scale = 1.0f;
         bool haveData = false;
+        int shownKey = -1;   // the view and spans the scope was last taken for
     };
 
     // Made in init() and never deleted. The tap is part of the IQ front end's chain, and

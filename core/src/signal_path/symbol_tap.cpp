@@ -31,8 +31,13 @@ namespace symboltap {
 
         // A different decoder, or the same one switching between an oversampled
         // waveform and bare symbols, starts the history over: the two cannot be mixed.
-        void restartIfChanged(const char* src, bool isOversampled) {
-            if (havePublished && source == src && oversampled == isOversampled) { return; }
+        // While one decoder is still publishing, another is turned away rather than let
+        // in: with DSD and oldDSD both running, each would otherwise wipe the other's
+        // history every block and neither would ever have enough to show. False when
+        // this one is turned away.
+        bool acceptFrom(const char* src, bool isOversampled) {
+            if (havePublished && source == src && oversampled == isOversampled) { return true; }
+            if (havePublished && (std::chrono::steady_clock::now() - lastPublish) < std::chrono::milliseconds(500)) { return false; }
             source = src;
             oversampled = isOversampled;
             samples.clear();
@@ -40,6 +45,7 @@ namespace symboltap {
             values.clear();
             firstSample = 0;
             havePublished = true;
+            return true;
         }
 
         void trim() {
@@ -72,7 +78,7 @@ namespace symboltap {
                        const float th[3], float hzPerUnit, double rate) {
         if (!wanted() || count <= 0 || in == nullptr) { return; }
         std::lock_guard<std::mutex> lck(mtx);
-        restartIfChanged(src, true);
+        if (!acceptFrom(src, true)) { return; }
         long long base = firstSample + (long long)samples.size();
         for (int i = 0; i < count; i++) { samples.push_back(in[i] * hzPerUnit); }
         marks.push_back((double)base + (double)samplePoint);
@@ -86,7 +92,7 @@ namespace symboltap {
     void publishSymbols(const char* src, const float* in, int count, const float th[3], float hzPerUnit, double rate) {
         if (!wanted() || count <= 0 || in == nullptr) { return; }
         std::lock_guard<std::mutex> lck(mtx);
-        restartIfChanged(src, false);
+        if (!acceptFrom(src, false)) { return; }
         for (int i = 0; i < count; i++) {
             long long index = firstSample + (long long)samples.size();
             samples.push_back(in[i] * hzPerUnit);

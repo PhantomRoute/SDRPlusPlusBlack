@@ -43,6 +43,8 @@ namespace {
     const int EYE_SPANS[] = { 1, 2, 3, 4, 6, 8 };
     const int EYE_SPAN_COUNT = 6;
     const int MAX_EYE_TRACES = 160;
+    // Decisions across the Inst. freq view for a decoder that passes only those.
+    const size_t DECISIONS_AUTO = 200;
     // Bins for finding how fast the constellation turns. Over a symbol rate of 2400 and a
     // power of 4 that is 0.15 Hz a bin, which holds the groups still across the window.
     const int ROT_FFT = 4096;
@@ -303,6 +305,7 @@ namespace {
         bool ready = false;
         sigan::Measurements meas;
         std::vector<float> freq;              // Hz, the analysis window
+        float freqRange = 1000.0f;            // its scale, which the eye uses
         std::vector<double> instants;         // symbol instants in freq
         std::vector<float> levels;
         std::vector<float> trace;             // Hz, however much time the Inst. freq view shows
@@ -367,8 +370,34 @@ namespace {
 
             if ((now - lastAnalysis) < 0.25) { return; }
             lastAnalysis = now;
-            if (channel != nullptr) { analyzeChannel(); }
-            if (shown && source == SOURCE_DECODER && !paused) { analyzeDecoder(); }
+            if (channel != nullptr) {
+                // The measurements carry on whatever is on screen.
+                size_t want = std::max<size_t>(ANALYSIS_SAMPLES, traceSamplesWanted(chanRate, cv.T));
+                sink.copyNewest(iqLong, std::min<size_t>(RING_SAMPLES, want));
+                analyzeChannel(iqLong, chanRate, paused ? cvScratch : cv, meas);
+                if (paused) {
+                    // Paused, the plot is drawn from a copy of everything the channel held
+                    // at the time, so the span can still be changed to look closer or
+                    // further out at that moment.
+                    if (frozenIq.empty() || !cv.ready) { freezeChannel(); }
+                    else if (frozenSpanIdx != traceSpanIdx) {
+                        sigan::Measurements unused;
+                        analyzeChannel(frozenIq, frozenRate, cv, unused);
+                        frozenSpanIdx = traceSpanIdx;
+                    }
+                }
+            }
+            if (shown && source == SOURCE_DECODER) {
+                // Paused, a new snapshot is only taken when there is nothing to hold yet.
+                if (!paused || !decReady) { analyzeDecoder(true); }
+                else if (decSpanIdx != traceSpanIdx) { analyzeDecoder(false); }
+            }
+        }
+
+        void setPaused(bool p) {
+            paused = p;
+            frozenIq.clear();
+            if (p && channel != nullptr) { freezeChannel(); }
         }
 
         void draw();
@@ -437,6 +466,17 @@ namespace {
             sink.clear();
             cv.ready = false;
             cvScratch.ready = false;
+            frozenIq.clear();
+        }
+
+        // Copies everything the channel holds and draws from it until Pause is released.
+        void freezeChannel() {
+            sink.copyNewest(frozenIq, RING_SAMPLES);
+            frozenRate = chanRate;
+            frozenSpanIdx = traceSpanIdx;
+            sigan::Measurements unused;
+            analyzeChannel(frozenIq, frozenRate, cv, unused);
+            if (!cv.ready) { frozenIq.clear(); }
         }
 
         void showWindow() {
@@ -536,20 +576,35 @@ namespace {
             return (size_t)(TRACE_SPANS_MS[traceSpanIdx] * sr / 1000.0);
         }
 
-        void analyzeChannel() {
-            ChannelView& out = paused ? cvScratch : cv;
-            double sr = chanRate;
-            // One copy covering both the measurements and however far back the view
-            // reaches, so the symbol marks line up with the trace.
-            size_t wantTrace = std::min<size_t>(RING_SAMPLES, std::max<size_t>(64, traceSamplesWanted(sr, cv.T)));
-            size_t total = sink.copyNewest(iqLong, std::max<size_t>(ANALYSIS_SAMPLES, wantTrace));
+        // Whether the decoder passes a waveform with its decisions marked on it, rather
+        // than only the decisions.
+        bool decWaveform() const { return snap.oversampled && decT >= 2.0; }
+
+        // The time the Inst. freq view covers when left to choose, in milliseconds.
+        double autoTraceMs() {
+            if (source == SOURCE_DECODER && decReady && !decWaveform()) {
+                return (snap.symbolRate > 0.0) ? 1000.0 * (double)DECISIONS_AUTO / snap.symbolRate : 0.0;
+            }
+            double sr = (source == SOURCE_CHANNEL) ? cv.sampleRate : snap.sampleRate;
+            double T = (source == SOURCE_CHANNEL) ? cv.T : decT;
+            return (sr > 0.0) ? 1000.0 * (double)traceSamplesWanted(sr, T) / sr : 0.0;
+        }
+
+        // Measures the newest ANALYSIS_SAMPLES of src and fills out from it. src is one
+        // copy covering both the measurements and however far back the Inst. freq view
+        // reaches, so the symbol marks line up with the trace.
+        void analyzeChannel(const std::vector<dsp::complex_t>& src, double sr, ChannelView& out, sigan::Measurements& meas) {
+            size_t total = src.size();
             size_t n = std::min<size_t>(total, ANALYSIS_SAMPLES);
-            iq.assign(iqLong.end() - n, iqLong.end());
-            meas.running = true;
+            iq.assign(src.end() - n, src.end());
             if (n < (size_t)RATE_FFT + 16) {
+                // Just after a retune: nothing yet, and nothing left over from before it.
+                meas = sigan::Measurements();
+                meas.running = true;
                 out.ready = false;
                 return;
             }
+            meas.running = true;
             out.sampleRate = sr;
 
             // Instantaneous frequency, in hertz from the channel centre.
@@ -675,14 +730,14 @@ namespace {
             // ---- What the views draw.
 
             // Frequency over however much time the view asks for, from the long copy.
-            size_t traceLen = std::min<size_t>(total, std::max<size_t>(64, traceSamplesWanted(sr, T)));
+            size_t traceLen = std::min<size_t>(total, std::max<size_t>(8, traceSamplesWanted(sr, T)));
             size_t traceFrom = total - traceLen;
             out.trace.resize(traceLen);
             for (size_t j = 0; j < traceLen; j++) {
                 size_t i = traceFrom + j;
                 if (i == 0) { out.trace[j] = 0.0f; continue; }
-                float re = (iqLong[i].re * iqLong[i - 1].re) + (iqLong[i].im * iqLong[i - 1].im);
-                float im = (iqLong[i].im * iqLong[i - 1].re) - (iqLong[i].re * iqLong[i - 1].im);
+                float re = (src[i].re * src[i - 1].re) + (src[i].im * src[i - 1].im);
+                float im = (src[i].im * src[i - 1].re) - (src[i].re * src[i - 1].im);
                 out.trace[j] = (float)(atan2(im, re) * sr / (2.0 * SIGAN_PI));
             }
             if (traceLen > 1 && traceFrom == 0) { out.trace[0] = out.trace[1]; }
@@ -693,11 +748,17 @@ namespace {
                 double at = t + windowStart - (double)traceFrom;
                 if (at >= 0.0) { out.traceMarks.push_back(at); }
             }
-            out.traceRange = std::max<float>(percentileOf(out.trace, 0.99), -percentileOf(out.trace, 0.01));
-            if (!out.levels.empty()) {
-                out.traceRange = std::max<float>(out.traceRange, std::max<float>(fabsf(out.levels.front()), fabsf(out.levels.back())));
-            }
-            out.traceRange = std::max<float>(out.traceRange * 1.15f, 100.0f);
+            // Each plot scaled to what it shows. The eye's from the analysis window, so
+            // narrowing the Inst. freq span to a few samples does not squash the eye.
+            auto rangeOf = [&](const std::vector<float>& v) {
+                float r = std::max<float>(percentileOf(v, 0.99), -percentileOf(v, 0.01));
+                if (!out.levels.empty()) {
+                    r = std::max<float>(r, std::max<float>(fabsf(out.levels.front()), fabsf(out.levels.back())));
+                }
+                return std::max<float>(r * 1.15f, 100.0f);
+            };
+            out.traceRange = rangeOf(out.trace);
+            out.freqRange = rangeOf(out.freq);
 
             // Points for the I eye and the constellation, normalised to the average magnitude.
             out.iPart.resize(n);
@@ -806,9 +867,15 @@ namespace {
 
         // ---- A decoder's own samples.
 
-        void analyzeDecoder() {
-            decReady = false;
-            if (!symboltap::snapshot(snap) || snap.age > 2.0 || snap.values.size() < 40) { return; }
+        // fresh takes a new snapshot; otherwise the one held is worked through again, which
+        // is how the span can still be changed while paused.
+        void analyzeDecoder(bool fresh) {
+            if (fresh) {
+                decReady = false;
+                if (!symboltap::snapshot(snap) || snap.age > 2.0 || snap.values.size() < 40) { return; }
+            }
+            else if (!decReady) { return; }
+            decSpanIdx = traceSpanIdx;
             decLevels = findLevels(snap.values);
             decHaveEye = eyeOpeningOf(snap.values, decLevels, decOpening);
             decT = (snap.symbolRate > 0.0) ? snap.sampleRate / snap.symbolRate : 0.0;
@@ -853,12 +920,11 @@ namespace {
                 decNearThreshold = (float)nearCount / (float)snap.values.size();
             }
 
-            // Trace: the last forty symbols of waveform, or the last two hundred decisions.
+            // Trace: waveform, or one decision after another, over the span asked for.
             decTrace.clear();
             decTraceMarks.clear();
-            if (snap.oversampled && decT >= 2.0) {
-                size_t wantLen = (traceSpanIdx < 0) ? (size_t)(40.0 * decT) : (size_t)(TRACE_SPANS_MS[traceSpanIdx] * snap.sampleRate / 1000.0);
-                size_t len = std::min<size_t>(snap.samples.size(), std::max<size_t>(16, wantLen));
+            if (decWaveform()) {
+                size_t len = std::min<size_t>(snap.samples.size(), std::max<size_t>(8, traceSamplesWanted(snap.sampleRate, decT)));
                 size_t start = snap.samples.size() - len;
                 decTrace.assign(snap.samples.begin() + start, snap.samples.end());
                 for (double m : snap.marks) {
@@ -866,15 +932,18 @@ namespace {
                 }
             }
             else {
-                size_t len = std::min<size_t>(snap.values.size(), 200);
+                size_t wantLen = (traceSpanIdx < 0) ? DECISIONS_AUTO : (size_t)(TRACE_SPANS_MS[traceSpanIdx] * snap.symbolRate / 1000.0);
+                size_t len = std::min<size_t>(snap.values.size(), std::max<size_t>(8, wantLen));
                 decTrace.assign(snap.values.end() - len, snap.values.end());
                 for (size_t i = 0; i < len; i++) { decTraceMarks.push_back((double)i); }
             }
+            // From everything held, not only the part the trace shows, so the eye and the
+            // decisions keep their scale when the span changes.
             float lo = percentileOf(snap.values, 0.01), hi = percentileOf(snap.values, 0.99);
             decRange = std::max<float>(fabsf(lo), fabsf(hi));
             for (float th : snap.thresholds) { decRange = std::max<float>(decRange, fabsf(th)); }
-            if (!decTrace.empty()) {
-                decRange = std::max<float>(decRange, std::max<float>(percentileOf(decTrace, 0.99), -percentileOf(decTrace, 0.01)));
+            if (snap.oversampled) {
+                decRange = std::max<float>(decRange, std::max<float>(percentileOf(snap.samples, 0.99), -percentileOf(snap.samples, 0.01)));
             }
             decRange = std::max<float>(decRange * 1.15f, 10.0f);
             decReady = true;
@@ -940,12 +1009,10 @@ namespace {
             float gap = 12.0f * style::uiScale;
             if (view == VIEW_FREQ) {
                 // Time across the plot: less, the amount, more, and back to automatic.
-                double sr = (source == SOURCE_CHANNEL) ? cv.sampleRate : snap.sampleRate;
-                double T = (source == SOURCE_CHANNEL) ? cv.T : decT;
                 std::string text;
                 char buf[40];
                 if (traceSpanIdx < 0) {
-                    double ms = (sr > 0.0) ? 1000.0 * (double)traceSamplesWanted(sr, T) / sr : 0.0;
+                    double ms = autoTraceMs();
                     snprintf(buf, sizeof buf, ms < 10.0 ? "auto %.2f ms" : "auto %.0f ms", ms);
                 }
                 else {
@@ -956,18 +1023,19 @@ namespace {
                 }
                 text = buf;
                 flowNext(" - ##sigan_tless", gap);
-                if (ImGui::SmallButton(" - ##sigan_tless")) { stepTraceSpan(-1, sr, T); }
+                if (ImGui::SmallButton(" - ##sigan_tless")) { stepTraceSpan(-1); }
                 if (ImGui::IsItemHovered()) { style::tooltip("Less time across the plot"); }
                 flowNext(text.c_str());
                 ImGui::TextUnformatted(text.c_str());
                 flowNext(" + ##sigan_tmore");
-                if (ImGui::SmallButton(" + ##sigan_tmore")) { stepTraceSpan(1, sr, T); }
+                if (ImGui::SmallButton(" + ##sigan_tmore")) { stepTraceSpan(1); }
                 if (ImGui::IsItemHovered()) { style::tooltip("More time across the plot"); }
                 flowNext("Auto##sigan_tauto");
                 if (pill("Auto##sigan_tauto", traceSpanIdx < 0)) { traceSpanIdx = -1; saveChoice("signalAnalyzerTraceSpan", traceSpanIdx); }
                 if (ImGui::IsItemHovered()) { style::tooltip("About forty symbols when there is a symbol rate, otherwise 2048 samples"); }
             }
-            if (view == VIEW_EYE) {
+            // No eye to widen from a decoder that passes only its decisions.
+            if (view == VIEW_EYE && !(source == SOURCE_DECODER && decReady && !decWaveform())) {
                 char buf[32];
                 snprintf(buf, sizeof buf, "%d symbol%s", EYE_SPANS[eyeSpanIdx], EYE_SPANS[eyeSpanIdx] == 1 ? "" : "s");
                 flowNext(" - ##sigan_eless", gap);
@@ -980,7 +1048,7 @@ namespace {
                 if (ImGui::IsItemHovered()) { style::tooltip("More symbols across the eye"); }
             }
             flowNext("Pause##sigan_pause", gap);
-            if (pill(paused ? "Paused##sigan_pause" : "Pause##sigan_pause", paused)) { paused = !paused; }
+            if (pill(paused ? "Paused##sigan_pause" : "Pause##sigan_pause", paused)) { setPaused(!paused); }
             if (ImGui::IsItemHovered()) {
                 style::tooltip(paused ? "Carry on updating" : "Hold the plot and its readouts still. Signal ID keeps measuring.");
             }
@@ -1001,9 +1069,10 @@ namespace {
 
         // Steps the Inst. freq time span. From automatic it starts at the nearest fixed
         // span to what automatic was showing, so the first press does not jump.
-        void stepTraceSpan(int dir, double sr, double T) {
+        void stepTraceSpan(int dir) {
             if (traceSpanIdx < 0) {
-                double ms = (sr > 0.0) ? 1000.0 * (double)traceSamplesWanted(sr, T) / sr : 20.0;
+                double ms = autoTraceMs();
+                if (ms <= 0.0) { ms = 20.0; }
                 int nearest = 0;
                 for (int i = 0; i < TRACE_SPAN_COUNT; i++) {
                     if (fabs(log(TRACE_SPANS_MS[i] / ms)) < fabs(log(TRACE_SPANS_MS[nearest] / ms))) { nearest = i; }
@@ -1197,28 +1266,35 @@ namespace {
             }
         }
 
-        void readouts(float width, const std::vector<std::string>& parts) {
+        // Lays the readouts out in lines across width, a whole readout at a time, and
+        // draws them when draw is set. Returns the lines they take, up to maxLines;
+        // anything past that is left off.
+        int readouts(float width, const std::vector<std::string>& parts, int maxLines, bool draw) {
+            if (parts.empty()) { return 0; }
             ImGui::PushFont(style::tinyFont);
             float spacing = 10.0f * style::uiScale;
             float used = 0.0f;
             int lines = 1;
             for (size_t i = 0; i < parts.size(); i++) {
                 float w = ImGui::CalcTextSize(parts[i].c_str()).x;
+                bool sameLine = true;
                 if (i > 0) {
                     if (used + spacing + w > width) {
-                        if (lines >= 2) { break; }
+                        if (lines >= maxLines) { break; }
                         lines++;
                         used = 0.0f;
+                        sameLine = false;
                     }
-                    else {
-                        ImGui::SameLine(0.0f, spacing);
-                        used += spacing;
-                    }
+                    else { used += spacing; }
                 }
-                ImGui::TextDisabled("%s", parts[i].c_str());
+                if (draw) {
+                    if (i > 0 && sameLine) { ImGui::SameLine(0.0f, spacing); }
+                    ImGui::TextDisabled("%s", parts[i].c_str());
+                }
                 used += w;
             }
             ImGui::PopFont();
+            return lines;
         }
 
         static std::string hz(double v, bool sign = true) {
@@ -1249,7 +1325,7 @@ namespace {
                 }
                 if (cv.meas.haveSymbolRate) {
                     if (cv.rotFound) { out.push_back("turning " + hz(cv.rotHz) + ", held still"); }
-                    else { out.push_back("not held still: no steady turning found"); }
+                    else { out.push_back("no steady turning to hold still"); }
                 }
                 return out;
             }
@@ -1282,19 +1358,21 @@ namespace {
                 snprintf(buf, sizeof buf, "%d level%s", (int)decLevels.size(), decLevels.size() == 1 ? "" : "s");
                 out.push_back(buf);
             }
+            // A decoder that passes only its decisions has no sample points of its own to
+            // speak of: the opening is measured on the decisions themselves.
             if (decHaveEye) {
-                snprintf(buf, sizeof buf, "eye %.0f%% open at its sample points", decOpening * 100.0f);
+                snprintf(buf, sizeof buf, decWaveform() ? "eye %.0f%% open at its samples" : "decisions %.0f%% open", decOpening * 100.0f);
                 out.push_back(buf);
             }
             if (decHaveWidest) {
-                if (fabsf(decWidest) < 0.049f) { out.push_back("widest at its sample points"); }
+                if (fabsf(decWidest) < 0.049f) { out.push_back("widest at its samples"); }
                 else {
                     snprintf(buf, sizeof buf, "widest %.2f symbol %s", fabsf(decWidest), decWidest > 0.0f ? "later" : "earlier");
                     out.push_back(buf);
                 }
             }
             if (decNearThreshold >= 0.0f) {
-                snprintf(buf, sizeof buf, "%.1f%% of decisions near a threshold", decNearThreshold * 100.0f);
+                snprintf(buf, sizeof buf, "%.1f%% near a threshold", decNearThreshold * 100.0f);
                 out.push_back(buf);
             }
             if (decHaveEdges) {
@@ -1330,6 +1408,10 @@ namespace {
         std::vector<float> featF, featA;
         ChannelView cv;          // what is drawn
         ChannelView cvScratch;   // filled instead while paused
+        std::vector<dsp::complex_t> frozenIq;   // everything the channel held when paused
+        double frozenRate = 48000.0;
+        int frozenSpanIdx = -1;  // the span cv was last drawn at from frozenIq
+        int decSpanIdx = -1;     // the span decTrace was last made at
 
         symboltap::Snapshot snap;
         bool decReady = false;
@@ -1358,8 +1440,17 @@ namespace {
         float tinyLine = ImGui::GetTextLineHeightWithSpacing();
         ImGui::PopFont();
 
+        // The readouts first, so the plot leaves exactly the room they need. At most a
+        // third of the panel, so a short panel still has a plot.
+        bool running = gui::mainWindow.sdrIsRunning();
+        std::vector<std::string> parts;
+        if (running && source == SOURCE_CHANNEL && !gui::waterfall.selectedVFO.empty() && cv.ready) { parts = channelReadouts(); }
+        else if (running && source == SOURCE_DECODER && decReady) { parts = decoderReadouts(); }
+        int maxLines = std::max<int>(1, (int)((avail.y / 3.0f) / tinyLine));
+        int lines = readouts(avail.x, parts, maxLines, false);
+
         ImVec2 top = ImGui::GetCursorScreenPos();
-        float plotH = (origin.y + avail.y) - top.y - (2.0f * tinyLine) - (4.0f * style::uiScale);
+        float plotH = (origin.y + avail.y) - top.y - ((float)std::max<int>(lines, 1) * tinyLine) - (4.0f * style::uiScale);
         if (plotH < 30.0f) { return; }
         Plot p;
         p.min = ImVec2(origin.x, top.y);
@@ -1371,15 +1462,16 @@ namespace {
         auto message = [&](const char* text) {
             float wrap = std::max<float>(40.0f, (p.max.x - p.min.x) - (12.0f * style::uiScale));
             ImVec2 ts = ImGui::CalcTextSize(text, NULL, false, wrap);
+            // From the top when it is taller than the plot, so the start of it shows.
+            float y = std::max<float>(p.min.y + (2.0f * style::uiScale), (p.min.y + p.max.y - ts.y) / 2.0f);
             p.dl->AddText(ImGui::GetFont(), ImGui::GetFontSize(),
-                          ImVec2((p.min.x + p.max.x - ts.x) / 2.0f, (p.min.y + p.max.y - ts.y) / 2.0f),
+                          ImVec2((p.min.x + p.max.x - ts.x) / 2.0f, y),
                           ImGui::GetColorU32(ImGuiCol_TextDisabled), text, NULL, wrap);
         };
 
-        std::vector<std::string> parts;
         bool plotEmpty = false;
         p.dl->PushClipRect(p.min, p.max, true);
-        if (!gui::mainWindow.sdrIsRunning()) {
+        if (!running) {
             message("radio stopped");
         }
         else if (source == SOURCE_CHANNEL) {
@@ -1390,12 +1482,19 @@ namespace {
                     drawTrace(p, cv.trace, cv.traceMarks, cv.traceRange, cv.levels, nullptr, false);
                 }
                 else if (view == VIEW_EYE) {
+                    const std::vector<double>& instants = (eyeOf == EYE_OF_FREQ) ? cv.instants : cv.constInstants;
                     if (cv.T < 2.0) {
                         message("No symbol rate found. An eye needs a signal sent as symbols at a steady rate.");
                         plotEmpty = true;
                     }
+                    else if (instants.size() < 4) {
+                        // A slow rate in a wide channel: a symbol-rate line, but too few
+                        // whole symbols in the window to lay over each other.
+                        message("Too few symbols in the window for an eye.");
+                        plotEmpty = true;
+                    }
                     else if (eyeOf == EYE_OF_FREQ) {
-                        drawEye(p, cv.freq, cv.instants, cv.T, cv.traceRange, cv.levels, nullptr);
+                        drawEye(p, cv.freq, cv.instants, cv.T, cv.freqRange, cv.levels, nullptr);
                     }
                     else {
                         float iRange = std::max<float>(percentileOf(cv.iPart, 0.99), -percentileOf(cv.iPart, 0.01)) * 1.15f;
@@ -1405,18 +1504,17 @@ namespace {
                 else {
                     drawConstellation(p, cv.constPoints);
                 }
-                parts = channelReadouts();
             }
         }
         else {
             if (!decReady) { message("no decoder publishing - choose DSD or oldDSD in Radio"); }
             else {
                 if (view == VIEW_FREQ) {
-                    drawTrace(p, decTrace, decTraceMarks, decRange, decLevels, snap.thresholds, !snap.oversampled);
+                    drawTrace(p, decTrace, decTraceMarks, decRange, decLevels, snap.thresholds, !decWaveform());
                 }
                 else if (view == VIEW_EYE) {
-                    if (!snap.oversampled) {
-                        message("This decoder passes one value per symbol, so there is no waveform for an eye.");
+                    if (!decWaveform()) {
+                        message((snap.source + " passes only its decisions, not a waveform to draw an eye from.").c_str());
                         plotEmpty = true;
                     }
                     else { drawEye(p, snap.samples, snap.marks, decT, decRange, decLevels, snap.thresholds); }
@@ -1424,13 +1522,12 @@ namespace {
                 else {
                     drawDecisions(p, snap.values, decRange, snap.thresholds);
                 }
-                parts = decoderReadouts();
             }
         }
         p.dl->PopClipRect();
 
         // The scale, top left inside the plot.
-        if (!plotEmpty && gui::mainWindow.sdrIsRunning() && ((source == SOURCE_CHANNEL && cv.ready) || (source == SOURCE_DECODER && decReady))) {
+        if (!plotEmpty && running && ((source == SOURCE_CHANNEL && cv.ready) || (source == SOURCE_DECODER && decReady))) {
             char scale[96];
             char eyeSpan[32];
             snprintf(eyeSpan, sizeof eyeSpan, "%d symbol%s across", EYE_SPANS[eyeSpanIdx], EYE_SPANS[eyeSpanIdx] == 1 ? "" : "s");
@@ -1441,7 +1538,7 @@ namespace {
                 snprintf(scale, sizeof scale, "I, %s", eyeSpan);
             }
             else {
-                float range = (source == SOURCE_CHANNEL) ? cv.traceRange : decRange;
+                float range = (source == SOURCE_DECODER) ? decRange : (view == VIEW_EYE) ? cv.freqRange : cv.traceRange;
                 std::string r = hz(range, false);
                 if (view == VIEW_CONST) { snprintf(scale, sizeof scale, "decisions, edges \xC2\xB1%s", r.c_str()); }
                 else if (view == VIEW_EYE) { snprintf(scale, sizeof scale, "\xC2\xB1%s, %s", r.c_str(), eyeSpan); }
@@ -1455,7 +1552,7 @@ namespace {
         }
 
         ImGui::SetCursorScreenPos(ImVec2(origin.x, p.max.y + (2.0f * style::uiScale)));
-        if (!parts.empty()) { readouts(avail.x, parts); }
+        readouts(avail.x, parts, maxLines, true);
     }
 
     Analyzer* analyzer = nullptr;
