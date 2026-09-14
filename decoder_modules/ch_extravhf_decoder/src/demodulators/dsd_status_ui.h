@@ -48,7 +48,12 @@ namespace demod {
     // that and shows none of it, so read the count out as a quality bar - full and
     // green is clean - and say what the letter meant. The raw string stays on the
     // tooltip for anyone who reads mbelib output directly.
-    inline void drawVoiceQualityBar(const std::string& errorbar, bool synced, float& smoothed, const std::string& idSuffix) {
+    //
+    // carryingVoice is false while the frames coming in are not voice at all - an
+    // NXDN data frame, say. The error bar is whatever the last voice frame left,
+    // so without it the row went on reporting that frame's bit errors against a
+    // Frame row that said DATA.
+    inline void drawVoiceQualityBar(const std::string& errorbar, bool synced, float& smoothed, const std::string& idSuffix, bool carryingVoice = true) {
         int errors = 0;
         char flag = 0;
         for (char c : errorbar) {
@@ -61,6 +66,10 @@ namespace demod {
         if (!synced) {
             verdict = "no signal";
             color = ImVec4(0.5f, 0.5f, 0.5f, 1.0f);
+        } else if (!carryingVoice) {
+            verdict = "no voice in these frames";
+            color = ImVec4(0.5f, 0.5f, 0.5f, 1.0f);
+            errors = 0;
         } else if (flag == 'M') {
             verdict = "muted, too many bad frames";
             color = ImVec4(1.0f, 0.3f, 0.3f, 1.0f);
@@ -93,7 +102,7 @@ namespace demod {
         // of AMBE frames per voice frame, so this is an indicator, not a measurement.
         float quality = 1.0f - ((float)errors / 16.0f);
         if (quality < 0.0f) { quality = 0.0f; }
-        if (!synced) { quality = 0.0f; }
+        if (!synced || !carryingVoice) { quality = 0.0f; }
         smoothed = approachValue(smoothed, quality, 6.0f);
 
         char overlay[64];

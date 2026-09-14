@@ -115,7 +115,11 @@ namespace demod {
                 who = "call";
             }
 
-            callLog.observe(dsdDec.status_sync, label, who, false);
+            // Sync alone is not a call for DMR and NXDN, which have nothing else to go
+            // on: a control channel is in sync all day, and was logged as one call
+            // lasting as long as the panel was open. The log's own hold carries a call
+            // across the data frames between voice.
+            callLog.observe(dsdDec.status_sync && carryingVoice(), label, who, false);
         }
 
         void start() {
@@ -217,7 +221,8 @@ namespace demod {
                 ImGui::Spacing();
                 if (ImGui::CollapsingHeader(("Advanced##_olddsd_adv_" + name).c_str())) {
                     // Off is szechyjs's exact compare, on is what dsdcc and dsd-fme do.
-                    // Worth turning off if it starts syncing on noise.
+                    // Only for staying on a signal already being decoded: finding one
+                    // always takes an exact match, so this cannot make it sync on noise.
                     bool tolerant = dsdDec.nxdnSyncTolerance > 0;
                     if (ImGui::Checkbox(("Tolerant NXDN sync##_olddsd_nxdntol_" + name).c_str(), &tolerant)) {
                         dsdDec.nxdnSyncTolerance = tolerant ? 1 : 0;
@@ -239,8 +244,23 @@ namespace demod {
             callLog.draw(name);
         }
 
+        // Whether the frames coming in carry voice. NXDN and DMR say which kind of
+        // frame they last had - on a live DMR control channel the voice row sat on
+        // the bit errors of a voice frame long gone while both slots carried CSBK and
+        // idle bursts. Everything else is taken as voice, as before.
+        bool carryingVoice() {
+            const std::string& proto = dsdDec.status_last_proto;
+            if (proto.find("NXDN") != std::string::npos) {
+                return dsdDec.status_last_nxdn_type != "DATA";
+            }
+            if (proto.find("DMR") != std::string::npos) {
+                return dsdDec.status_last_dmr_slot0_burst == "VOICE" || dsdDec.status_last_dmr_slot1_burst == "VOICE";
+            }
+            return true;
+        }
+
         void drawVoiceQuality() {
-            drawVoiceQualityBar(dsdDec.status_errorbar, dsdDec.status_sync, voiceQualitySmoothed, name);
+            drawVoiceQualityBar(dsdDec.status_errorbar, dsdDec.status_sync, voiceQualitySmoothed, name, carryingVoice());
         }
 
         // Names getFrameSync's return codes. A protocol showing up here without

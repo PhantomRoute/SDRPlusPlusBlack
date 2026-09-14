@@ -265,6 +265,7 @@ private:
         double centre = 0.0;
         float level = 0.0f;
         double width = 0.0;
+        double middle = 0.0;  // halfway between the -26 dB edges
         bool on = false;
     };
     static constexpr double TREND_WINDOW = 10.0;
@@ -584,6 +585,7 @@ private:
             t.centre = meas.centre;
             t.level = meas.peakDbfs;
             t.width = meas.occupied;
+            t.middle = (meas.occLeft + meas.occRight) / 2.0;
             t.on = meas.on;
             trend.push_back(t);
             while (!trend.empty() && (now - trend.front().time) > TREND_WINDOW) {
@@ -948,19 +950,15 @@ private:
         return frozen || gui::mainWindow.sdrIsRunning();
     }
 
-    // Hz per second the peak is moving: false when there is not enough to say, true
-    // with 0 when it is sitting still.
+    // A straight line through every frame of the trend window the signal was up in,
+    // by its peak or by the middle of its edges. Gives how fast that is moving, how
+    // far the frames scatter either side of the line, where the line is at the latest
+    // frame, and how many seconds the frames cover. False when there is too little to
+    // fit.
     //
-    // A straight line fitted through every frame the signal was up, not the first
-    // frame compared with the last. The peak of anything wider than a carrier hops
-    // about between bins from one frame to the next, so two single frames ten seconds
-    // apart routinely landed a couple of bins apart and a perfectly still signal was
-    // reported drifting. The frames between transmissions are left out for the same
-    // reason: their "peak" is wherever the noise happened to be highest.
-    bool drift(double& hzPerSec) const {
-        hzPerSec = 0.0;
-        if (!trendLive()) { return false; }
-
+    // The frames between transmissions are left out: their "peak" is wherever the
+    // noise happened to be highest.
+    bool fitTrend(bool byPeak, double& slope, double& resid, double& latest, double& seconds) const {
         int n = 0;
         double first = 0.0, last = 0.0;
         double sumT = 0.0, sumC = 0.0;
@@ -969,7 +967,7 @@ private:
             if (n == 0) { first = t.time; }
             last = t.time;
             sumT += t.time;
-            sumC += t.centre;
+            sumC += byPeak ? t.centre : t.middle;
             n++;
         }
         if (n < 20 || (last - first) < 3.0) { return false; }
@@ -978,25 +976,42 @@ private:
         double sxx = 0.0, sxy = 0.0;
         for (const auto& t : trend) {
             if (!t.on) { continue; }
+            double c = byPeak ? t.centre : t.middle;
             sxx += (t.time - meanT) * (t.time - meanT);
-            sxy += (t.time - meanT) * (t.centre - meanC);
+            sxy += (t.time - meanT) * (c - meanC);
         }
         if (sxx <= 0.0) { return false; }
-        double slope = sxy / sxx;
+        slope = sxy / sxx;
 
-        // How far the frames scatter either side of the line.
-        double resid = 0.0;
+        resid = 0.0;
         for (const auto& t : trend) {
             if (!t.on) { continue; }
-            double d = (t.centre - meanC) - (slope * (t.time - meanT));
+            double d = ((byPeak ? t.centre : t.middle) - meanC) - (slope * (t.time - meanT));
             resid += d * d;
         }
         resid = sqrt(resid / (double)n);
+        latest = meanC + (slope * (last - meanT));
+        seconds = last - first;
+        return true;
+    }
+
+    // Hz per second the peak is moving: false when there is not enough to say, true
+    // with 0 when it is sitting still.
+    //
+    // From the fitted line, not the first frame compared with the last. The peak of
+    // anything wider than a carrier hops about between bins from one frame to the
+    // next, so two single frames ten seconds apart routinely landed a couple of bins
+    // apart and a perfectly still signal was reported drifting.
+    bool drift(double& hzPerSec) const {
+        hzPerSec = 0.0;
+        if (!trendLive()) { return false; }
+        double slope = 0.0, resid = 0.0, latest = 0.0, seconds = 0.0;
+        if (!fitTrend(true, slope, resid, latest, seconds)) { return false; }
 
         // Only a move counts: the line has to travel at least half a bin, which is
         // about as finely as the peak can be placed between bins, and further than
         // the frames scatter about it, or the slope is just the scatter leaning one way.
-        double moved = fabs(slope * (last - first));
+        double moved = fabs(slope * seconds);
         if (moved < std::max<double>(shown.hzPerBin * 0.5, resid * 2.0)) { return true; }
         hzPerSec = slope;
         return true;
@@ -1079,8 +1094,13 @@ private:
         return (double)samplesOn / (double)samplesTotal;
     }
 
-    // Where the signal is, by whichever measure following settled on when it began.
-    double followPosition() const {
+    // Where the signal is now, by whichever measure following settled on when it
+    // began, and how far that position scatters. The fitted line when there is one,
+    // since it is steadier than any median; the settled median until there is.
+    double followPosition(double& scatter) const {
+        double slope = 0.0, latest = 0.0, seconds = 0.0;
+        scatter = 0.0;
+        if (fitTrend(followByPeak, slope, scatter, latest, seconds)) { return latest; }
         return followByPeak ? settledPeak : settledMiddle;
     }
 
@@ -1115,7 +1135,8 @@ private:
         // position by the difference between them and move the VFO for nothing.
         followByPeak = (shown.crestDb >= 12.0f) || (shown.binsAcross <= 8);
         followVfo = gui::waterfall.selectedVFO;
-        followRef = followPosition();
+        double scatter = 0.0;
+        followRef = followPosition(scatter);
         followOffset = f - followRef;
         followStart = f;
         followExpect = f;
@@ -1158,7 +1179,8 @@ private:
 
         // Up for most of the last two seconds, so the position is a real one.
         bool good = settledOnFraction >= 0.5;
-        double pos = followPosition();
+        double scatter = 0.0;
+        double pos = followPosition(scatter);
         // And not a jump. A signal drifts a few hertz a second; a position that moved
         // by half its width in a quarter of a second is something else - a stronger
         // neighbour taking over the measurement, or a glitch - and not to be chased.
@@ -1172,13 +1194,21 @@ private:
         followRef = pos;
 
         // Some way either side before moving, or the VFO would chase the measurement's
-        // own jitter and warble the audio back and forth for no reason. A peak is
-        // placed between bins and holds still to a fraction of one, so half a bin
-        // is enough and the steps are small. The middle of two edges is only ever
-        // whole or half bins, and a median of it flips between neighbours, so that
-        // waits for a bin and a half.
+        // own jitter and warble the audio back and forth for no reason.
+        //
+        // The floor is the resolution: a carrier's peak is placed between bins and
+        // holds still to a fraction of one, so half a bin, and the steps are small;
+        // the middle of two edges is only ever whole or half bins, so a bin and a half.
+        //
+        // Above that, three times how far the position scatters about its line. On a
+        // live FM broadcast the peak hops about with the audio by kilohertz, and with
+        // only the floor the VFO took a 1.4 kHz step off a station that was not
+        // moving at all. A signal that really drifts scatters little about its line
+        // and is followed closely; one whose peak only wanders is left alone unless
+        // it moves further than it wanders.
         double target = pos + followOffset;
-        if (fabs(target - f) < bin * (followByPeak ? 0.5 : 1.5)) { return; }
+        double deadband = std::max<double>(bin * (followByPeak ? 0.5 : 1.5), scatter * 3.0);
+        if (fabs(target - f) < deadband) { return; }
 
         tuner::tune(tuner::TUNER_MODE_NORMAL, followVfo, target);
         if (!tuneFreq(f)) { return; }

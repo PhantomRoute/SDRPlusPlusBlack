@@ -348,6 +348,8 @@ namespace dsp {
             short sample;
             int result;
 
+            symbolClock++;
+
             sum = 0;
             count = 0;
             // Snapshot the rate and the sampling point. setDemodMode writes both
@@ -1489,18 +1491,29 @@ namespace dsp {
                     // the old full width compare left it, and processNXDNVoice's dibit
                     // skip is still correct; the trailing LICH symbols are simply not
                     // required to match any more.
+                    //
+                    // On a signal already being decoded the next sync word is due
+                    // 18 symbols into the search - one more if timing slipped - and
+                    // may have a symbol wrong. Anywhere else it has to be exact.
+                    bool wasNxdn = (lastsynctype == 8) || (lastsynctype == 16) || (lastsynctype == 9) || (lastsynctype == 17);
+                    bool continuing = (carrier == 1) && wasNxdn && (framesyncSymbolsRead <= 19);
+                    int tolerance = continuing ? nxdnSyncTolerance : 0;
                     bool nxdnInv = false;
-                    bool nxdnSync = syncMatches (framesynctest18, NXDN_BS_VOICE_SYNC, nxdnSyncTolerance, NXDN_FSW_LEN);
+                    bool nxdnSync = syncMatches (framesynctest18, NXDN_BS_VOICE_SYNC, tolerance, NXDN_FSW_LEN);
                     if (!nxdnSync) {
-                        nxdnSync = syncMatches (framesynctest18, INV_NXDN_BS_VOICE_SYNC, nxdnSyncTolerance, NXDN_FSW_LEN);
+                        nxdnSync = syncMatches (framesynctest18, INV_NXDN_BS_VOICE_SYNC, tolerance, NXDN_FSW_LEN);
                         nxdnInv = nxdnSync;
                     }
                     if (nxdnSync) {
                         int frameType = nxdnFrameSyncType (framesynctest18, nxdnInv);
-                        // Same confirmation the full width compare used: an NXDN sync
-                        // of the same polarity has to have been seen already.
-                        bool confirmed = nxdnInv ? ((lastsynctype == 9) || (lastsynctype == 17))
-                                                 : ((lastsynctype == 8) || (lastsynctype == 16));
+                        bool samePolarity = nxdnInv ? ((lastsynctype == 9) || (lastsynctype == 17))
+                                                    : ((lastsynctype == 8) || (lastsynctype == 16));
+                        // Carrying on, the frame before was NXDN of the same polarity.
+                        // Starting afresh, an exact sync word one frame earlier - the
+                        // old rule, any NXDN sync seen at any point before, was met by
+                        // two chance matches a moment apart.
+                        bool confirmed = continuing ? samePolarity : nxdnSeenFrameAgo (nxdnInv);
+                        rememberNxdnSync (nxdnInv);
                         if (confirmed) {
                             carrier = 1;
                             offset = framesynctest_pos;

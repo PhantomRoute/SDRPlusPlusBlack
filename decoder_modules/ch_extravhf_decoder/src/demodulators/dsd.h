@@ -245,7 +245,12 @@ namespace demod {
                 who = buf;
             }
 
-            callLog.observe(fr_st.sync, proto, who, encrypted);
+            // A DMR call is voice. Sync alone is every control channel, which the log
+            // recorded as one call lasting as long as the panel was open. The log's own
+            // hold carries a call across the gaps between voice superframes.
+            bool active = fr_st.sync;
+            if (proto == "DMR") { active = active && decoder.getMBEStatus().mbe_status_decoding; }
+            callLog.observe(active, proto, who, encrypted);
         }
 
         void showMenu() {
@@ -339,7 +344,10 @@ namespace demod {
             if (!fr_st.sync) { style::endDisabled(); }
 
             dsp::NewDSD::MBE_status mbe_st = decoder.getMBEStatus();
-            drawVoiceQualityBar(mbe_st.mbe_status_errorbar, fr_st.sync && mbe_st.mbe_status_decoding, voiceQualitySmoothed, name);
+            // Synced and not decoding voice is a data or idle frame, not a missing
+            // signal. Folding the two into one "synced" said "no signal" under a
+            // green SYNC line on every DMR control channel.
+            drawVoiceQualityBar(mbe_st.mbe_status_errorbar, fr_st.sync, voiceQualitySmoothed, name, mbe_st.mbe_status_decoding);
 
             ImGui::Spacing();
             callLog.draw(name);

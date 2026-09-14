@@ -658,7 +658,42 @@ namespace dsp {
         // descendants of this decoder fixed it the same way: f4exb/dsdcc matches
         // its 19 symbol RDCH sync with a tolerance of 1, and dsd-fme likewise moved
         // off exact matching. 0 restores the old exact-compare behaviour.
+        //
+        // That tolerance only applies where the next frame's sync word is due -
+        // straight after a frame this decoder has just read. Hunting for a signal it
+        // was not already on, a 10 symbol word with a symbol to spare matches random
+        // data about one time in a hundred, which on a DMR signal was dozens of times
+        // a second: the decoder reported NXDN48 voice and played noise. A new sync
+        // has to match exactly, twice, one frame apart - see nxdnSeenFrameAgo.
         int nxdnSyncTolerance = 1;
+
+        // Every symbol read, counted, so two sync words can be checked for being one
+        // frame apart even with a frame's worth of decoding between them.
+        long long symbolClock = 0;
+        // Where the last few NXDN sync words were seen, by polarity.
+        static constexpr int NXDN_RECENT = 8;
+        long long nxdnRecentSync[2][NXDN_RECENT] = {
+            { -1000000, -1000000, -1000000, -1000000, -1000000, -1000000, -1000000, -1000000 },
+            { -1000000, -1000000, -1000000, -1000000, -1000000, -1000000, -1000000, -1000000 }
+        };
+        int nxdnRecentNext[2] = { 0, 0 };
+
+        // An NXDN frame is 192 symbols as this decoder reads it, sync word
+        // included. 384 is accepted too, for NXDN96 at twice the symbol rate, and a
+        // symbol either way for timing recovery slipping.
+        bool nxdnSeenFrameAgo(bool inverted) const {
+            for (long long seen : nxdnRecentSync[inverted ? 1 : 0]) {
+                long long gap = symbolClock - seen;
+                if ((gap >= 191 && gap <= 193) || (gap >= 383 && gap <= 385)) { return true; }
+            }
+            return false;
+        }
+
+        void rememberNxdnSync(bool inverted) {
+            int p = inverted ? 1 : 0;
+            nxdnRecentSync[p][nxdnRecentNext[p]] = symbolClock;
+            nxdnRecentNext[p] = (nxdnRecentNext[p] + 1) % NXDN_RECENT;
+        }
 
         // Whether the slicer levels are tracked continuously in GFSK, or left on the
         // estimate taken when the frame synced - see use_symbol. Off restores

@@ -135,6 +135,21 @@ namespace httpdebug {
 
 #endif // __cplusplus
 
+    // Module commands run on the UI thread, because most of them change what it is
+    // drawing, and the request gives up after five seconds. A command that waits for
+    // something - a decoder reaching a state - cannot live with either: it freezes
+    // the window while it waits and is cut off before its own timeout.
+    //
+    // One registered here runs on the debug server's thread instead, under the
+    // instance name and command it would otherwise have been sent to, and takes as
+    // long as it takes. It must only touch state it guards itself, and must not
+    // assume the module instance is still there.
+    using OffThreadCommand = std::function<std::string(const std::string& args)>;
+    void registerOffThreadCommand(const std::string& instanceName, const std::string& cmd, OffThreadCommand run);
+    void unregisterOffThreadCommand(const std::string& instanceName, const std::string& cmd);
+    // Empty when nothing is registered for that pair.
+    OffThreadCommand findOffThreadCommand(const std::string& instanceName, const std::string& cmd);
+
     namespace procfs {
         struct ProcRequest {
             std::string path;

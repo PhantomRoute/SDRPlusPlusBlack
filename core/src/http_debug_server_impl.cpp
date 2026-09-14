@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <unordered_map>
 #include <map>
+#include <mutex>
 #include <set>
 #include <cstdarg>
 #include <core.h>
@@ -304,6 +305,32 @@ namespace httpdebug {
 #endif // __cplusplus
 
 } // namespace httpdebug
+
+namespace httpdebug {
+    namespace {
+        std::map<std::pair<std::string, std::string>, OffThreadCommand> offThreadCommands;
+        std::mutex offThreadCommandsMutex;
+    }
+
+    void registerOffThreadCommand(const std::string& instanceName, const std::string& cmd, OffThreadCommand run) {
+        std::lock_guard<std::mutex> lock(offThreadCommandsMutex);
+        offThreadCommands[std::make_pair(instanceName, cmd)] = run;
+    }
+
+    void unregisterOffThreadCommand(const std::string& instanceName, const std::string& cmd) {
+        std::lock_guard<std::mutex> lock(offThreadCommandsMutex);
+        offThreadCommands.erase(std::make_pair(instanceName, cmd));
+    }
+
+    OffThreadCommand findOffThreadCommand(const std::string& instanceName, const std::string& cmd) {
+        // A copy, so the command can run after the lock is released - and after
+        // the module has unregistered it, if it is unloaded meanwhile.
+        std::lock_guard<std::mutex> lock(offThreadCommandsMutex);
+        auto it = offThreadCommands.find(std::make_pair(instanceName, cmd));
+        if (it == offThreadCommands.end()) { return OffThreadCommand(); }
+        return it->second;
+    }
+}
 
 namespace httpdebug {
     namespace procfs {
@@ -758,6 +785,13 @@ struct Response* createResponseForRequest(const struct Request* request, struct 
                 char* argsParam = strdupDecodeGETParam("args=", request, "");
                 args = argsParam;
                 free(argsParam);
+            }
+
+            // Waits and the like, which must not hold up the UI thread - see
+            // registerOffThreadCommand.
+            if (auto offThread = httpdebug::findOffThreadCommand(instanceName, cmd)) {
+                std::string result = offThread(args);
+                return responseAllocJSON(result.c_str());
             }
 
             // Module commands select demodulators, tear down DSP chains and bind

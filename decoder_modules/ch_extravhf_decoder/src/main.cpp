@@ -26,6 +26,7 @@
 #include <core.h>
 #include <utils/optionlist.h>
 #include <chrono>
+#include <http_debug_server.h>
 #include "./demod.h"
 
 ConfigManager config;
@@ -39,10 +40,19 @@ public:
     std::string name;
 
     VhfVoiceRadioModule(std::string name) {
-
+        this->name = name;
+        // The wait sleeps until the decoder has held voice for long enough, which
+        // is up to its own timeout - ten seconds in the e2e test. Run where module
+        // commands normally run, on the UI thread, it froze the window for that long
+        // and the request was cut off at five seconds, so it could never succeed.
+        // It only reads the decoders' own locked registry, so it needs neither.
+        httpdebug::registerOffThreadCommand(name, "wait_dmr_sync_voice", [](const std::string& args) {
+            return runWaitForDMRSyncVoice(args);
+        });
     }
 
     ~VhfVoiceRadioModule() {
+        httpdebug::unregisterOffThreadCommand(name, "wait_dmr_sync_voice");
     }
 
     EventHandler<std::string> moduleCreatedListener;
@@ -189,21 +199,22 @@ public:
             }
             return debugStatusToJson(st, 0, false);
         }
-        if (cmd == "wait_dmr_sync_voice") {
-            std::string radioName = "Radio";
-            int stableMs = 2000;
-            int timeoutMs = 10000;
-            parseWaitArgs(args, radioName, stableMs, timeoutMs);
-            demod::DSD::DebugStatus st;
-            int waitedMs = 0;
-            bool ok = demod::DSD::waitForDMRSyncVoice(radioName, stableMs, timeoutMs, st, waitedMs);
-            return debugStatusToJson(st, waitedMs, ok);
-        }
         return "{}";
     }
 
 
 private:
+    static std::string runWaitForDMRSyncVoice(const std::string& args) {
+        std::string radioName = "Radio";
+        int stableMs = 2000;
+        int timeoutMs = 10000;
+        parseWaitArgs(args, radioName, stableMs, timeoutMs);
+        demod::DSD::DebugStatus st;
+        int waitedMs = 0;
+        bool ok = demod::DSD::waitForDMRSyncVoice(radioName, stableMs, timeoutMs, st, waitedMs);
+        return debugStatusToJson(st, waitedMs, ok);
+    }
+
     static void parseWaitArgs(const std::string& args, std::string& radioName, int& stableMs, int& timeoutMs) {
         if (args.empty()) {
             return;
