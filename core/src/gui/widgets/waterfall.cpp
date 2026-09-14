@@ -1809,8 +1809,12 @@ namespace ImGui {
     void WaterFall::drawPersistence(ImGuiWindow* window) {
         if (!fftPersistence || persistHits.empty() || persistW != dataWidth || persistH != fftHeight) { return; }
 
-        if (persistTexture == 0) {
+        // On Android a recreated activity comes back with a new GL context, in which the
+        // old texture name means nothing. Make a fresh one and size it again.
+        if (persistTexture == 0 || !glIsTexture(persistTexture)) {
             glGenTextures(1, &persistTexture);
+            persistTexW = 0;
+            persistTexH = 0;
         }
 
         // Brightness on a log scale against what a point hit on every frame builds up

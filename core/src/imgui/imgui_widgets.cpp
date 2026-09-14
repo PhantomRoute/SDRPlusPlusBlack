@@ -2750,6 +2750,15 @@ TYPE ImGui::ScaleValueFromRatioT(ImGuiDataType data_type, float t, TYPE v_min, T
     return result;
 }
 
+// Which slider the pointer has been moved onto, and how far, for the wheel handling in
+// SliderBehaviorT. One set for every slider type, since the template gets a copy of any
+// statics per type.
+namespace SliderWheelArm {
+    static ImGuiID id = 0;
+    static float moved = 0.0f;
+    static int frame = -1;
+}
+
 // FIXME: Move more of the code into SliderBehavior()
 template<typename TYPE, typename SIGNEDTYPE, typename FLOATTYPE>
 bool ImGui::SliderBehaviorT(const ImRect& bb, ImGuiID id, ImGuiDataType data_type, TYPE* v, const TYPE v_min, const TYPE v_max, const char* format, ImGuiSliderFlags flags, ImRect* out_grab_bb)
@@ -2784,7 +2793,45 @@ bool ImGui::SliderBehaviorT(const ImRect& bb, ImGuiID id, ImGuiDataType data_typ
 
     // Process interacting with the slider
     bool value_changed = false;
-    if (g.IO.MouseWheel != 0) {
+
+    // The wheel on a slider (a local addition: stock sliders ignore it) is taken only by
+    // a slider the pointer was actually moved onto.
+    //
+    // Scrolling a panel slides its controls under a pointer that is not moving, and a
+    // scroll wheel is not one smooth movement - there is a pause each time a finger goes
+    // back to the top of the wheel. Every such pause used to land the next notch in
+    // whichever slider had arrived under the pointer, so scrolling past the clock
+    // correction or a gain nudged it by a step. Moving the pointer onto a slider arms it;
+    // a notch that scrolls the panel disarms it again, since whatever is under the
+    // pointer afterwards was not aimed at. An armed slider also claims the wheel from the
+    // panel, so nudging it no longer scrolls the panel out from under the pointer too.
+    //
+    // It also has to be the hovered item now, not just have the pointer inside it, so a
+    // slider covered by a popup or another window no longer takes the wheel either.
+    //
+    // The state lives in SliderWheelArm below rather than in statics here: this is a
+    // template, so statics would be kept separately for int and float sliders. And a
+    // slider that was not hovered on the previous frame starts unarmed again, or one
+    // nudged earlier would still be armed when a scroll brought it back under the
+    // pointer later.
+    const float wheelArmDistance = 4.0f;
+    bool wheelArmed = false;
+    if (g.HoveredId == id && bb.Contains(g.IO.MousePos)) {
+        if (SliderWheelArm::id != id || (g.FrameCount - SliderWheelArm::frame) > 1) {
+            SliderWheelArm::id = id;
+            SliderWheelArm::moved = 0.0f;
+        }
+        SliderWheelArm::frame = g.FrameCount;
+        SliderWheelArm::moved += ImFabs(g.IO.MouseDelta.x) + ImFabs(g.IO.MouseDelta.y);
+        wheelArmed = SliderWheelArm::moved >= wheelArmDistance;
+        if (wheelArmed) {
+            g.HoveredIdUsingMouseWheel = true;
+        }
+        else if (g.IO.MouseWheel != 0) {
+            SliderWheelArm::moved = 0.0f;
+        }
+    }
+    if (g.IO.MouseWheel != 0 && wheelArmed) {
         if (bb.Contains(g.IO.MousePos)) {
             auto wheel = g.IO.MouseWheel;
             if (axis == ImGuiAxis_X) wheel = -wheel; // just coincidence
