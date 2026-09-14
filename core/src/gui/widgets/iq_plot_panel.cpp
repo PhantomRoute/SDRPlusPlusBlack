@@ -13,6 +13,8 @@
 #include <dsp/processor.h>
 #include <vector>
 #include <mutex>
+#include <atomic>
+#include <string>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -24,11 +26,19 @@ namespace {
     const int POINTS_PER_BLOCK = 512;
     // Full scale is a magnitude of 1.0.
     const float CLIP_LEVEL = 0.98f;
-    // Samples in a row for the scope's sample view: consecutive, not thinned, so the
+    // Samples in a row kept for the scope's sample view: consecutive, not thinned, so the
     // shape of the waveform - flattened tops, I and Q a quarter turn apart - survives.
-    const int SCOPE_SAMPLES = 1024;
+    // About a tenth of a second at 2.4 MS/s, and over five seconds at 48 kHz.
+    const int SCOPE_RING = 262144;
+    // How many of them the view can show at once, from a few cycles to the whole ring.
+    const int SCOPE_SPANS[] = { 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144 };
+    const int SCOPE_SPAN_COUNT = 13;
+    const int SCOPE_SPAN_DEFAULT = 4;
     // Blocks remembered for the scope's envelope view, which is what shows bursts.
-    const int ENVELOPE_BLOCKS = 600;
+    const int ENVELOPE_BLOCKS = 32768;
+    const float ENVELOPE_SPANS[] = { 0.5f, 1.0f, 2.0f, 5.0f, 10.0f, 30.0f, 60.0f };
+    const int ENVELOPE_SPAN_COUNT = 7;
+    const int ENVELOPE_SPAN_DEFAULT = 2;
     const double IQ_PI = 3.14159265358979323846;
 
     enum IQView { IQ_VIEW_SCATTER = 0, IQ_VIEW_SCOPE };
@@ -48,7 +58,7 @@ namespace {
     public:
         IQTap() {
             ring.resize(SNAPSHOT_POINTS);
-            scope.resize(SCOPE_SAMPLES);
+            scope.resize(SCOPE_RING);
             envelope.resize(ENVELOPE_BLOCKS);
         }
 
@@ -76,24 +86,36 @@ namespace {
             return filled;
         }
 
-        // The newest run of consecutive samples, oldest first.
-        int scopeSnapshot(std::vector<dsp::complex_t>& out) {
+        // Whether to keep every sample for the scope. Only while its sample view is up:
+        // at a few megasamples a second the copy is not free.
+        std::atomic<bool> scopeCapture{ false };
+
+        // The newest want consecutive samples, oldest first, or as many as there are.
+        int scopeSnapshot(std::vector<dsp::complex_t>& out, int want) {
             std::lock_guard<std::mutex> lck(snapMtx);
-            out.resize(scopeFilled);
-            for (int i = 0; i < scopeFilled; i++) {
-                out[i] = scope[(scopePos - scopeFilled + i + SCOPE_SAMPLES) % SCOPE_SAMPLES];
+            int n = std::min<int>(want, scopeFilled);
+            out.resize(n);
+            for (int i = 0; i < n; i++) {
+                out[i] = scope[(scopePos - n + i + SCOPE_RING) % SCOPE_RING];
             }
-            return scopeFilled;
+            return n;
         }
 
-        // The per-block peaks, oldest first.
-        int envelopeSnapshot(std::vector<EnvelopeBlock>& out) {
+        // The per-block peaks covering the last seconds of signal, oldest first.
+        int envelopeSnapshot(std::vector<EnvelopeBlock>& out, double seconds, double sampleRate) {
             std::lock_guard<std::mutex> lck(snapMtx);
-            out.resize(envFilled);
-            for (int i = 0; i < envFilled; i++) {
-                out[i] = envelope[(envPos - envFilled + i + ENVELOPE_BLOCKS) % ENVELOPE_BLOCKS];
+            double wantSamples = seconds * std::max<double>(sampleRate, 1.0);
+            double have = 0.0;
+            int n = 0;
+            while (n < envFilled && have < wantSamples) {
+                have += envelope[(envPos - 1 - n + ENVELOPE_BLOCKS) % ENVELOPE_BLOCKS].count;
+                n++;
             }
-            return envFilled;
+            out.resize(n);
+            for (int i = 0; i < n; i++) {
+                out[i] = envelope[(envPos - n + i + ENVELOPE_BLOCKS) % ENVELOPE_BLOCKS];
+            }
+            return n;
         }
 
         void clear() {
@@ -129,11 +151,18 @@ namespace {
                 pos = (pos + 1) % SNAPSHOT_POINTS;
                 if (filled < SNAPSHOT_POINTS) { filled++; }
             }
-            // The last samples of the block, in order.
-            for (int i = std::max<int>(0, count - SCOPE_SAMPLES); i < count; i++) {
-                scope[scopePos] = in[i];
-                scopePos = (scopePos + 1) % SCOPE_SAMPLES;
-                if (scopeFilled < SCOPE_SAMPLES) { scopeFilled++; }
+            // Every sample, in order, while the scope wants them.
+            if (scopeCapture.load(std::memory_order_relaxed)) {
+                int start = std::max<int>(0, count - SCOPE_RING);
+                int remaining = count - start;
+                while (remaining > 0) {
+                    int chunk = std::min<int>(remaining, SCOPE_RING - scopePos);
+                    memcpy(&scope[scopePos], &in[start], (size_t)chunk * sizeof(dsp::complex_t));
+                    scopePos = (scopePos + chunk) % SCOPE_RING;
+                    scopeFilled = std::min<int>(SCOPE_RING, scopeFilled + chunk);
+                    start += chunk;
+                    remaining -= chunk;
+                }
             }
             EnvelopeBlock blk;
             blk.peakI = peakI;
@@ -162,6 +191,9 @@ namespace {
         bool shown = false;
         int view = IQ_VIEW_SCATTER;
         int span = SPAN_SAMPLES;
+        int scopeSpanIdx = SCOPE_SPAN_DEFAULT;
+        int envSpanIdx = ENVELOPE_SPAN_DEFAULT;
+        bool paused = false;
         IQTap tap;
         bool tapInChain = false;
         bool tapEnabled = false;
@@ -191,6 +223,10 @@ namespace {
             }
             show();
             setTapEnabled(true);
+            tap.scopeCapture.store(view == IQ_VIEW_SCOPE && span == SPAN_SAMPLES, std::memory_order_relaxed);
+
+            // Paused, everything on screen stays as it was, numbers included.
+            if (paused && haveData) { return; }
 
             double now = ImGui::GetTime();
             if ((now - lastRead) < 0.05) { return; }
@@ -236,8 +272,8 @@ namespace {
             phaseErrorDeg = phaseSeeded ? (phaseErrorDeg * 0.95f) + (instantDeg * 0.05f) : instantDeg;
             phaseSeeded = true;
             if (view == IQ_VIEW_SCOPE) {
-                tap.scopeSnapshot(scopePoints);
-                tap.envelopeSnapshot(envelopePoints);
+                if (span == SPAN_SAMPLES) { tap.scopeSnapshot(scopePoints, SCOPE_SPANS[scopeSpanIdx]); }
+                else { tap.envelopeSnapshot(envelopePoints, ENVELOPE_SPANS[envSpanIdx], sigpath::iqFrontEnd.getEffectiveSamplerate()); }
             }
 
             // Zoom to what is actually there. Real signals sit far below full scale, so a
@@ -275,19 +311,66 @@ namespace {
             core::configManager.release(true);
         }
 
+        // Places the next button on the same line if it fits, otherwise on a new one.
+        void flowNext(const char* nextLabel, float gap = -1.0f) {
+            float spacing = (gap < 0.0f) ? ImGui::GetStyle().ItemSpacing.x : gap;
+            float w = ImGui::CalcTextSize(nextLabel, NULL, true).x + (ImGui::GetStyle().FramePadding.x * 2.0f);
+            float right = ImGui::GetItemRectMax().x + spacing + w;
+            float limit = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
+            if (right < limit) { ImGui::SameLine(0.0f, spacing); }
+        }
+
+        std::string spanText() {
+            char buf[48];
+            if (span == SPAN_ENVELOPE) {
+                float sec = ENVELOPE_SPANS[envSpanIdx];
+                snprintf(buf, sizeof buf, sec < 1.0f ? "%.1f s" : "%.0f s", sec);
+                return buf;
+            }
+            double sr = sigpath::iqFrontEnd.getEffectiveSamplerate();
+            double ms = (sr > 0.0) ? 1000.0 * SCOPE_SPANS[scopeSpanIdx] / sr : 0.0;
+            if (ms <= 0.0) { snprintf(buf, sizeof buf, "%d samples", SCOPE_SPANS[scopeSpanIdx]); }
+            else if (ms < 1.0) { snprintf(buf, sizeof buf, "%.2f ms", ms); }
+            else if (ms < 1000.0) { snprintf(buf, sizeof buf, "%.1f ms", ms); }
+            else { snprintf(buf, sizeof buf, "%.2f s", ms / 1000.0); }
+            return buf;
+        }
+
         void drawViewPills() {
-            ImGui::SameLine(0.0f, 10.0f * style::uiScale);
+            float groupGap = 10.0f * style::uiScale;
+            flowNext("Scatter##_iqplot_view0", groupGap);
             if (pill("Scatter##_iqplot_view0", view == IQ_VIEW_SCATTER)) { view = IQ_VIEW_SCATTER; saveChoice("iqPlotView", view); }
-            ImGui::SameLine();
+            flowNext("Scope##_iqplot_view1");
             if (pill("Scope##_iqplot_view1", view == IQ_VIEW_SCOPE)) { view = IQ_VIEW_SCOPE; saveChoice("iqPlotView", view); }
             if (view == IQ_VIEW_SCOPE) {
-                ImGui::SameLine(0.0f, 10.0f * style::uiScale);
+                flowNext("Samples##_iqplot_span0", groupGap);
                 if (pill("Samples##_iqplot_span0", span == SPAN_SAMPLES)) { span = SPAN_SAMPLES; saveChoice("iqPlotScopeSpan", span); }
-                if (ImGui::IsItemHovered()) { style::tooltip("The last %d samples in a row: the waveform itself", SCOPE_SAMPLES); }
-                ImGui::SameLine();
+                if (ImGui::IsItemHovered()) { style::tooltip("Consecutive samples: the waveform itself"); }
+                flowNext("Envelope##_iqplot_span1");
                 if (pill("Envelope##_iqplot_span1", span == SPAN_ENVELOPE)) { span = SPAN_ENVELOPE; saveChoice("iqPlotScopeSpan", span); }
-                if (ImGui::IsItemHovered()) { style::tooltip("The peak of I and Q in each block over the last few seconds"); }
+                if (ImGui::IsItemHovered()) { style::tooltip("The peak of I and Q in each block, over seconds"); }
+
+                // How much time is across the plot.
+                std::string text = spanText();
+                flowNext(" - ##_iqplot_less", groupGap);
+                if (ImGui::SmallButton(" - ##_iqplot_less")) {
+                    if (span == SPAN_SAMPLES) { scopeSpanIdx = std::max<int>(0, scopeSpanIdx - 1); saveChoice("iqPlotScopeSamples", scopeSpanIdx); }
+                    else { envSpanIdx = std::max<int>(0, envSpanIdx - 1); saveChoice("iqPlotEnvelopeSpan", envSpanIdx); }
+                }
+                if (ImGui::IsItemHovered()) { style::tooltip("Less time across the plot"); }
+                flowNext(text.c_str());
+                ImGui::AlignTextToFramePadding();
+                ImGui::TextUnformatted(text.c_str());
+                flowNext(" + ##_iqplot_more");
+                if (ImGui::SmallButton(" + ##_iqplot_more")) {
+                    if (span == SPAN_SAMPLES) { scopeSpanIdx = std::min<int>(SCOPE_SPAN_COUNT - 1, scopeSpanIdx + 1); saveChoice("iqPlotScopeSamples", scopeSpanIdx); }
+                    else { envSpanIdx = std::min<int>(ENVELOPE_SPAN_COUNT - 1, envSpanIdx + 1); saveChoice("iqPlotEnvelopeSpan", envSpanIdx); }
+                }
+                if (ImGui::IsItemHovered()) { style::tooltip("More time across the plot"); }
             }
+            flowNext("Pause##_iqplot_pause", groupGap);
+            if (pill(paused ? "Paused##_iqplot_pause" : "Pause##_iqplot_pause", paused)) { paused = !paused; }
+            if (ImGui::IsItemHovered()) { style::tooltip(paused ? "Carry on updating" : "Hold what is on screen, numbers included"); }
         }
 
         // I and Q against time: the consecutive samples, or the peaks of each block.
@@ -318,11 +401,37 @@ namespace {
                     float peak = 0.0f;
                     for (const auto& pt : scopePoints) { peak = std::max<float>(peak, std::max<float>(fabsf(pt.re), fabsf(pt.im))); }
                     range = std::max<float>(scale, std::min<float>(1.0f, peak * 1.1f));
-                    float dx = w / (float)(scopePoints.size() - 1);
-                    for (size_t i = 0; i + 1 < scopePoints.size(); i++) {
-                        float x0 = plotMin.x + (dx * i), x1 = plotMin.x + (dx * (i + 1));
-                        draw->AddLine(ImVec2(x0, yOf(scopePoints[i].im)), ImVec2(x1, yOf(scopePoints[i + 1].im)), qColor, thick);
-                        draw->AddLine(ImVec2(x0, yOf(scopePoints[i].re)), ImVec2(x1, yOf(scopePoints[i + 1].re)), iColor, thick);
+                    size_t cols = (size_t)std::max<float>(2.0f, w);
+                    if (scopePoints.size() <= cols) {
+                        float dx = w / (float)(scopePoints.size() - 1);
+                        for (size_t i = 0; i + 1 < scopePoints.size(); i++) {
+                            float x0 = plotMin.x + (dx * i), x1 = plotMin.x + (dx * (i + 1));
+                            draw->AddLine(ImVec2(x0, yOf(scopePoints[i].im)), ImVec2(x1, yOf(scopePoints[i + 1].im)), qColor, thick);
+                            draw->AddLine(ImVec2(x0, yOf(scopePoints[i].re)), ImVec2(x1, yOf(scopePoints[i + 1].re)), iColor, thick);
+                        }
+                    }
+                    else {
+                        // More samples than pixels: each column spans its lowest to highest,
+                        // so a single clipped sample still reaches the top.
+                        size_t total = scopePoints.size();
+                        for (int pass = 0; pass < 2; pass++) {
+                            ImU32 col = (pass == 0) ? qColor : iColor;
+                            for (size_t c = 0; c < cols; c++) {
+                                size_t a = c * total / cols;
+                                size_t b = std::max<size_t>(a + 1, (c + 1) * total / cols);
+                                // Starting from the last sample of the column before, so
+                                // the columns join up into one trace.
+                                size_t from = (a > 0) ? a - 1 : a;
+                                float lo = 1e9f, hi = -1e9f;
+                                for (size_t i = from; i < b && i < total; i++) {
+                                    float v = (pass == 0) ? scopePoints[i].im : scopePoints[i].re;
+                                    lo = std::min<float>(lo, v);
+                                    hi = std::max<float>(hi, v);
+                                }
+                                float x = plotMin.x + (float)c;
+                                draw->AddLine(ImVec2(x, yOf(hi)), ImVec2(x, yOf(lo) + 1.0f), col, 1.0f);
+                            }
+                        }
                     }
                 }
             }
@@ -355,13 +464,13 @@ namespace {
             char label[96];
             double sr = sigpath::iqFrontEnd.getEffectiveSamplerate();
             if (span == SPAN_SAMPLES) {
-                if (sr > 0.0) { snprintf(label, sizeof label, "I solid, Q orange  \xC2\xB1%.3g  %.2f ms across", range, 1000.0 * (double)scopePoints.size() / sr); }
+                if (sr > 0.0) { snprintf(label, sizeof label, "I blue, Q orange  \xC2\xB1%.3g  %.2f ms across%s", range, 1000.0 * (double)scopePoints.size() / sr, paused ? "  paused" : ""); }
                 else { snprintf(label, sizeof label, "I solid, Q orange  \xC2\xB1%.3g", range); }
             }
             else {
                 double total = 0.0;
                 for (const auto& b : envelopePoints) { total += b.count; }
-                if (sr > 0.0) { snprintf(label, sizeof label, "I bars, Q ticks  \xC2\xB1%.3g  %.1f s across", range, total / sr); }
+                if (sr > 0.0) { snprintf(label, sizeof label, "I bars, Q ticks  \xC2\xB1%.3g  %.1f s across%s", range, total / sr, paused ? "  paused" : ""); }
                 else { snprintf(label, sizeof label, "I bars, Q ticks  \xC2\xB1%.3g", range); }
             }
             draw->AddText(ImVec2(plotMin.x + (3.0f * style::uiScale), plotMin.y + style::uiScale), ImGui::GetColorU32(ImGuiCol_TextDisabled), label);
@@ -436,7 +545,7 @@ namespace {
                 drawViewPills();
                 ImGui::SameLine();
                 ImGui::PushFont(style::tinyFont);
-                ImGui::TextDisabled("outer ring %.3g of full scale", scale);
+                ImGui::TextDisabled("outer ring %.3g%s", scale, paused ? ", paused" : "");
                 ImGui::PopFont();
             }
 
@@ -449,13 +558,14 @@ namespace {
 
         void drawScopePanel(ImVec2 avail) {
             ImVec2 origin = ImGui::GetCursorScreenPos();
-            float headerHeight = ImGui::GetFrameHeightWithSpacing();
             ImGui::PushFont(style::tinyFont);
             float lineH = ImGui::GetTextLineHeightWithSpacing();
             ImGui::PopFont();
             if (!gui::mainWindow.sdrIsRunning() && !haveData) { ImGui::TextDisabled("IQ   radio stopped"); }
             else { ImGui::TextUnformatted("IQ"); }
             drawViewPills();
+            // Below however many lines the buttons took.
+            float headerHeight = ImGui::GetCursorScreenPos().y - origin.y;
             if (haveData) {
                 drawScope(origin, avail, headerHeight, lineH);
                 ImGui::SetCursorScreenPos(ImVec2(origin.x, origin.y + avail.y - lineH));
@@ -532,6 +642,12 @@ namespace iqplot {
         }
         if (core::configManager.conf.contains("iqPlotScopeSpan")) {
             panel->span = std::clamp<int>(core::configManager.conf["iqPlotScopeSpan"], 0, 1);
+        }
+        if (core::configManager.conf.contains("iqPlotScopeSamples")) {
+            panel->scopeSpanIdx = std::clamp<int>(core::configManager.conf["iqPlotScopeSamples"], 0, SCOPE_SPAN_COUNT - 1);
+        }
+        if (core::configManager.conf.contains("iqPlotEnvelopeSpan")) {
+            panel->envSpanIdx = std::clamp<int>(core::configManager.conf["iqPlotEnvelopeSpan"], 0, ENVELOPE_SPAN_COUNT - 1);
         }
         core::configManager.release();
 

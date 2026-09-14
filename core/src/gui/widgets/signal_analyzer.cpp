@@ -22,9 +22,10 @@
 #include <cstdio>
 
 namespace {
-    // Samples kept from the channel: a third of a second at 48 kHz, enough for a
-    // few hundred symbols at the rates the eye is useful for.
-    const size_t RING_SAMPLES = 32768;
+    // Samples kept from the channel: five seconds at 48 kHz, half a second for a wide
+    // channel, so the Inst. freq view can be widened out to see slow changes. The
+    // measurements only ever use the newest ANALYSIS_SAMPLES of them.
+    const size_t RING_SAMPLES = 262144;
     const size_t ANALYSIS_SAMPLES = 16384;
     // Samples the symbol-rate search looks at. A power of two for the FFT.
     const int RATE_FFT = 8192;
@@ -33,7 +34,14 @@ namespace {
     // anything much lower than this could be nothing at all.
     const float MIN_LINE_DB = 14.0f;
     // Points drawn across one eye trace, which spans two symbols.
-    const int EYE_POINTS = 49;
+    // Points per symbol along an eye trace.
+    const int EYE_POINTS_PER_SYMBOL = 24;
+    // Time across the Inst. freq view, when it is not left to choose for itself.
+    const double TRACE_SPANS_MS[] = { 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0 };
+    const int TRACE_SPAN_COUNT = 14;
+    // Symbols across the eye.
+    const int EYE_SPANS[] = { 1, 2, 3, 4, 6, 8 };
+    const int EYE_SPAN_COUNT = 6;
     const int MAX_EYE_TRACES = 160;
     // Bins for finding how fast the constellation turns. Over a symbol rate of 2400 and a
     // power of 4 that is 0.15 Hz a bin, which holds the groups still across the window.
@@ -289,9 +297,35 @@ namespace {
         return (int)peaks.size();
     }
 
+    // Everything the channel views draw, kept apart from the measurements so Pause can
+    // hold the picture still while Signal ID's numbers carry on.
+    struct ChannelView {
+        bool ready = false;
+        sigan::Measurements meas;
+        std::vector<float> freq;              // Hz, the analysis window
+        std::vector<double> instants;         // symbol instants in freq
+        std::vector<float> levels;
+        std::vector<float> trace;             // Hz, however much time the Inst. freq view shows
+        std::vector<double> traceMarks;       // symbol instants in trace
+        float traceRange = 1000.0f;
+        std::vector<float> iPart;
+        std::vector<double> constInstants;
+        std::vector<dsp::complex_t> constPoints;
+        std::vector<float> constAngles;
+        int constGroups = 0;
+        float constSpread = 0.0f;
+        bool rotFound = false;
+        double rotHz = 0.0;
+        double T = 0.0;
+        double sampleRate = 48000.0;
+    };
+
     class Analyzer {
     public:
         bool shown = false;
+        bool paused = false;
+        int traceSpanIdx = -1;     // -1 lets the view choose: about forty symbols
+        int eyeSpanIdx = 1;        // two symbols
         int view = VIEW_FREQ;
         int source = SOURCE_CHANNEL;
         int eyeOf = EYE_OF_FREQ;
@@ -334,7 +368,7 @@ namespace {
             if ((now - lastAnalysis) < 0.25) { return; }
             lastAnalysis = now;
             if (channel != nullptr) { analyzeChannel(); }
-            if (shown && source == SOURCE_DECODER) { analyzeDecoder(); }
+            if (shown && source == SOURCE_DECODER && !paused) { analyzeDecoder(); }
         }
 
         void draw();
@@ -401,7 +435,8 @@ namespace {
             sigpath::iqFrontEnd.removeVFO(CHANNEL_NAME);
             channel = nullptr;
             sink.clear();
-            chanReady = false;
+            cv.ready = false;
+            cvScratch.ready = false;
         }
 
         void showWindow() {
@@ -492,29 +527,45 @@ namespace {
             return true;
         }
 
+        // How many samples the Inst. freq view wants, given how many symbols or
+        // milliseconds it has been asked for.
+        size_t traceSamplesWanted(double sr, double T) {
+            if (traceSpanIdx < 0) {
+                return (T >= 2.0) ? (size_t)(40.0 * T) : 2048;
+            }
+            return (size_t)(TRACE_SPANS_MS[traceSpanIdx] * sr / 1000.0);
+        }
+
         void analyzeChannel() {
-            size_t n = sink.copyNewest(iq, ANALYSIS_SAMPLES);
+            ChannelView& out = paused ? cvScratch : cv;
+            double sr = chanRate;
+            // One copy covering both the measurements and however far back the view
+            // reaches, so the symbol marks line up with the trace.
+            size_t wantTrace = std::min<size_t>(RING_SAMPLES, std::max<size_t>(64, traceSamplesWanted(sr, cv.T)));
+            size_t total = sink.copyNewest(iqLong, std::max<size_t>(ANALYSIS_SAMPLES, wantTrace));
+            size_t n = std::min<size_t>(total, ANALYSIS_SAMPLES);
+            iq.assign(iqLong.end() - n, iqLong.end());
             meas.running = true;
             if (n < (size_t)RATE_FFT + 16) {
-                chanReady = false;
+                out.ready = false;
                 return;
             }
-            double sr = chanRate;
+            out.sampleRate = sr;
 
             // Instantaneous frequency, in hertz from the channel centre.
-            freq.resize(n);
-            freq[0] = 0.0f;
+            out.freq.resize(n);
+            out.freq[0] = 0.0f;
             double wsum = 0.0, fsum = 0.0, magSum = 0.0;
             for (size_t i = 1; i < n; i++) {
                 float re = (iq[i].re * iq[i - 1].re) + (iq[i].im * iq[i - 1].im);
                 float im = (iq[i].im * iq[i - 1].re) - (iq[i].re * iq[i - 1].im);
-                freq[i] = (float)(atan2(im, re) * sr / (2.0 * SIGAN_PI));
+                out.freq[i] = (float)(atan2(im, re) * sr / (2.0 * SIGAN_PI));
                 double w = (iq[i].re * iq[i].re) + (iq[i].im * iq[i].im);
                 wsum += w;
-                fsum += w * freq[i];
+                fsum += w * out.freq[i];
                 magSum += sqrt(w);
             }
-            freq[0] = freq[1];
+            out.freq[0] = out.freq[1];
             meas.haveOffset = wsum > 0.0;
             meas.offsetHz = (wsum > 0.0) ? fsum / wsum : 0.0;
             double rmsMag = sqrt(wsum / (double)n);
@@ -528,7 +579,7 @@ namespace {
             featA[0] = 0.0f;
             float prevMag = sqrtf((iq[0].re * iq[0].re) + (iq[0].im * iq[0].im));
             for (size_t i = 1; i < n; i++) {
-                featF[i] = fabsf(freq[i] - freq[i - 1]);
+                featF[i] = fabsf(out.freq[i] - out.freq[i - 1]);
                 float mag = sqrtf((iq[i].re * iq[i].re) + (iq[i].im * iq[i].im));
                 featA[i] = fabsf(mag - prevMag);
                 prevMag = mag;
@@ -562,8 +613,8 @@ namespace {
             meas.levels = 0;
             meas.haveEye = false;
             meas.haveEdges = false;
-            instants.clear();
-            chanLevels.clear();
+            out.instants.clear();
+            out.levels.clear();
             double T = meas.haveSymbolRate ? sr / meas.symbolRate : 0.0;
 
             if (meas.haveSymbolRate && T >= 2.0) {
@@ -579,7 +630,7 @@ namespace {
                         double t0 = T + (T * p / PHASES);
                         double s = 0.0, s2 = 0.0;
                         for (int k = 0; k < K; k++) {
-                            double v = interpAt(freq, t0 + (k * T));
+                            double v = interpAt(out.freq, t0 + (k * T));
                             s += v;
                             s2 += v * v;
                         }
@@ -589,7 +640,7 @@ namespace {
                     std::vector<float> values(K);
                     auto sampleAt = [&](int p) {
                         double t0 = T + (T * p / PHASES);
-                        for (int k = 0; k < K; k++) { values[k] = interpAt(freq, t0 + (k * T)); }
+                        for (int k = 0; k < K; k++) { values[k] = interpAt(out.freq, t0 + (k * T)); }
                     };
                     sampleAt(bestP);
                     std::vector<float> levels = findLevels(values);
@@ -606,48 +657,58 @@ namespace {
                         levels = findLevels(values);
                     }
                     double t0 = T + (T * bestP / PHASES);
-                    for (int k = 0; k < K; k++) { instants.push_back(t0 + (k * T)); }
+                    for (int k = 0; k < K; k++) { out.instants.push_back(t0 + (k * T)); }
 
                     if (!levels.empty()) {
                         meas.levels = (int)std::min<size_t>(levels.size(), 8);
                         for (int i = 0; i < meas.levels; i++) { meas.levelHz[i] = levels[i]; }
                         meas.deviationHz = (levels.back() - levels.front()) / 2.0f;
-                        chanLevels = levels;
+                        out.levels = levels;
                         float o = 0.0f;
                         if (eyeOpeningOf(values, levels, o)) { meas.haveEye = true; meas.eyeOpening = o; }
                         float e = 0.0f;
-                        if (edgeFractionOf(freq, instants, T, levels, e)) { meas.haveEdges = true; meas.edgeFraction = e; }
+                        if (edgeFractionOf(out.freq, out.instants, T, levels, e)) { meas.haveEdges = true; meas.edgeFraction = e; }
                     }
                 }
             }
 
             // ---- What the views draw.
 
-            // Frequency over the last forty symbols, or two thousand samples without a rate.
-            size_t traceLen = (T >= 2.0) ? (size_t)std::min<double>((double)n, 40.0 * T) : std::min<size_t>(n, 2048);
-            traceLen = std::max<size_t>(traceLen, 64);
-            traceStart = n - traceLen;
-            trace.assign(freq.begin() + traceStart, freq.end());
-            traceMarks.clear();
-            for (double t : instants) {
-                if (t >= (double)traceStart) { traceMarks.push_back(t - (double)traceStart); }
+            // Frequency over however much time the view asks for, from the long copy.
+            size_t traceLen = std::min<size_t>(total, std::max<size_t>(64, traceSamplesWanted(sr, T)));
+            size_t traceFrom = total - traceLen;
+            out.trace.resize(traceLen);
+            for (size_t j = 0; j < traceLen; j++) {
+                size_t i = traceFrom + j;
+                if (i == 0) { out.trace[j] = 0.0f; continue; }
+                float re = (iqLong[i].re * iqLong[i - 1].re) + (iqLong[i].im * iqLong[i - 1].im);
+                float im = (iqLong[i].im * iqLong[i - 1].re) - (iqLong[i].re * iqLong[i - 1].im);
+                out.trace[j] = (float)(atan2(im, re) * sr / (2.0 * SIGAN_PI));
             }
-            traceRange = std::max<float>(percentileOf(trace, 0.99), -percentileOf(trace, 0.01));
-            if (!chanLevels.empty()) {
-                traceRange = std::max<float>(traceRange, std::max<float>(fabsf(chanLevels.front()), fabsf(chanLevels.back())));
+            if (traceLen > 1 && traceFrom == 0) { out.trace[0] = out.trace[1]; }
+            // The analysis window is the newest n samples of the long copy.
+            double windowStart = (double)(total - n);
+            out.traceMarks.clear();
+            for (double t : out.instants) {
+                double at = t + windowStart - (double)traceFrom;
+                if (at >= 0.0) { out.traceMarks.push_back(at); }
             }
-            traceRange = std::max<float>(traceRange * 1.15f, 100.0f);
+            out.traceRange = std::max<float>(percentileOf(out.trace, 0.99), -percentileOf(out.trace, 0.01));
+            if (!out.levels.empty()) {
+                out.traceRange = std::max<float>(out.traceRange, std::max<float>(fabsf(out.levels.front()), fabsf(out.levels.back())));
+            }
+            out.traceRange = std::max<float>(out.traceRange * 1.15f, 100.0f);
 
             // Points for the I eye and the constellation, normalised to the average magnitude.
-            iPart.resize(n);
+            out.iPart.resize(n);
             float norm = (rmsMag > 0.0) ? (float)(1.0 / rmsMag) : 1.0f;
-            for (size_t i = 0; i < n; i++) { iPart[i] = iq[i].re * norm; }
+            for (size_t i = 0; i < n; i++) { out.iPart[i] = iq[i].re * norm; }
 
             // The constellation's sampling point is chosen separately from the frequency
             // one: where the magnitude varies least from symbol to symbol, which is the
             // symbol instant for a signal that carries its information in phase.
-            constPoints.clear();
-            constAngles.clear();
+            out.constPoints.clear();
+            out.constAngles.clear();
             if (T >= 2.0) {
                 int K = (int)floor(((double)n - (3.0 * T)) / T);
                 const int PHASES = 24;
@@ -667,7 +728,7 @@ namespace {
                     if (cv < bestCv) { bestCv = cv; bestP = p; }
                 }
                 double t0 = T + (T * bestP / PHASES);
-                constSpread = (float)bestCv;
+                out.constSpread = (float)bestCv;
 
                 // How fast the points turn. The average frequency is only good to some
                 // tens of hertz, and over a third of a second that still spins them into a
@@ -675,8 +736,8 @@ namespace {
                 // set of values, leaving only the turning, as one clean line: the 2nd, 4th
                 // and 8th powers are tried, and the clearest line is used. Only the plot is
                 // turned back by it; nothing is read into which power won.
-                rotFound = false;
-                rotHz = 0.0;
+                out.rotFound = false;
+                out.rotHz = 0.0;
                 int usable = std::min<int>(K, ROT_FFT);
                 double bestStrength = 0.0;
                 for (int power : { 2, 4, 8 }) {
@@ -704,11 +765,11 @@ namespace {
                         bestStrength = strength;
                         double cyclesPerSymbol = (double)pk / ROT_FFT;
                         if (cyclesPerSymbol > 0.5) { cyclesPerSymbol -= 1.0; }
-                        rotHz = cyclesPerSymbol * (sr / T) / power;
-                        rotFound = true;
+                        out.rotHz = cyclesPerSymbol * (sr / T) / power;
+                        out.rotFound = true;
                     }
                 }
-                double turnHz = rotFound ? rotHz : 0.0;
+                double turnHz = out.rotFound ? out.rotHz : 0.0;
 
                 for (int k = 0; k < K; k++) {
                     double t = t0 + (k * T);
@@ -719,12 +780,12 @@ namespace {
                     dsp::complex_t pt;
                     pt.re = (re * c) - (im * s);
                     pt.im = (re * s) + (im * c);
-                    if (k >= K - 1200) { constPoints.push_back(pt); }
-                    if ((pt.re * pt.re) + (pt.im * pt.im) > 0.09f) { constAngles.push_back(atan2f(pt.im, pt.re)); }
+                    if (k >= K - 1200) { out.constPoints.push_back(pt); }
+                    if ((pt.re * pt.re) + (pt.im * pt.im) > 0.09f) { out.constAngles.push_back(atan2f(pt.im, pt.re)); }
                 }
-                constGroups = angleGroupsOf(constAngles);
-                constInstants.clear();
-                for (int k = 0; k < K; k++) { constInstants.push_back(t0 + (k * T)); }
+                out.constGroups = angleGroupsOf(out.constAngles);
+                out.constInstants.clear();
+                for (int k = 0; k < K; k++) { out.constInstants.push_back(t0 + (k * T)); }
             }
             else {
                 // No rate: every sample, which is still the shape of the signal.
@@ -732,14 +793,15 @@ namespace {
                     dsp::complex_t pt;
                     pt.re = iq[i].re * norm;
                     pt.im = iq[i].im * norm;
-                    constPoints.push_back(pt);
+                    out.constPoints.push_back(pt);
                 }
-                constGroups = 0;
-                constSpread = 0.0f;
-                constInstants.clear();
+                out.constGroups = 0;
+                out.constSpread = 0.0f;
+                out.constInstants.clear();
             }
-            chanT = T;
-            chanReady = true;
+            out.T = T;
+            out.meas = meas;
+            out.ready = true;
         }
 
         // ---- A decoder's own samples.
@@ -795,7 +857,8 @@ namespace {
             decTrace.clear();
             decTraceMarks.clear();
             if (snap.oversampled && decT >= 2.0) {
-                size_t len = std::min<size_t>(snap.samples.size(), (size_t)(40.0 * decT));
+                size_t wantLen = (traceSpanIdx < 0) ? (size_t)(40.0 * decT) : (size_t)(TRACE_SPANS_MS[traceSpanIdx] * snap.sampleRate / 1000.0);
+                size_t len = std::min<size_t>(snap.samples.size(), std::max<size_t>(16, wantLen));
                 size_t start = snap.samples.size() - len;
                 decTrace.assign(snap.samples.begin() + start, snap.samples.end());
                 for (double m : snap.marks) {
@@ -874,6 +937,53 @@ namespace {
                                           : "What a running DSD or oldDSD decoder actually sampled, with its own\nsample points and slicer thresholds.");
                 }
             }
+            float gap = 12.0f * style::uiScale;
+            if (view == VIEW_FREQ) {
+                // Time across the plot: less, the amount, more, and back to automatic.
+                double sr = (source == SOURCE_CHANNEL) ? cv.sampleRate : snap.sampleRate;
+                double T = (source == SOURCE_CHANNEL) ? cv.T : decT;
+                std::string text;
+                char buf[40];
+                if (traceSpanIdx < 0) {
+                    double ms = (sr > 0.0) ? 1000.0 * (double)traceSamplesWanted(sr, T) / sr : 0.0;
+                    snprintf(buf, sizeof buf, ms < 10.0 ? "auto %.2f ms" : "auto %.0f ms", ms);
+                }
+                else {
+                    double ms = TRACE_SPANS_MS[traceSpanIdx];
+                    if (ms < 1.0) { snprintf(buf, sizeof buf, "%.1f ms", ms); }
+                    else if (ms < 1000.0) { snprintf(buf, sizeof buf, "%.0f ms", ms); }
+                    else { snprintf(buf, sizeof buf, "%.0f s", ms / 1000.0); }
+                }
+                text = buf;
+                flowNext(" - ##sigan_tless", gap);
+                if (ImGui::SmallButton(" - ##sigan_tless")) { stepTraceSpan(-1, sr, T); }
+                if (ImGui::IsItemHovered()) { style::tooltip("Less time across the plot"); }
+                flowNext(text.c_str());
+                ImGui::TextUnformatted(text.c_str());
+                flowNext(" + ##sigan_tmore");
+                if (ImGui::SmallButton(" + ##sigan_tmore")) { stepTraceSpan(1, sr, T); }
+                if (ImGui::IsItemHovered()) { style::tooltip("More time across the plot"); }
+                flowNext("Auto##sigan_tauto");
+                if (pill("Auto##sigan_tauto", traceSpanIdx < 0)) { traceSpanIdx = -1; saveChoice("signalAnalyzerTraceSpan", traceSpanIdx); }
+                if (ImGui::IsItemHovered()) { style::tooltip("About forty symbols when there is a symbol rate, otherwise 2048 samples"); }
+            }
+            if (view == VIEW_EYE) {
+                char buf[32];
+                snprintf(buf, sizeof buf, "%d symbol%s", EYE_SPANS[eyeSpanIdx], EYE_SPANS[eyeSpanIdx] == 1 ? "" : "s");
+                flowNext(" - ##sigan_eless", gap);
+                if (ImGui::SmallButton(" - ##sigan_eless")) { eyeSpanIdx = std::max<int>(0, eyeSpanIdx - 1); saveChoice("signalAnalyzerEyeSpan", eyeSpanIdx); }
+                if (ImGui::IsItemHovered()) { style::tooltip("Fewer symbols across the eye"); }
+                flowNext(buf);
+                ImGui::TextUnformatted(buf);
+                flowNext(" + ##sigan_emore");
+                if (ImGui::SmallButton(" + ##sigan_emore")) { eyeSpanIdx = std::min<int>(EYE_SPAN_COUNT - 1, eyeSpanIdx + 1); saveChoice("signalAnalyzerEyeSpan", eyeSpanIdx); }
+                if (ImGui::IsItemHovered()) { style::tooltip("More symbols across the eye"); }
+            }
+            flowNext("Pause##sigan_pause", gap);
+            if (pill(paused ? "Paused##sigan_pause" : "Pause##sigan_pause", paused)) { paused = !paused; }
+            if (ImGui::IsItemHovered()) {
+                style::tooltip(paused ? "Carry on updating" : "Hold the plot and its readouts still. Signal ID keeps measuring.");
+            }
             if (view == VIEW_EYE && source == SOURCE_CHANNEL) {
                 const char* of[2] = { "Freq##sigan_e0", "I##sigan_e1" };
                 for (int i = 0; i < 2; i++) {
@@ -887,6 +997,21 @@ namespace {
                     }
                 }
             }
+        }
+
+        // Steps the Inst. freq time span. From automatic it starts at the nearest fixed
+        // span to what automatic was showing, so the first press does not jump.
+        void stepTraceSpan(int dir, double sr, double T) {
+            if (traceSpanIdx < 0) {
+                double ms = (sr > 0.0) ? 1000.0 * (double)traceSamplesWanted(sr, T) / sr : 20.0;
+                int nearest = 0;
+                for (int i = 0; i < TRACE_SPAN_COUNT; i++) {
+                    if (fabs(log(TRACE_SPANS_MS[i] / ms)) < fabs(log(TRACE_SPANS_MS[nearest] / ms))) { nearest = i; }
+                }
+                traceSpanIdx = nearest;
+            }
+            traceSpanIdx = std::clamp<int>(traceSpanIdx + dir, 0, TRACE_SPAN_COUNT - 1);
+            saveChoice("signalAnalyzerTraceSpan", traceSpanIdx);
         }
 
         struct Plot {
@@ -961,6 +1086,8 @@ namespace {
             }
             ImU32 markCol = ImGui::GetColorU32(ImGuiCol_Text);
             float dot = 1.5f * style::uiScale;
+            // Dots closer than a few pixels apart only smear the trace.
+            if ((float)marks.size() > w / 4.0f) { return; }
             for (double m : marks) {
                 float x = p.min.x + (xScale * (float)m);
                 if (x < p.min.x || x > p.max.x) { continue; }
@@ -981,15 +1108,28 @@ namespace {
                 for (int i = 0; i < 3; i++) { dashedH(p, p.yOf(thresholds[i], range), threshCol); }
             }
             if (T < 2.0 || instants.size() < 4) { return; }
+            const int symbols = EYE_SPANS[eyeSpanIdx];
+            const int points = (EYE_POINTS_PER_SYMBOL * symbols) + 1;
+            const double half = T * symbols / 2.0;
             size_t first = instants.size() > (size_t)MAX_EYE_TRACES ? instants.size() - MAX_EYE_TRACES : 0;
             float w = p.max.x - p.min.x;
+            // Faint lines at the symbol boundaries either side of the sample line.
+            ImU32 gridCol = ImGui::ColorConvertFloat4ToU32(gui::themeManager.fftGridColor);
+            // The sample line is in the middle, so the boundaries sit half a symbol either
+            // side of it and every symbol after that.
+            for (int j = -symbols; j <= symbols; j++) {
+                double off = ((double)j + 0.5) * T;
+                if (fabs(off) >= half) { continue; }
+                float x = p.min.x + (float)((off + half) / (2.0 * half)) * w;
+                p.dl->AddLine(ImVec2(x, p.min.y), ImVec2(x, p.max.y), gridCol);
+            }
             for (size_t k = first; k < instants.size(); k++) {
                 double centre = instants[k];
-                if (centre - T < 0.0 || centre + T > (double)(y.size() - 1)) { continue; }
+                if (centre - half < 0.0 || centre + half > (double)(y.size() - 1)) { continue; }
                 float prevX = 0.0f, prevY = 0.0f;
-                for (int s = 0; s < EYE_POINTS; s++) {
-                    double t = centre - T + (2.0 * T * s / (EYE_POINTS - 1));
-                    float x = p.min.x + (w * (float)s / (float)(EYE_POINTS - 1));
+                for (int s = 0; s < points; s++) {
+                    double t = centre - half + (2.0 * half * s / (points - 1));
+                    float x = p.min.x + (w * (float)s / (float)(points - 1));
                     float yy = p.yOf(interpAt(y, t), range);
                     if (s > 0) { p.dl->AddLine(ImVec2(prevX, prevY), ImVec2(x, yy), traceCol, style::uiScale); }
                     prevX = x;
@@ -1091,42 +1231,42 @@ namespace {
         std::vector<std::string> channelReadouts() {
             std::vector<std::string> out;
             char buf[96];
-            if (meas.haveSymbolRate) {
-                snprintf(buf, sizeof buf, "%.0f Bd (line %.0f dB)", meas.symbolRate, meas.lineDb);
+            if (cv.meas.haveSymbolRate) {
+                snprintf(buf, sizeof buf, "%.0f Bd (line %.0f dB)", cv.meas.symbolRate, cv.meas.lineDb);
                 out.push_back(buf);
             }
             else {
                 out.push_back("no symbol-rate line");
             }
             if (view == VIEW_CONST) {
-                if (constGroups > 0) {
-                    snprintf(buf, sizeof buf, "%d phase groups", constGroups);
+                if (cv.constGroups > 0) {
+                    snprintf(buf, sizeof buf, "%d phase groups", cv.constGroups);
                     out.push_back(buf);
                 }
-                if (meas.haveSymbolRate) {
-                    snprintf(buf, sizeof buf, "magnitude spread %.0f%%", constSpread * 100.0f);
+                if (cv.meas.haveSymbolRate) {
+                    snprintf(buf, sizeof buf, "magnitude spread %.0f%%", cv.constSpread * 100.0f);
                     out.push_back(buf);
                 }
-                if (meas.haveSymbolRate) {
-                    if (rotFound) { out.push_back("turning " + hz(rotHz) + ", held still"); }
+                if (cv.meas.haveSymbolRate) {
+                    if (cv.rotFound) { out.push_back("turning " + hz(cv.rotHz) + ", held still"); }
                     else { out.push_back("not held still: no steady turning found"); }
                 }
                 return out;
             }
-            if (meas.levels > 0) {
-                snprintf(buf, sizeof buf, "%d level%s", meas.levels, meas.levels == 1 ? "" : "s");
+            if (cv.meas.levels > 0) {
+                snprintf(buf, sizeof buf, "%d level%s", cv.meas.levels, cv.meas.levels == 1 ? "" : "s");
                 out.push_back(buf);
-                if (meas.levels >= 2) { out.push_back("deviation " + std::string("\xC2\xB1") + hz(meas.deviationHz, false)); }
+                if (cv.meas.levels >= 2) { out.push_back("deviation " + std::string("\xC2\xB1") + hz(cv.meas.deviationHz, false)); }
             }
-            if (meas.haveEye) {
-                snprintf(buf, sizeof buf, "eye %.0f%% open", meas.eyeOpening * 100.0f);
-                out.push_back(buf);
-            }
-            if (meas.haveEdges) {
-                snprintf(buf, sizeof buf, "edges %.0f%% of a symbol", meas.edgeFraction * 100.0f);
+            if (cv.meas.haveEye) {
+                snprintf(buf, sizeof buf, "eye %.0f%% open", cv.meas.eyeOpening * 100.0f);
                 out.push_back(buf);
             }
-            if (meas.haveOffset) { out.push_back("average " + hz(meas.offsetHz)); }
+            if (cv.meas.haveEdges) {
+                snprintf(buf, sizeof buf, "edges %.0f%% of a symbol", cv.meas.edgeFraction * 100.0f);
+                out.push_back(buf);
+            }
+            if (cv.meas.haveOffset) { out.push_back("average " + hz(cv.meas.offsetHz)); }
             return out;
         }
 
@@ -1185,23 +1325,11 @@ namespace {
         fftwf_complex* rotIn = nullptr;
         fftwf_complex* rotOut = nullptr;
         fftwf_plan rotPlan = nullptr;
-        bool rotFound = false;
-        double rotHz = 0.0;
 
-        std::vector<dsp::complex_t> iq;
-        std::vector<float> freq, featF, featA, iPart;
-        std::vector<double> instants, constInstants;
-        std::vector<float> chanLevels;
-        std::vector<float> trace;
-        std::vector<double> traceMarks;
-        size_t traceStart = 0;
-        float traceRange = 1000.0f;
-        std::vector<dsp::complex_t> constPoints;
-        std::vector<float> constAngles;
-        int constGroups = 0;
-        float constSpread = 0.0f;
-        double chanT = 0.0;
-        bool chanReady = false;
+        std::vector<dsp::complex_t> iq, iqLong;
+        std::vector<float> featF, featA;
+        ChannelView cv;          // what is drawn
+        ChannelView cvScratch;   // filled instead while paused
 
         symboltap::Snapshot snap;
         bool decReady = false;
@@ -1239,36 +1367,43 @@ namespace {
         p.dl = ImGui::GetWindowDrawList();
         p.dl->AddRect(p.min, p.max, ImGui::ColorConvertFloat4ToU32(gui::themeManager.fftBorderColor));
 
+        // Wrapped to the plot, which can be narrow with other panels beside it.
         auto message = [&](const char* text) {
-            ImVec2 ts = ImGui::CalcTextSize(text);
-            p.dl->AddText(ImVec2((p.min.x + p.max.x - ts.x) / 2.0f, (p.min.y + p.max.y - ts.y) / 2.0f),
-                          ImGui::GetColorU32(ImGuiCol_TextDisabled), text);
+            float wrap = std::max<float>(40.0f, (p.max.x - p.min.x) - (12.0f * style::uiScale));
+            ImVec2 ts = ImGui::CalcTextSize(text, NULL, false, wrap);
+            p.dl->AddText(ImGui::GetFont(), ImGui::GetFontSize(),
+                          ImVec2((p.min.x + p.max.x - ts.x) / 2.0f, (p.min.y + p.max.y - ts.y) / 2.0f),
+                          ImGui::GetColorU32(ImGuiCol_TextDisabled), text, NULL, wrap);
         };
 
         std::vector<std::string> parts;
+        bool plotEmpty = false;
         p.dl->PushClipRect(p.min, p.max, true);
         if (!gui::mainWindow.sdrIsRunning()) {
             message("radio stopped");
         }
         else if (source == SOURCE_CHANNEL) {
             if (gui::waterfall.selectedVFO.empty()) { message("no VFO selected"); }
-            else if (!chanReady) { message("collecting"); }
+            else if (!cv.ready) { message("collecting"); }
             else {
                 if (view == VIEW_FREQ) {
-                    drawTrace(p, trace, traceMarks, traceRange, chanLevels, nullptr, false);
+                    drawTrace(p, cv.trace, cv.traceMarks, cv.traceRange, cv.levels, nullptr, false);
                 }
                 else if (view == VIEW_EYE) {
-                    if (chanT < 2.0) { message("no symbol-rate line to time the eye by"); }
+                    if (cv.T < 2.0) {
+                        message("No symbol rate found. An eye needs a signal sent as symbols at a steady rate.");
+                        plotEmpty = true;
+                    }
                     else if (eyeOf == EYE_OF_FREQ) {
-                        drawEye(p, freq, instants, chanT, traceRange, chanLevels, nullptr);
+                        drawEye(p, cv.freq, cv.instants, cv.T, cv.traceRange, cv.levels, nullptr);
                     }
                     else {
-                        float iRange = std::max<float>(percentileOf(iPart, 0.99), -percentileOf(iPart, 0.01)) * 1.15f;
-                        drawEye(p, iPart, constInstants, chanT, std::max<float>(iRange, 0.1f), std::vector<float>(), nullptr);
+                        float iRange = std::max<float>(percentileOf(cv.iPart, 0.99), -percentileOf(cv.iPart, 0.01)) * 1.15f;
+                        drawEye(p, cv.iPart, cv.constInstants, cv.T, std::max<float>(iRange, 0.1f), std::vector<float>(), nullptr);
                     }
                 }
                 else {
-                    drawConstellation(p, constPoints);
+                    drawConstellation(p, cv.constPoints);
                 }
                 parts = channelReadouts();
             }
@@ -1280,7 +1415,10 @@ namespace {
                     drawTrace(p, decTrace, decTraceMarks, decRange, decLevels, snap.thresholds, !snap.oversampled);
                 }
                 else if (view == VIEW_EYE) {
-                    if (!snap.oversampled) { message("this decoder passes one value per symbol, so there is no waveform for an eye"); }
+                    if (!snap.oversampled) {
+                        message("This decoder passes one value per symbol, so there is no waveform for an eye.");
+                        plotEmpty = true;
+                    }
                     else { drawEye(p, snap.samples, snap.marks, decT, decRange, decLevels, snap.thresholds); }
                 }
                 else {
@@ -1292,21 +1430,24 @@ namespace {
         p.dl->PopClipRect();
 
         // The scale, top left inside the plot.
-        if ((source == SOURCE_CHANNEL && chanReady) || (source == SOURCE_DECODER && decReady)) {
-            char scale[64];
+        if (!plotEmpty && gui::mainWindow.sdrIsRunning() && ((source == SOURCE_CHANNEL && cv.ready) || (source == SOURCE_DECODER && decReady))) {
+            char scale[96];
+            char eyeSpan[32];
+            snprintf(eyeSpan, sizeof eyeSpan, "%d symbol%s across", EYE_SPANS[eyeSpanIdx], EYE_SPANS[eyeSpanIdx] == 1 ? "" : "s");
             if (view == VIEW_CONST && source == SOURCE_CHANNEL) {
                 snprintf(scale, sizeof scale, "outer ring 2x average");
             }
             else if (view == VIEW_EYE && source == SOURCE_CHANNEL && eyeOf == EYE_OF_I) {
-                snprintf(scale, sizeof scale, "I, 2 symbols across");
+                snprintf(scale, sizeof scale, "I, %s", eyeSpan);
             }
             else {
-                float range = (source == SOURCE_CHANNEL) ? traceRange : decRange;
+                float range = (source == SOURCE_CHANNEL) ? cv.traceRange : decRange;
                 std::string r = hz(range, false);
                 if (view == VIEW_CONST) { snprintf(scale, sizeof scale, "decisions, edges \xC2\xB1%s", r.c_str()); }
-                else if (view == VIEW_EYE) { snprintf(scale, sizeof scale, "\xC2\xB1%s, 2 symbols across", r.c_str()); }
+                else if (view == VIEW_EYE) { snprintf(scale, sizeof scale, "\xC2\xB1%s, %s", r.c_str(), eyeSpan); }
                 else { snprintf(scale, sizeof scale, "\xC2\xB1%s", r.c_str()); }
             }
+            if (paused) { strncat(scale, "  paused", sizeof(scale) - strlen(scale) - 1); }
             ImGui::PushFont(style::tinyFont);
             p.dl->AddText(ImVec2(p.min.x + (3.0f * style::uiScale), p.min.y + (1.0f * style::uiScale)),
                           ImGui::GetColorU32(ImGuiCol_TextDisabled), scale);
@@ -1331,6 +1472,8 @@ namespace sigan {
         if (conf.contains("signalAnalyzerView")) { analyzer->view = std::clamp<int>(conf["signalAnalyzerView"], 0, 2); }
         if (conf.contains("signalAnalyzerSource")) { analyzer->source = std::clamp<int>(conf["signalAnalyzerSource"], 0, 1); }
         if (conf.contains("signalAnalyzerEyeOf")) { analyzer->eyeOf = std::clamp<int>(conf["signalAnalyzerEyeOf"], 0, 1); }
+        if (conf.contains("signalAnalyzerTraceSpan")) { analyzer->traceSpanIdx = std::clamp<int>(conf["signalAnalyzerTraceSpan"], -1, TRACE_SPAN_COUNT - 1); }
+        if (conf.contains("signalAnalyzerEyeSpan")) { analyzer->eyeSpanIdx = std::clamp<int>(conf["signalAnalyzerEyeSpan"], 0, EYE_SPAN_COUNT - 1); }
         core::configManager.release();
 
         waterfallDrawnHandler.ctx = analyzer;
