@@ -10,6 +10,7 @@
 
 #include <config.h>
 #include "dsd.h"
+#include <signal_path/symbol_tap.h>
 
 namespace dsp {
 
@@ -360,6 +361,20 @@ namespace dsp {
             // that. Working from locals keeps one pass internally consistent.
             const int sps = samplesPerSymbol;
             const int symCenter = symbolCenter;
+
+            // For the signal analyzer: the samples this symbol was read from, and where
+            // among them the decision was taken - the middle of the samples averaged
+            // below, which differs by rate and modulation.
+            const bool tapping = symboltap::wanted();
+            float tapBuf[32];
+            int tapN = 0;
+            int centreInt = symCenter;
+            float centreFrac = 0.0f;
+            if (sps == 20) { centreInt = 10; }
+            else if (sps == 5) { centreInt = 2; }
+            else if (rfMod == 0) { centreFrac = 0.5f; }
+            float tapPoint = -1.0f;
+
             for (i = 0; i < sps; i++) {
                 // timing control
                 if ((i == 0) && (have_sync == 0)) {
@@ -460,6 +475,10 @@ namespace dsp {
                         }
                     }
                 }
+                if (tapping && tapN < 32) {
+                    if (i == centreInt && tapPoint < 0.0f) { tapPoint = (float)tapN + centreFrac; }
+                    tapBuf[tapN++] = (float)sample;
+                }
                 if (sps == 20) {
                     if ((i >= 9) && (i <= 11)) {
                         sum += sample;
@@ -501,6 +520,14 @@ namespace dsp {
             // nothing accumulated, and dividing by that killed the process.
             if (count == 0) { return lastsample; }
             symbol = (sum / count);
+
+            if (tapping && tapN > 0) {
+                // The timing control above skips or repeats a sample now and then; if that
+                // stepped over the centre, place it proportionally instead.
+                if (tapPoint < 0.0f) { tapPoint = (float)tapN * ((float)centreInt + centreFrac) / (float)sps; }
+                const float thresholds[3] = { (float)lmid, (float)center, (float)umid };
+                symboltap::publishSymbol("oldDSD", tapBuf, tapN, tapPoint, (float)symbol, thresholds, analyzerHzPerUnit, 48000.0);
+            }
 
             if ((symboltiming == 1) && (have_sync == 0) && (lastsynctype != -1)) {
                 if (jitter >= 0) {

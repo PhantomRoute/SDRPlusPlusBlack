@@ -24,6 +24,7 @@
 #include <atomic>
 #include <thread>
 #include <unordered_map>
+#include <signal_path/symbol_tap.h>
 
 #define CONCAT(a, b) ((std::string(a) + b).c_str())
 
@@ -474,6 +475,13 @@ namespace demod {
             float prev = _this->symbolPeak.load(std::memory_order_relaxed);
             _this->symbolPeak.store(peak > prev ? peak : prev + ((peak - prev) * 0.15f),
                                     std::memory_order_relaxed);
+
+            // The same symbols, to the signal analyzer when it is looking at decoders.
+            // quadDemod scales 1944 Hz of deviation to 1.0.
+            if (symboltap::wanted()) {
+                const float thresholds[3] = { _this->slicer.lmid, _this->slicer.center, _this->slicer.umid };
+                symboltap::publishSymbols("DSD", data, count, thresholds, 1944.0f, 4800.0);
+            }
 
             dsp::complex_t* cdBuff = _this->constDiag.acquireBuffer();
             if (count == 1024) {

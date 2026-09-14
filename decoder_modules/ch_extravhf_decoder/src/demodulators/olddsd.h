@@ -64,6 +64,7 @@ namespace demod {
             _config->release();
 
             dsdDec.setDemodMode(getSelectedMode());
+            dsdDec.analyzerHzPerUnit = (float)((bandwidth / 2.0) / 32768.0);
 
             // Define structure
 
@@ -284,6 +285,7 @@ namespace demod {
 
         void setBandwidth(double bandwidth) {
             fmdemod.setBandwidth(bandwidth);
+            dsdDec.analyzerHzPerUnit = (float)((bandwidth / 2.0) / 32768.0);
         }
 
         void setInput(dsp::stream<dsp::complex_t>* input) {

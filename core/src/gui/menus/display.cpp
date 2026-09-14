@@ -3,6 +3,7 @@
 #include <gui/widgets/snr_chart.h>
 #include <gui/widgets/occupancy_panel.h>
 #include <gui/widgets/iq_plot_panel.h>
+#include <gui/widgets/signal_analyzer.h>
 #include <imgui.h>
 #include <gui/gui.h>
 #include <core.h>
@@ -148,6 +149,7 @@ namespace displaymenu {
         snrchart::init();
         occupancy::init();
         iqplot::init();
+        sigan::init();
 
         if (core::configManager.conf.contains("showFFT")) {
             showFFT = core::configManager.conf["showFFT"];
@@ -500,7 +502,13 @@ namespace displaymenu {
         if (ImGui::Checkbox("IQ plot##_sdrpp_iq_plot", &iqPlotShown)) {
             iqplot::setShown(iqPlotShown);
         }
-        ImGui::HelpMarker("The raw I samples against Q, as a panel along the bottom. A cloud off centre is a DC offset, an ellipse is IQ imbalance, and squared-off edges are clipping. Shows the samples after SDR++'s own DC blocking, when that is on.");
+        ImGui::HelpMarker("The raw IQ samples, as a panel along the bottom, before any VFO. Scatter plots I against Q; Scope plots them against time, either the latest samples in a row or the peak of each block over the last few seconds. Readouts: peak level against full scale, DC on each channel, the level difference between I and Q, and how far they are from a quarter turn apart. Shows the samples after SDR++'s own DC blocking, when that is on.");
+
+        bool analyzerShown = sigan::isShown();
+        if (ImGui::Checkbox("Signal analyzer##_sdrpp_signal_analyzer", &analyzerShown)) {
+            sigan::setShown(analyzerShown);
+        }
+        ImGui::HelpMarker("The signal inside the selected VFO, as a panel along the bottom. Inst. freq plots its frequency against time, Eye lays two symbols at a time over each other, and Constellation plots I against Q at the symbol instants. Channel is the analyzer's own view of the VFO; Decoder shows what a running DSD or oldDSD decoder actually sampled, with its sample points and slicer thresholds. The readouts are measurements only: symbol rate, levels, deviation, eye opening, how long a change between levels takes.");
         onPanelsDraw.emit(GImGui);
 
         ImGui::SectionHeader("SPECTRUM");

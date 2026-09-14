@@ -4,6 +4,7 @@
 #include <gui/style.h>
 #include <gui/widgets/bandplan.h>
 #include <gui/tuner.h>
+#include <gui/widgets/signal_analyzer.h>
 #include <signal_path/signal_path.h>
 #include <config.h>
 #include <core.h>
@@ -1328,7 +1329,43 @@ private:
         snprintf(buf, sizeof buf, "  Measured over %d bins of %s\n", shown.binsAcross,
                  fmtWidth(shown.hzPerBin).c_str());
         s += buf;
+
+        sigan::Measurements mod;
+        if (sigan::getMeasurements(mod)) {
+            if (mod.haveSymbolRate) {
+                snprintf(buf, sizeof buf, "  Symbol rate %.0f Bd\n", mod.symbolRate);
+                s += buf;
+            }
+            if (mod.levels > 0) { s += "  Levels " + levelsText(mod) + "\n"; }
+            if (mod.levels >= 2) { s += "  Deviation \xC2\xB1" + fmtWidth(mod.deviationHz) + "\n"; }
+            if (mod.haveEdges) {
+                snprintf(buf, sizeof buf, "  Level changes take %.0f%% of a symbol\n", mod.edgeFraction * 100.0f);
+                s += buf;
+            }
+            if (mod.haveEye) {
+                snprintf(buf, sizeof buf, "  Eye %.0f%% open\n", mod.eyeOpening * 100.0f);
+                s += buf;
+            }
+        }
         return s;
+    }
+
+    // The frequency levels, in kHz or Hz from the channel centre, lowest first.
+    static std::string levelsText(const sigan::Measurements& mod) {
+        std::string out;
+        bool khz = false;
+        for (int i = 0; i < mod.levels; i++) {
+            if (fabs(mod.levelHz[i]) >= 1000.0f) { khz = true; }
+        }
+        char buf[32];
+        for (int i = 0; i < mod.levels; i++) {
+            if (khz) { snprintf(buf, sizeof buf, "%+.2f", mod.levelHz[i] / 1000.0f); }
+            else { snprintf(buf, sizeof buf, "%+.0f", mod.levelHz[i]); }
+            if (!out.empty()) { out += " "; }
+            out += buf;
+        }
+        out += khz ? " kHz" : " Hz";
+        return out;
     }
 
     const bandplan::Band_t* bandAt(double freq) const {
@@ -1720,6 +1757,56 @@ private:
         else if (shown.balance < -0.25) { ImGui::Text("Balance   mostly below the peak"); }
         else { ImGui::Text("Balance   even"); }
         if (ImGui::IsItemHovered()) { style::tooltip("Which side of the peak the energy sits on"); }
+
+        // ---- Modulation. Measured by the signal analyzer on its own channel through the
+        // selected VFO, whether or not its panel is showing. What it can see and nothing
+        // more: none of these rows says what the signal is.
+        ImGui::SectionHeader("MODULATION");
+        sigan::request();
+        sigan::Measurements mod;
+        bool haveMod = sigan::getMeasurements(mod);
+
+        if (haveMod && mod.haveSymbolRate) { ImGui::Text("Symbols   %.0f Bd", mod.symbolRate); }
+        else { ImGui::Text("Symbols   -"); }
+        if (ImGui::IsItemHovered()) {
+            style::tooltip("A rate the signal repeats at: the strongest line in the spectrum of how its\n"
+                           "frequency, or its envelope, changes from one sample to the next. Only shown\n"
+                           "when that line stands at least 10 dB clear%s.",
+                           (haveMod && mod.haveSymbolRate) ? "" : " - it does not right now");
+        }
+
+        if (haveMod && mod.levels > 0) { ImGui::Text("Levels    %d", mod.levels); }
+        else { ImGui::Text("Levels    -"); }
+        if (ImGui::IsItemHovered()) {
+            style::tooltip("How many distinct frequencies the signal sits at when sampled once per symbol,\n"
+                           "counted from a histogram of those samples. Needs a symbol rate first.");
+        }
+
+        if (haveMod && mod.levels > 0) { ImGui::Text("At        %s", levelsText(mod).c_str()); }
+        else { ImGui::Text("At        -"); }
+        if (ImGui::IsItemHovered()) { style::tooltip("Where each level sits, from the middle of the channel"); }
+
+        if (haveMod && mod.levels >= 2) { ImGui::Text("Deviation \xC2\xB1%s", fmtWidth(mod.deviationHz).c_str()); }
+        else { ImGui::Text("Deviation -"); }
+        if (ImGui::IsItemHovered()) { style::tooltip("Half the distance between the lowest level and the highest"); }
+
+        if (haveMod && mod.haveEdges) {
+            ImGui::Text("Edges     %.0f%% of a symbol, %s", mod.edgeFraction * 100.0f, mod.edgeFraction < 0.2f ? "sharp" : "rounded");
+        }
+        else { ImGui::Text("Edges     -"); }
+        if (ImGui::IsItemHovered()) {
+            style::tooltip("How long a change from one level to another takes, from 20%% of the way\n"
+                           "to 80%%, as a share of one symbol. Under a fifth of a symbol is called\n"
+                           "sharp here, anything longer rounded.");
+        }
+
+        if (haveMod && mod.haveEye) { ImGui::Text("Eye       %.0f%% open", mod.eyeOpening * 100.0f); }
+        else { ImGui::Text("Eye       -"); }
+        if (ImGui::IsItemHovered()) {
+            style::tooltip("The narrowest gap left between the spread of one level and the spread of\n"
+                           "the next, at the best sampling point, as a share of the spacing between\n"
+                           "them. Display, PANELS, Signal analyzer draws it.");
+        }
 
         // ---- Strength
         ImGui::SectionHeader("STRENGTH");

@@ -667,6 +667,12 @@ namespace dsp {
         // has to match exactly, twice, one frame apart - see nxdnSeenFrameAgo.
         int nxdnSyncTolerance = 1;
 
+        // Hertz of deviation per sample unit, for what is handed to the signal analyzer.
+        // The FM demodulator in front maps half the channel width to 1.0 and the
+        // conversion to 16 bits maps that to 32768; the demodulator updates this when
+        // the width changes.
+        float analyzerHzPerUnit = (12500.0f / 2.0f) / 32768.0f;
+
         // Every symbol read, counted, so two sync words can be checked for being one
         // frame apart even with a frame's worth of decoding between them.
         long long symbolClock = 0;
