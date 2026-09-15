@@ -476,12 +476,23 @@ namespace {
                 float peak = 0.0f;
                 for (const auto& b : envelopePoints) { peak = std::max<float>(peak, std::max<float>(b.peakI, b.peakQ)); }
                 range = std::max<float>(0.01f, std::min<float>(1.0f, peak * 1.1f));
-                float dx = w / (float)envelopePoints.size();
-                for (size_t i = 0; i < envelopePoints.size(); i++) {
-                    float x = plotMin.x + (dx * (float)i) + (dx / 2.0f);
-                    draw->AddLine(ImVec2(x, yOf(envelopePoints[i].peakI)), ImVec2(x, yOf(-envelopePoints[i].peakI)), iColor, std::max<float>(thick, dx * 0.6f));
-                    draw->AddLine(ImVec2(x - dx / 2.0f, yOf(envelopePoints[i].peakQ)), ImVec2(x + dx / 2.0f, yOf(envelopePoints[i].peakQ)), qColor, thick);
-                    draw->AddLine(ImVec2(x - dx / 2.0f, yOf(-envelopePoints[i].peakQ)), ImVec2(x + dx / 2.0f, yOf(-envelopePoints[i].peakQ)), qColor, thick);
+                // A minute of blocks is thousands of them; more than there are pixels, each
+                // column takes the highest peak among its blocks, so a burst is not lost.
+                size_t total = envelopePoints.size();
+                size_t cols = std::min<size_t>(total, (size_t)std::max<float>(1.0f, w));
+                float dx = w / (float)cols;
+                for (size_t c = 0; c < cols; c++) {
+                    size_t a = c * total / cols;
+                    size_t b = std::max<size_t>(a + 1, (c + 1) * total / cols);
+                    float pI = 0.0f, pQ = 0.0f;
+                    for (size_t i = a; i < b && i < total; i++) {
+                        pI = std::max<float>(pI, envelopePoints[i].peakI);
+                        pQ = std::max<float>(pQ, envelopePoints[i].peakQ);
+                    }
+                    float x = plotMin.x + (dx * (float)c) + (dx / 2.0f);
+                    draw->AddLine(ImVec2(x, yOf(pI)), ImVec2(x, yOf(-pI)), iColor, std::max<float>(thick, dx * 0.6f));
+                    draw->AddLine(ImVec2(x - dx / 2.0f, yOf(pQ)), ImVec2(x + dx / 2.0f, yOf(pQ)), qColor, thick);
+                    draw->AddLine(ImVec2(x - dx / 2.0f, yOf(-pQ)), ImVec2(x + dx / 2.0f, yOf(-pQ)), qColor, thick);
                 }
             }
 
@@ -532,10 +543,25 @@ namespace {
             }
 
             ImVec2 origin = ImGui::GetCursorScreenPos();
-            float headerHeight = ImGui::GetTextLineHeightWithSpacing();
             ImGui::PushFont(style::tinyFont);
             float lineH = ImGui::GetTextLineHeightWithSpacing();
             ImGui::PopFont();
+
+            // Header: name, the views, and the scale the outer ring stands for. First, so
+            // the plot goes under however many lines it wraps onto in a narrow panel.
+            if (!gui::mainWindow.sdrIsRunning() && !haveData) { ImGui::TextDisabled("IQ   radio stopped"); }
+            else if (!haveData) { ImGui::TextDisabled("IQ   collecting"); }
+            else { ImGui::TextUnformatted("IQ"); }
+            drawViewPills();
+            if (haveData) {
+                char ring[48];
+                snprintf(ring, sizeof ring, "outer ring %.3g%s", scale, paused ? ", paused" : "");
+                ImGui::PushFont(style::tinyFont);
+                flowNext(ring);
+                ImGui::TextDisabled("%s", ring);
+                ImGui::PopFont();
+            }
+            float headerHeight = ImGui::GetCursorScreenPos().y - origin.y;
 
             // Square plot, as big as the room allows under the header and above the
             // readout line.
@@ -577,23 +603,6 @@ namespace {
                 draw->AddLine(ImVec2(cx, cy - tick), ImVec2(cx, cy + tick), textColor);
             }
             draw->PopClipRect();
-
-            // Header: name, and the scale the outer ring stands for.
-            ImGui::SetCursorScreenPos(origin);
-            if (!gui::mainWindow.sdrIsRunning() && !haveData) {
-                ImGui::TextDisabled("IQ   radio stopped");
-            }
-            else if (!haveData) {
-                ImGui::TextDisabled("IQ   collecting");
-            }
-            else {
-                ImGui::TextUnformatted("IQ");
-                drawViewPills();
-                ImGui::SameLine();
-                ImGui::PushFont(style::tinyFont);
-                ImGui::TextDisabled("outer ring %.3g%s", scale, paused ? ", paused" : "");
-                ImGui::PopFont();
-            }
 
             // Readouts under the plot, as many as fit.
             if (haveData) {

@@ -202,6 +202,12 @@ private:
     float holdSeconds = 3.0f;
     bool frozen = false;
 
+    // The signal analyzer's modulation readings as last shown. Taken afresh every frame
+    // the section is drawn, except while frozen, when they stay put with the rest.
+    sigan::Measurements heldMod;
+    bool haveHeldMod = false;
+    bool heldModOffSignal = false;
+
     // Whether retuning starts the timing history over. On is right when the panel is
     // being used to characterise one signal; off is right when it is being swept
     // along a band as a readout, where starting over at every step means the timing
@@ -1330,8 +1336,8 @@ private:
                  fmtWidth(shown.hzPerBin).c_str());
         s += buf;
 
-        sigan::Measurements mod;
-        if (sigan::getMeasurements(mod)) {
+        if (haveHeldMod) {
+            const sigan::Measurements& mod = heldMod;
             if (mod.haveSymbolRate) {
                 snprintf(buf, sizeof buf, "  Symbol rate %.0f Bd\n", mod.symbolRate);
                 s += buf;
@@ -1762,16 +1768,25 @@ private:
         // selected VFO, whether or not its panel is showing. What it can see and nothing
         // more: none of these rows says what the signal is.
         ImGui::SectionHeader("MODULATION");
-        sigan::request();
-        sigan::Measurements mod;
-        bool haveMod = sigan::getMeasurements(mod);
+        // The analyzer only sees what is inside the VFO, while the signal above can be
+        // found a little way either side of it. Readings from a VFO that is off the
+        // signal describe something else, so none are shown then.
+        bool vfoOnSignal = haveVfo && fabs(shown.centre - vfoFreq) <= (vfoBw / 2.0);
+        if (!frozen) {
+            sigan::request();
+            haveHeldMod = sigan::getMeasurements(heldMod) && vfoOnSignal;
+            heldModOffSignal = haveVfo && !vfoOnSignal;
+        }
+        if (heldModOffSignal) { ImGui::TextDisabled("The VFO is not on this signal"); }
+        const sigan::Measurements& mod = heldMod;
+        bool haveMod = haveHeldMod;
 
         if (haveMod && mod.haveSymbolRate) { ImGui::Text("Symbols   %.0f Bd", mod.symbolRate); }
         else { ImGui::Text("Symbols   -"); }
         if (ImGui::IsItemHovered()) {
             style::tooltip("A rate the signal repeats at: the strongest line in the spectrum of how its\n"
                            "frequency, or its envelope, changes from one sample to the next. Only shown\n"
-                           "when that line stands at least 10 dB clear%s.",
+                           "when that line stands at least 14 dB clear%s.",
                            (haveMod && mod.haveSymbolRate) ? "" : " - it does not right now");
         }
 

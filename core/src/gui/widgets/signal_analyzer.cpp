@@ -312,6 +312,7 @@ namespace {
         std::vector<double> traceMarks;       // symbol instants in trace
         float traceRange = 1000.0f;
         std::vector<float> iPart;
+        float iRange = 1.0f;
         std::vector<double> constInstants;
         std::vector<dsp::complex_t> constPoints;
         std::vector<float> constAngles;
@@ -442,6 +443,7 @@ namespace {
                 chanRate = rate;
                 chanBandwidth = selBandwidth;
                 chanOffset = selOffset;
+                chanCentre = gui::waterfall.getCenterFrequency();
                 return;
             }
             if (rate != chanRate || selBandwidth != chanBandwidth) {
@@ -454,6 +456,12 @@ namespace {
                 channel->setOffset(selOffset);
                 chanOffset = selOffset;
                 // Samples from before a retune describe a different piece of spectrum.
+                sink.clear();
+            }
+            // So do samples from before the centre frequency moved under a VFO that stayed.
+            double centre = gui::waterfall.getCenterFrequency();
+            if (centre != chanCentre) {
+                chanCentre = centre;
                 sink.clear();
             }
         }
@@ -764,18 +772,22 @@ namespace {
             out.iPart.resize(n);
             float norm = (rmsMag > 0.0) ? (float)(1.0 / rmsMag) : 1.0f;
             for (size_t i = 0; i < n; i++) { out.iPart[i] = iq[i].re * norm; }
+            out.iRange = std::max<float>(std::max<float>(percentileOf(out.iPart, 0.99), -percentileOf(out.iPart, 0.01)) * 1.15f, 0.1f);
 
             // The constellation's sampling point is chosen separately from the frequency
             // one: where the magnitude varies least from symbol to symbol, which is the
             // symbol instant for a signal that carries its information in phase.
             out.constPoints.clear();
             out.constAngles.clear();
-            if (T >= 2.0) {
-                int K = (int)floor(((double)n - (3.0 * T)) / T);
+            // Too few symbols in the window and there is nothing to choose a sampling point
+            // from; drawn as for no rate at all.
+            int constK = (T >= 2.0) ? (int)floor(((double)n - (3.0 * T)) / T) : 0;
+            if (constK >= 40) {
+                int K = constK;
                 const int PHASES = 24;
                 int bestP = 0;
                 double bestCv = 1e30;
-                for (int p = 0; p < PHASES && K >= 40; p++) {
+                for (int p = 0; p < PHASES; p++) {
                     double t0 = T + (T * p / PHASES);
                     double s = 0.0, s2 = 0.0;
                     for (int k = 0; k < K; k++) {
@@ -1319,11 +1331,12 @@ namespace {
                     snprintf(buf, sizeof buf, "%d phase groups", cv.constGroups);
                     out.push_back(buf);
                 }
-                if (cv.meas.haveSymbolRate) {
+                // Both need points taken once a symbol, which a rate alone does not give.
+                if (!cv.constInstants.empty()) {
                     snprintf(buf, sizeof buf, "magnitude spread %.0f%%", cv.constSpread * 100.0f);
                     out.push_back(buf);
                 }
-                if (cv.meas.haveSymbolRate) {
+                if (!cv.constInstants.empty()) {
                     if (cv.rotFound) { out.push_back("turning " + hz(cv.rotHz) + ", held still"); }
                     else { out.push_back("no steady turning to hold still"); }
                 }
@@ -1393,6 +1406,7 @@ namespace {
         double chanRate = 48000.0;
         double chanBandwidth = 0.0;
         double chanOffset = 0.0;
+        double chanCentre = 0.0;
         double lastAnalysis = 0.0;
 
         fftwf_complex* fftIn = nullptr;
@@ -1497,8 +1511,7 @@ namespace {
                         drawEye(p, cv.freq, cv.instants, cv.T, cv.freqRange, cv.levels, nullptr);
                     }
                     else {
-                        float iRange = std::max<float>(percentileOf(cv.iPart, 0.99), -percentileOf(cv.iPart, 0.01)) * 1.15f;
-                        drawEye(p, cv.iPart, cv.constInstants, cv.T, std::max<float>(iRange, 0.1f), std::vector<float>(), nullptr);
+                        drawEye(p, cv.iPart, cv.constInstants, cv.T, cv.iRange, std::vector<float>(), nullptr);
                     }
                 }
                 else {
@@ -1542,7 +1555,23 @@ namespace {
                 std::string r = hz(range, false);
                 if (view == VIEW_CONST) { snprintf(scale, sizeof scale, "decisions, edges \xC2\xB1%s", r.c_str()); }
                 else if (view == VIEW_EYE) { snprintf(scale, sizeof scale, "\xC2\xB1%s, %s", r.c_str(), eyeSpan); }
-                else { snprintf(scale, sizeof scale, "\xC2\xB1%s", r.c_str()); }
+                else {
+                    // What is actually across, which is less than asked for when there is
+                    // not that much held: a few hundred milliseconds of a wide channel.
+                    char across[40];
+                    if (source == SOURCE_DECODER && !decWaveform()) {
+                        snprintf(across, sizeof across, "%zu decisions across", decTrace.size());
+                    }
+                    else {
+                        double sr = (source == SOURCE_CHANNEL) ? cv.sampleRate : snap.sampleRate;
+                        size_t len = (source == SOURCE_CHANNEL) ? cv.trace.size() : decTrace.size();
+                        double ms = (sr > 0.0) ? 1000.0 * (double)len / sr : 0.0;
+                        if (ms < 10.0) { snprintf(across, sizeof across, "%.2f ms across", ms); }
+                        else if (ms < 1000.0) { snprintf(across, sizeof across, "%.0f ms across", ms); }
+                        else { snprintf(across, sizeof across, "%.2f s across", ms / 1000.0); }
+                    }
+                    snprintf(scale, sizeof scale, "\xC2\xB1%s, %s", r.c_str(), across);
+                }
             }
             if (paused) { strncat(scale, "  paused", sizeof(scale) - strlen(scale) - 1); }
             ImGui::PushFont(style::tinyFont);
