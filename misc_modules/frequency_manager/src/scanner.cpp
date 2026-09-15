@@ -3,6 +3,9 @@
 #include <cmath>
 #include <cstdio>
 #include <algorithm>
+#include <cfloat>
+#include <chrono>
+#include <ctime>
 #include <utils/flog.h>
 #include <gui/gui.h>
 #include <gui/style.h>
@@ -34,6 +37,72 @@ namespace {
         case Scanner::SCAN_HELD: return ImVec4(0.6f, 0.65f, 1.0f, 1.0f);
         default: return ImVec4(0.65f, 0.65f, 0.65f, 1.0f);
         }
+    }
+
+    // A channel counts as recently heard, and its bars are drawn in the accent colour,
+    // for this long after it was last heard.
+    const long long RECENT_SECONDS = 600;
+    // Channels not heard for this long are dropped from the saved history.
+    const long long HISTORY_KEEP_SECONDS = 30LL * 24 * 3600;
+
+    long long unixNow() {
+        return (long long)std::chrono::duration_cast<std::chrono::seconds>(
+                   std::chrono::system_clock::now().time_since_epoch()).count();
+    }
+
+    // Moves a history's hourly slots on to the given hour: everything shifts one slot
+    // older per hour gone by, and hours with nothing heard in them come in as zero.
+    template <class H>
+    void advanceHistory(H& h, int slots, long long hour) {
+        long long gone = hour - h.hour;
+        if (gone <= 0) { return; }   // same hour, or the clock went back: leave it
+        if (gone >= slots) {
+            for (int i = 0; i < slots; i++) { h.counts[i] = 0; }
+        }
+        else {
+            for (int i = 0; i < slots; i++) {
+                h.counts[i] = (i + gone < slots) ? h.counts[i + gone] : 0;
+            }
+        }
+        h.hour = hour;
+    }
+
+    // 464.550, 446.03125: megahertz to at least three places, more only when the
+    // frequency needs them.
+    std::string fmtChannelFreq(double freq) {
+        char buf[48];
+        if (fabs(freq) < 1000000.0) {
+            snprintf(buf, sizeof buf, "%.3f kHz", freq / 1000.0);
+            return buf;
+        }
+        snprintf(buf, sizeof buf, "%.6f", freq / 1000000.0);
+        std::string out = buf;
+        size_t dot = out.find('.');
+        while (dot != std::string::npos && out.size() > dot + 4 && out.back() == '0') { out.pop_back(); }
+        return out + " MHz";
+    }
+
+    std::string agoText(long long seconds) {
+        char buf[32];
+        if (seconds < 60) { return "now"; }
+        if (seconds < 3600) { snprintf(buf, sizeof buf, "%lld min", seconds / 60); }
+        else if (seconds < 48 * 3600) { snprintf(buf, sizeof buf, "%lld h", seconds / 3600); }
+        else { snprintf(buf, sizeof buf, "%lld d", seconds / 86400); }
+        return buf;
+    }
+
+    // Cut to fit maxWidth, with an ellipsis, without splitting a UTF-8 character.
+    std::string fitText(ImFont* font, float size, const std::string& text, float maxWidth) {
+        if (maxWidth <= 0.0f) { return ""; }
+        if (font->CalcTextSizeA(size, FLT_MAX, 0.0f, text.c_str()).x <= maxWidth) { return text; }
+        const char* ellipsis = "...";
+        float ellipsisWidth = font->CalcTextSizeA(size, FLT_MAX, 0.0f, ellipsis).x;
+        std::string cut = text;
+        while (!cut.empty() && font->CalcTextSizeA(size, FLT_MAX, 0.0f, cut.c_str()).x + ellipsisWidth > maxWidth) {
+            while (!cut.empty() && (((unsigned char)cut.back()) & 0xC0) == 0x80) { cut.pop_back(); }
+            if (!cut.empty()) { cut.pop_back(); }
+        }
+        return cut + ellipsis;
     }
 
     template <class T>
@@ -99,6 +168,32 @@ Scanner::Scanner(FrequencyManagerModule* module) : module(module) {
     // dead on it. Repair anything outside the range the UI allows.
     if (!(noiseFloor >= METER_MIN_DB && noiseFloor <= METER_MAX_DB)) { noiseFloor = 3.0f; }
     if (!(signalMarginDb >= 0.0f && signalMarginDb <= METER_MAX_DB)) { signalMarginDb = 4.0f; }
+
+    // The channel history. Anything malformed is skipped rather than trusted, and a
+    // channel not heard for a month is let go.
+    if (sc.contains("history") && sc["history"].is_object()) {
+        long long cutoff = unixNow() - HISTORY_KEEP_SECONDS;
+        for (auto& [key, entry] : sc["history"].items()) {
+            if (!entry.is_object()) { continue; }
+            long long freq = 0;
+            try { freq = std::stoll(key); }
+            catch (...) { continue; }
+            ChannelHistory ch;
+            if (entry.contains("hour") && entry["hour"].is_number_integer()) { ch.hour = entry["hour"].get<long long>(); }
+            if (entry.contains("last") && entry["last"].is_number_integer()) { ch.lastHeard = entry["last"].get<long long>(); }
+            if (ch.lastHeard < cutoff) { continue; }
+            if (entry.contains("counts") && entry["counts"].is_array()) {
+                const auto& counts = entry["counts"];
+                // Newest last: a longer array from some other build keeps its newest hours.
+                int skip = std::max<int>(0, (int)counts.size() - HISTORY_HOURS);
+                for (int i = 0; i < HISTORY_HOURS && (skip + i) < (int)counts.size(); i++) {
+                    const auto& c = counts[skip + i];
+                    if (c.is_number_integer()) { ch.counts[i] = (unsigned int)std::clamp<long long>(c.get<long long>(), 0, 1000000); }
+                }
+            }
+            history[freq] = ch;
+        }
+    }
     dwellMs = std::clamp<float>(dwellMs, 20.0f, 10000.0f);
     settleMs = std::clamp<float>(settleMs, 0.0f, 2000.0f);
     listenTimeSec = std::clamp<float>(listenTimeSec, 0.5f, 600.0f);
@@ -108,6 +203,7 @@ Scanner::Scanner(FrequencyManagerModule* module) : module(module) {
 
 Scanner::~Scanner() {
     stop();
+    saveHistory();
     gui::mainWindow.onPlayStateChange.unbindHandler(&playStateHandler);
 }
 
@@ -245,6 +341,7 @@ void Scanner::stop() {
     // checkbox happened to still be on, so turning it off mid scan left the audio
     // muted with no way back other than restarting.
     setMuted(false);
+    saveHistory();
     flog::info("Scanner stopped");
 }
 
@@ -261,14 +358,38 @@ void Scanner::onPlayStateChange(bool playing) {
     }
 }
 
-void Scanner::logHit() {
-    Hit hit;
-    hit.name = currentStation;
-    hit.frequency = haveCurrentBookmark ? currentBookmark.frequency : 0.0;
-    hit.level = haveLevel ? level : 0.0f;
-    hit.time = ImGui::GetTime();
-    hits.push_front(hit);
-    while (hits.size() > 8) { hits.pop_back(); }
+// Records that the current channel is being heard: one more stop in this hour when
+// the scan has just stopped on it, and in any case the time it was last heard.
+void Scanner::noteHeard(bool newStop) {
+    if (!haveCurrentBookmark || currentBookmark.frequency <= 0.0) { return; }
+    long long now = unixNow();
+    ChannelHistory& ch = history[llround(currentBookmark.frequency)];
+    advanceHistory(ch, HISTORY_HOURS, now / 3600);
+    if (ch.hour == 0) { ch.hour = now / 3600; }
+    if (newStop) { ch.counts[HISTORY_HOURS - 1]++; }
+    ch.lastHeard = now;
+    // Written straight away for a new stop; while a channel just stays busy, every
+    // half minute is plenty for when it was last heard.
+    double t = ImGui::GetTime();
+    if (newStop || (t - lastHistorySave) > 30.0) { saveHistory(); }
+}
+
+void Scanner::saveHistory() {
+    lastHistorySave = ImGui::GetTime();
+    json out = json::object();
+    for (const auto& [freq, ch] : history) {
+        json entry = json::object();
+        entry["hour"] = ch.hour;
+        entry["last"] = ch.lastHeard;
+        json counts = json::array();
+        for (int i = 0; i < HISTORY_HOURS; i++) { counts.push_back(ch.counts[i]); }
+        entry["counts"] = counts;
+        out[std::to_string(freq)] = entry;
+    }
+    auto& config = getFrequencyManagerConfig();
+    config.acquire();
+    config.conf["scanner"]["history"] = out;
+    config.release(true);
 }
 
 float Scanner::historyAverage() const {
@@ -432,7 +553,7 @@ void Scanner::update(float deltaTime) {
 
     case SCAN_MEASURING:
         if (haveLevel && level >= trigger) {
-            logHit();
+            noteHeard(true);
             enterState(SCAN_LISTENING);
         }
         else if ((stateTime * 1000.0f) >= dwellMs) {
@@ -447,6 +568,8 @@ void Scanner::update(float deltaTime) {
         if (carrierHoldMode && haveLevel && level >= (trigger - 2.0f)) {
             stateTime = 0.0f;
         }
+        // Still on the air: last heard is now, not when the scan first stopped here.
+        if (haveLevel && level >= (trigger - 2.0f)) { noteHeard(false); }
         if (stateTime >= listenTimeSec) {
             step(1);
         }
@@ -481,7 +604,7 @@ void Scanner::render() {
     drawTransport();
     drawStatus();
     drawMeter();
-    drawActivity();
+    drawHistory();
     drawSettings();
 }
 
@@ -611,24 +734,163 @@ void Scanner::drawMeter() {
     if (r.hovered) { style::tooltip("Signal on the current channel, in dB over the noise around it.\nDrag to set the level a channel has to beat."); }
 }
 
-void Scanner::drawActivity() {
-    if (hits.empty()) { return; }
-    if (!ImGui::TreeNode("Recent activity##scanner_hits")) { return; }
-    double now = ImGui::GetTime();
-    int index = 0;
-    for (const auto& hit : hits) {
-        char label[192];
-        snprintf(label, sizeof label, "%s  %s  %.0f dB  %.0fs ago##scanner_hit_%d",
-                 hit.name.c_str(), fmtFreq(hit.frequency).c_str(), hit.level,
-                 std::max<double>(0.0, now - hit.time), index++);
-        if (ImGui::Selectable(label)) {
-            auto it = bookmarksMap.find(hit.name);
-            if (it != bookmarksMap.end()) {
-                stop();
-                applyBookmark(it->second, gui::waterfall.selectedVFO);
-            }
+// Every channel in this list the scan has stopped on, most recently heard first: its
+// name, frequency and mode, a bar per hour for the last nine hours, and how long ago it
+// was last heard. A row is a button back to its channel.
+void Scanner::drawHistory() {
+    struct Row {
+        const std::string* name;
+        const FrequencyBookmark* bookmark;
+        long long freq;
+        ChannelHistory ch;
+    };
+    long long now = unixNow();
+    std::vector<Row> rows;
+    std::set<long long> listed;
+    for (const auto& name : bookmarks) {
+        auto bm = bookmarksMap.find(name);
+        if (bm == bookmarksMap.end() || bm->second.frequency <= 0.0) { continue; }
+        long long freq = llround(bm->second.frequency);
+        auto found = history.find(freq);
+        if (found == history.end() || found->second.lastHeard <= 0) { continue; }
+        // Two bookmarks on one frequency share its history; one row is enough.
+        if (!listed.insert(freq).second) { continue; }
+        Row row{ &name, &bm->second, freq, found->second };
+        advanceHistory(row.ch, HISTORY_HOURS, now / 3600);
+        rows.push_back(row);
+    }
+    std::stable_sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) { return a.ch.lastHeard > b.ch.lastHeard; });
+
+    if (!ImGui::TreeNodeEx("Channel activity##scanner_history", ImGuiTreeNodeFlags_DefaultOpen)) { return; }
+    if (rows.empty()) {
+        ImGui::TextDisabled("Nothing heard on this list yet");
+        ImGui::TreePop();
+        return;
+    }
+
+    const float s = style::uiScale;
+    float width = ImGui::GetContentRegionAvail().x;
+    float padX = 10.0f * s;
+    float padY = 6.0f * s;
+    ImFont* nameFont = ImGui::GetFont();
+    float nameSize = ImGui::GetFontSize();
+    ImGui::PushFont(style::tinyFont);
+    ImFont* smallFont = ImGui::GetFont();
+    float smallSize = ImGui::GetFontSize();
+    ImGui::PopFont();
+    float rowH = (padY * 2.0f) + nameSize + (2.0f * s) + smallSize;
+    float rounding = 6.0f * s;
+
+    const float barW = 5.0f * s;
+    const float barGap = 3.0f * s;
+    const float barsW = (HISTORY_HOURS * barW) + ((HISTORY_HOURS - 1) * barGap);
+
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    ImU32 textCol = ImGui::GetColorU32(ImGuiCol_Text);
+    ImU32 dimCol = ImGui::GetColorU32(ImGuiCol_TextDisabled);
+    ImU32 accentCol = ImGui::GetColorU32(ImGuiCol_CheckMark);
+    ImU32 dashCol = ImGui::GetColorU32(ImGuiCol_TextDisabled, 0.55f);
+    ImU32 sepCol = ImGui::GetColorU32(ImGuiCol_Separator, 0.6f);
+
+    // Bars share one scale, so a busy channel looks busier than a quiet one. On a square
+    // root, so one very busy channel does not flatten every other row to a sliver.
+    unsigned int maxCount = 1;
+    for (const auto& row : rows) {
+        for (int i = 0; i < HISTORY_HOURS; i++) { maxCount = std::max<unsigned int>(maxCount, row.ch.counts[i]); }
+    }
+
+    ImVec2 origin = ImGui::GetCursorScreenPos();
+    ImVec2 cardMax(origin.x + width, origin.y + (rowH * (float)rows.size()));
+    dl->AddRectFilled(origin, cardMax, ImGui::GetColorU32(ImGuiCol_FrameBg, 0.55f), rounding);
+    dl->AddRect(origin, cardMax, ImGui::GetColorU32(ImGuiCol_Border), rounding);
+
+    const Row* clicked = nullptr;
+    for (size_t i = 0; i < rows.size(); i++) {
+        const Row& row = rows[i];
+        ImVec2 r0(origin.x, origin.y + (rowH * (float)i));
+        ImVec2 r1(origin.x + width, r0.y + rowH);
+
+        ImGui::SetCursorScreenPos(r0);
+        ImGui::PushID((int)i);
+        if (ImGui::InvisibleButton("##scanner_history_row", ImVec2(width, rowH))) { clicked = &row; }
+        bool hovered = ImGui::IsItemHovered();
+        ImGui::PopID();
+
+        if (hovered) {
+            ImDrawFlags corners = ImDrawFlags_RoundCornersNone;
+            if (i == 0) { corners |= ImDrawFlags_RoundCornersTop; }
+            if (i + 1 == rows.size()) { corners |= ImDrawFlags_RoundCornersBottom; }
+            dl->AddRectFilled(ImVec2(r0.x + 1.0f, r0.y + 1.0f), ImVec2(r1.x - 1.0f, r1.y - 1.0f),
+                              ImGui::GetColorU32(ImGuiCol_FrameBgHovered), rounding, corners);
         }
-        if (ImGui::IsItemHovered()) { style::tooltip("Stop the scan and go back to this channel"); }
+        if (i > 0) { dl->AddLine(ImVec2(r0.x + padX, r0.y), ImVec2(r1.x - padX, r0.y), sepCol); }
+
+        long long ago = std::max<long long>(0, now - row.ch.lastHeard);
+        bool onItNow = (state == SCAN_LISTENING) && haveCurrentBookmark && llround(currentBookmark.frequency) == row.freq;
+        if (onItNow) { ago = 0; }
+        bool recent = ago < RECENT_SECONDS;
+        unsigned int total = 0;
+        for (int k = 0; k < HISTORY_HOURS; k++) { total += row.ch.counts[k]; }
+
+        // The bars, oldest hour on the left, standing on the name's baseline.
+        float barsX = r1.x - padX - barsW;
+        float barsTop = r0.y + padY;
+        float barsBottom = barsTop + nameSize;
+        ImU32 barCol = recent ? accentCol : dimCol;
+        for (int k = 0; k < HISTORY_HOURS; k++) {
+            float x = barsX + ((float)k * (barW + barGap));
+            unsigned int c = row.ch.counts[k];
+            if (c == 0) {
+                dl->AddRectFilled(ImVec2(x, barsBottom - (2.0f * s)), ImVec2(x + barW, barsBottom), dashCol);
+                continue;
+            }
+            float h = std::max<float>(3.0f * s, nameSize * (float)sqrt((double)c / (double)maxCount));
+            dl->AddRectFilled(ImVec2(x, barsBottom - h), ImVec2(x + barW, barsBottom), barCol, 1.0f * s);
+        }
+
+        // How long ago, right-aligned under the bars.
+        std::string agoStr = agoText(ago);
+        float agoW = smallFont->CalcTextSizeA(smallSize, FLT_MAX, 0.0f, agoStr.c_str()).x;
+        float smallY = barsBottom + (2.0f * s);
+        dl->AddText(smallFont, smallSize, ImVec2(r1.x - padX - agoW, smallY), recent ? textCol : dimCol, agoStr.c_str());
+
+        // Name, and frequency and mode, kept clear of the bars.
+        float textX = r0.x + padX;
+        float textW = barsX - (12.0f * s) - textX;
+        std::string name = fitText(nameFont, nameSize, *row.name, textW);
+        dl->AddText(nameFont, nameSize, ImVec2(textX, barsTop), (total > 0) ? textCol : dimCol, name.c_str());
+        std::string detail = fmtChannelFreq(row.bookmark->frequency);
+        if (modeName) { detail += "  " + modeName(row.bookmark->demodId); }
+        float detailW = std::min<float>(textW, (r1.x - padX - agoW - (12.0f * s)) - textX);
+        detail = fitText(smallFont, smallSize, detail, detailW);
+        dl->AddText(smallFont, smallSize, ImVec2(textX, smallY), dimCol, detail.c_str());
+
+        if (hovered) {
+            char lastAt[32] = "-";
+            time_t t = (time_t)row.ch.lastHeard;
+            std::tm local = {};
+#ifdef _WIN32
+            if (localtime_s(&local, &t) == 0) { strftime(lastAt, sizeof lastAt, "%H:%M, %d %b", &local); }
+#else
+            if (localtime_r(&t, &local) != nullptr) { strftime(lastAt, sizeof lastAt, "%H:%M, %d %b", &local); }
+#endif
+            std::string perHour;
+            for (int k = 0; k < HISTORY_HOURS; k++) {
+                if (k > 0) { perHour += " "; }
+                perHour += std::to_string(row.ch.counts[k]);
+            }
+            style::tooltip("%s\n%u stop%s in the last %d hours: %s, oldest first\nLast heard %s\nClick to stop the scan and go to this channel",
+                           row.name->c_str(), total, total == 1 ? "" : "s", HISTORY_HOURS, perHour.c_str(),
+                           onItNow ? "now" : lastAt);
+        }
+    }
+    ImGui::SetCursorScreenPos(ImVec2(origin.x, cardMax.y + (4.0f * s)));
+    ImGui::Dummy(ImVec2(0.0f, 0.0f));
+
+    if (clicked != nullptr) {
+        FrequencyBookmark target = *clicked->bookmark;
+        stop();
+        applyBookmark(target, gui::waterfall.selectedVFO);
     }
     ImGui::TreePop();
 }

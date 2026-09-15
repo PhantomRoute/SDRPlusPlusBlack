@@ -113,6 +113,7 @@ public:
         // because the scanner is a member and is built before this body runs.
         scanner.onSetSkip = [this](const std::string& bmName, bool skip) { setBookmarkSkip(bmName, skip); };
         scanner.onClearSkips = [this]() { clearBookmarkSkips(); };
+        scanner.modeName = [](int demodId) { return demodModeName(demodId); };
 
         migrateScannerSkipList();
 

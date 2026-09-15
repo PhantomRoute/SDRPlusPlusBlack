@@ -47,6 +47,9 @@ public:
     // without a manager behind it.
     std::function<void(const std::string&, bool)> onSetSkip;
     std::function<void()> onClearSkips;
+    // A mode's name from its DemodID, for the history rows. The table of names lives
+    // in the frequency manager. May be empty, in which case no mode is shown.
+    std::function<std::string(int)> modeName;
 
     // The level a channel has to beat to count as busy.
     float getTriggerLevel() const { return noiseFloor + signalMarginDb; }
@@ -107,14 +110,19 @@ private:
     };
     std::deque<SignalSample> signalHistory;
 
-    // ---- Activity log
-    struct Hit {
-        std::string name;
-        double frequency;
-        float level;
-        double time;
+    // ---- History: how often the scan stopped on each channel, an hour at a time
+    // for the last HISTORY_HOURS hours, and when it last heard it. Kept by frequency
+    // rather than by bookmark name, so renaming a channel or listing it in two lists
+    // keeps one history for what is actually on the air there. Wall-clock hours, so
+    // it carries on across restarts; saved under "scanner"/"history".
+    static const int HISTORY_HOURS = 9;
+    struct ChannelHistory {
+        long long hour = 0;                        // the hour the last slot covers, since the epoch
+        unsigned int counts[HISTORY_HOURS] = { 0 }; // oldest first
+        long long lastHeard = 0;                   // seconds since the epoch
     };
-    std::deque<Hit> hits;
+    std::map<long long, ChannelHistory> history;   // by frequency, in whole hertz
+    double lastHistorySave = -1000.0;
 
     bool weMuted = false;    // the temp mute is ours to release
     double lastRenderTime = -1000.0;
@@ -129,7 +137,8 @@ private:
     // bookmarks themselves rather than kept as a second copy that can go stale.
     std::vector<std::string> skippedNames() const;
     void setMuted(bool muted);
-    void logHit();
+    void noteHeard(bool newStop);
+    void saveHistory();
     float historyAverage() const;
 
     void sampleLevel(float deltaTime);
@@ -140,7 +149,7 @@ private:
     void drawStatus();
     void drawMeter();
     void drawSettings();
-    void drawActivity();
+    void drawHistory();
 
     EventHandler<bool> playStateHandler;
 };
