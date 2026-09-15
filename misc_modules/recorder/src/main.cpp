@@ -1,4 +1,5 @@
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <module.h>
 #include <dsp/types.h>
 #include <dsp/stream.h>
@@ -9,13 +10,14 @@
 #include <dsp/convert/stereo_to_mono.h>
 #include <thread>
 #include <ctime>
+#include <memory>
+#include <cfloat>
 #include <gui/gui.h>
 #include <filesystem>
 #include <system_error>
 #include <signal_path/signal_path.h>
 #include <config.h>
 #include <gui/style.h>
-#include <gui/widgets/volume_meter.h>
 #include <regex>
 #include <gui/widgets/folder_select.h>
 #include <recorder_interface.h>
@@ -24,6 +26,7 @@
 #include <utils/optionlist.h>
 #include <utils/wav.h>
 #include <radio_module_interface.h>
+#include "audio_file.h"
 
 #define CONCAT(a, b) ((std::string(a) + b).c_str())
 
@@ -33,13 +36,38 @@ SDRPP_MOD_INFO{
     /* Name:            */ "recorder",
     /* Description:     */ "Recorder module for SDR++",
     /* Author:          */ "Ryzerth",
-    /* Version:         */ 0, 3, 0,
+    /* Version:         */ 0, 4, 0,
     /* Max instances    */ -1
 };
 
 ConfigManager config;
 
 namespace {
+    // What an audio recording is written as. Baseband is always WAV: it is kept exactly
+    // as it arrived, so it can be replayed and retuned later.
+    enum AudioFormat {
+        AUDIO_FORMAT_WAV = 0,
+        AUDIO_FORMAT_FLAC,
+        AUDIO_FORMAT_MP3,
+        AUDIO_FORMAT_COUNT
+    };
+    const char* AUDIO_FORMAT_KEYS[AUDIO_FORMAT_COUNT] = { "WAV", "FLAC", "MP3" };
+    const char* AUDIO_FORMAT_EXT[AUDIO_FORMAT_COUNT] = { ".wav", ".flac", ".mp3" };
+
+    const int FLAC_BITS[] = { 16, 24 };
+    const int FLAC_BITS_COUNT = 2;
+    const int MP3_BITRATES[] = { 32, 48, 64, 96, 128, 160, 192, 256, 320 };
+    const int MP3_BITRATES_COUNT = 9;
+
+    // The level meter's scale, in dB below full scale.
+    const float METER_MIN_DB = -60.0f;
+    const float METER_MAX_DB = 0.0f;
+    // Where the bar turns from green to amber, and from amber to red.
+    const float METER_WARN_DB = -18.0f;
+    const float METER_HOT_DB = -6.0f;
+    // The gain slider's bottom stop, which means off.
+    const float GAIN_OFF_DB = -60.0f;
+
     std::string formatBytes(uint64_t bytes) {
         const char* units[] = { "B", "KB", "MB", "GB", "TB" };
         double value = (double)bytes;
@@ -69,6 +97,41 @@ namespace {
         else { snprintf(buf, sizeof buf, "%.1f days", (double)seconds / 86400.0); }
         return std::string(buf);
     }
+
+    std::string formatRate(uint64_t rate) {
+        char buf[48];
+        if (rate >= 1000000) { snprintf(buf, sizeof buf, "%.3g MS/s", (double)rate / 1000000.0); }
+        else if (rate % 1000 == 0) { snprintf(buf, sizeof buf, "%d kHz", (int)(rate / 1000)); }
+        else { snprintf(buf, sizeof buf, "%.1f kHz", (double)rate / 1000.0); }
+        return std::string(buf);
+    }
+
+    ImU32 withAlpha(ImVec4 c, float a) {
+        c.w *= a;
+        return ImGui::GetColorU32(c);
+    }
+
+    // A peak meter channel: jumps up at once, falls back at a steady rate, and keeps a
+    // mark at the highest recent peak for a moment so a short one can still be read.
+    struct MeterChannel {
+        float level = -120.0f;
+        float hold = -120.0f;
+        double holdTime = 0.0;
+        double clipTime = -1000.0;
+
+        void update(float linearPeak, float dt, double now) {
+            float db = (linearPeak > 1e-6f) ? 20.0f * log10f(linearPeak) : -120.0f;
+            level = std::max<float>(db, level - (24.0f * dt));
+            if (db >= hold) {
+                hold = db;
+                holdTime = now;
+            }
+            else if ((now - holdTime) > 1.5) {
+                hold = std::max<float>(level, hold - (20.0f * dt));
+            }
+            if (linearPeak >= 0.999f) { clipTime = now; }
+        }
+    };
 }
 
 class RecorderModule : public ModuleManager::Instance {
@@ -85,7 +148,6 @@ public:
         sampleTypes.define(wav::SAMP_TYPE_INT16, "Int16", wav::SAMP_TYPE_INT16);
         sampleTypes.define(wav::SAMP_TYPE_INT32, "Int32", wav::SAMP_TYPE_INT32);
         sampleTypes.define(wav::SAMP_TYPE_FLOAT32, "Float32", wav::SAMP_TYPE_FLOAT32);
-
 
         // Load default config for option lists
         containerId = containers.valueId(wav::FORMAT_WAV);
@@ -123,6 +185,27 @@ public:
                 _nameTemplate = _nameTemplate.substr(0, sizeof(nameTemplate)-1);
             }
             strcpy(nameTemplate, _nameTemplate.c_str());
+        }
+        // Read defensively: a hand edited file, or one from an older build, is as
+        // likely to have these missing or of the wrong type as right.
+        auto& conf = config.conf[name];
+        if (conf.contains("audioFormat") && conf["audioFormat"].is_string()) {
+            std::string key = conf["audioFormat"];
+            for (int i = 0; i < AUDIO_FORMAT_COUNT; i++) {
+                if (key == AUDIO_FORMAT_KEYS[i]) { audioFormat = i; }
+            }
+        }
+        if (conf.contains("flacBits") && conf["flacBits"].is_number_integer()) {
+            int bits = conf["flacBits"];
+            for (int i = 0; i < FLAC_BITS_COUNT; i++) {
+                if (FLAC_BITS[i] == bits) { flacBitsId = i; }
+            }
+        }
+        if (conf.contains("mp3Bitrate") && conf["mp3Bitrate"].is_number_integer()) {
+            int kbps = conf["mp3Bitrate"];
+            for (int i = 0; i < MP3_BITRATES_COUNT; i++) {
+                if (MP3_BITRATES[i] == kbps) { mp3BitrateId = i; }
+            }
         }
         config.release();
 
@@ -213,17 +296,22 @@ public:
         return (recMode == RECORDER_MODE_AUDIO && !stereo) ? 1 : 2;
     }
 
+    // The format the next recording is written in. Baseband is WAV whatever audio is set to.
+    int effectiveFormat() {
+        return (recMode == RECORDER_MODE_AUDIO) ? audioFormat : AUDIO_FORMAT_WAV;
+    }
+
     // The name the next recording would get. Rebuilt when something it depends on
     // changes, and at most twice a second otherwise, because building it runs nine
     // regex replacements and the clock fields in it only tick once a second.
     const std::string& fileNamePreview() {
-        std::string key = std::string(nameTemplate) + "|" + std::to_string(recMode) + "|" + selectedStreamName;
+        std::string key = std::string(nameTemplate) + "|" + std::to_string(recMode) + "|" + selectedStreamName + "|" + std::to_string(effectiveFormat());
         double now = ImGui::GetTime();
         if (key != previewKey || (now - previewTime) > 0.5) {
             previewKey = key;
             previewTime = now;
             std::string vfoName = (recMode == RECORDER_MODE_AUDIO) ? selectedStreamName : "";
-            previewName = genFileName(nameTemplate, recMode, vfoName) + ".wav";
+            previewName = genFileName(nameTemplate, recMode, vfoName) + AUDIO_FORMAT_EXT[effectiveFormat()];
             previewPath = expandString(folderSelect.path + "/" + previewName);
         }
         return previewName;
@@ -253,6 +341,38 @@ public:
         return (bits / 8) * currentChannels();
     }
 
+    // Bytes a second the chosen format writes at this rate. For FLAC, which depends on
+    // what is being recorded, the uncompressed size - the most it can come to.
+    double bytesPerSecond(uint64_t rate) {
+        switch (effectiveFormat()) {
+        case AUDIO_FORMAT_MP3: return (double)MP3_BITRATES[mp3BitrateId] * 1000.0 / 8.0;
+        case AUDIO_FORMAT_FLAC: return (double)rate * (double)(FLAC_BITS[flacBitsId] / 8) * (double)currentChannels();
+        default: return (double)rate * (double)bytesPerFrame();
+        }
+    }
+
+    const char* sampleTypeName() {
+        switch (sampleTypes[sampleTypeId]) {
+        case wav::SAMP_TYPE_UINT8: return "8-bit";
+        case wav::SAMP_TYPE_INT32: return "32-bit";
+        case wav::SAMP_TYPE_FLOAT32: return "32-bit float";
+        default: return "16-bit";
+        }
+    }
+
+    // "MP3 128 kbps, 48 kHz mono", for the line under the Record button.
+    std::string formatSummary(uint64_t rate) {
+        char buf[128];
+        const char* layout = (recMode == RECORDER_MODE_BASEBAND) ? "IQ" : (currentChannels() == 1 ? "mono" : "stereo");
+        std::string rateStr = formatRate(rate);
+        switch (effectiveFormat()) {
+        case AUDIO_FORMAT_MP3: snprintf(buf, sizeof buf, "MP3 %d kbps, %s %s", MP3_BITRATES[mp3BitrateId], rateStr.c_str(), layout); break;
+        case AUDIO_FORMAT_FLAC: snprintf(buf, sizeof buf, "FLAC %d-bit, %s %s", FLAC_BITS[flacBitsId], rateStr.c_str(), layout); break;
+        default: snprintf(buf, sizeof buf, "WAV %s, %s %s", sampleTypeName(), rateStr.c_str(), layout); break;
+        }
+        return buf;
+    }
+
     void start() {
         std::lock_guard<std::recursive_mutex> lck(recMtx);
         if (recording) { return; }
@@ -262,28 +382,41 @@ public:
         lastError = recordBlockedReason();
         if (!lastError.empty()) { return; }
 
-        // Configure the wav writer
         samplerate = currentSamplerate();
-        writer.setFormat(containers[containerId]);
-        writer.setChannels(currentChannels());
-        writer.setSampleType(sampleTypes[sampleTypeId]);
-        writer.setSamplerate(samplerate);
-
-        // Open file
+        recFormat = effectiveFormat();
         std::string vfoName = (recMode == RECORDER_MODE_AUDIO) ? selectedStreamName : "";
-        std::string extension = ".wav";
-        std::string expandedPath = expandString(folderSelect.path + "/" + genFileName(nameTemplate, recMode, vfoName) + extension);
-        if (!writer.open(expandedPath)) {
-            flog::error("Failed to open file for recording: {0}", expandedPath);
-            lastError = "Could not open " + expandedPath;
-            return;
+        std::string expandedPath = expandString(folderSelect.path + "/" + genFileName(nameTemplate, recMode, vfoName) + AUDIO_FORMAT_EXT[recFormat]);
+
+        if (recFormat == AUDIO_FORMAT_WAV) {
+            encoded.reset();
+            writer.setFormat(containers[containerId]);
+            writer.setChannels(currentChannels());
+            writer.setSampleType(sampleTypes[sampleTypeId]);
+            writer.setSamplerate(samplerate);
+            if (!writer.open(expandedPath)) {
+                flog::error("Failed to open file for recording: {0}", expandedPath);
+                lastError = "Could not open " + expandedPath;
+                return;
+            }
+            recBytesPerFrame = bytesPerFrame();
+        }
+        else {
+            std::shared_ptr<recorder_audio::EncodedFile> file;
+            if (recFormat == AUDIO_FORMAT_FLAC) { file = std::make_shared<recorder_audio::FlacFile>(FLAC_BITS[flacBitsId]); }
+            else { file = std::make_shared<recorder_audio::Mp3File>(MP3_BITRATES[mp3BitrateId]); }
+            if (!file->open(expandedPath, currentChannels(), (int)samplerate)) {
+                flog::error("Failed to start recording to {0}: {1}", expandedPath, file->lastError());
+                lastError = file->lastError();
+                return;
+            }
+            encoded = file;
         }
         currentPath = expandedPath;
-        recBytesPerFrame = bytesPerFrame();
+        recBytesPerSecond = bytesPerSecond(samplerate);
 
         // Open audio stream or baseband
         if (recMode == RECORDER_MODE_AUDIO) {
-            // Start correct path depending on 
+            // Start correct path depending on
             if (stereo) {
                 stereoSink.start();
             }
@@ -314,7 +447,7 @@ public:
             monoSink.stop();
             stereoSink.stop();
             s2m.stop();
-            
+
         }
         else {
             // Unbind and destroy IQ stream
@@ -323,260 +456,556 @@ public:
             delete basebandStream;
         }
 
-        // Close file
-        writer.close();
-        
+        // Close file. The sinks above are stopped, so nothing is still writing to it.
+        // An encoded file is kept, closed, until the next recording starts: the panel
+        // still reads its size and whether a write failed.
+        if (encoded) { encoded->close(); }
+        else { writer.close(); }
+
         recording = false;
     }
 
 private:
-    static void menuHandler(void* ctx) {
-        RecorderModule* _this = (RecorderModule*)ctx;
-        float menuWidth = ImGui::GetContentRegionAvail().x;
+    // ---- Reading the recording back, for the panel.
 
-        // The panel was one run of controls from the mode switch to the record
-        // button, so the container and sample type - which decide the file - read as
-        // if they belonged to the audio meters below them.
-        ImGui::SectionHeader("WHAT TO RECORD");
+    uint64_t recordedFrames() {
+        return encoded ? encoded->framesWritten() : (uint64_t)writer.getSamplesWritten();
+    }
 
-        // Recording mode
-        if (_this->recording) { style::beginDisabled(); }
-        ImGui::BeginGroup();
-        ImGui::Columns(2, CONCAT("RecorderModeColumns##_", _this->name), false);
-        if (ImGui::RadioButton(CONCAT("Baseband##_recorder_mode_", _this->name), _this->recMode == RECORDER_MODE_BASEBAND)) {
-            _this->recMode = RECORDER_MODE_BASEBAND;
+    uint64_t recordedBytes() {
+        return encoded ? encoded->bytesWritten() : (uint64_t)writer.getSamplesWritten() * (uint64_t)recBytesPerFrame;
+    }
+
+    // ---- Drawing
+
+    // A row of buttons that act as one choice, the chosen one in the theme's accent
+    // colour. Returns true when the choice changed.
+    static bool segmented(const char* id, const char* const* labels, int count, int& value) {
+        float width = ImGui::GetContentRegionAvail().x;
+        float gap = 2.0f * style::uiScale;
+        float each = (width - (gap * (float)(count - 1))) / (float)count;
+        bool changed = false;
+        for (int i = 0; i < count; i++) {
+            if (i > 0) { ImGui::SameLine(0.0f, gap); }
+            bool active = (value == i);
+            if (active) {
+                ImVec4 fill = ImGui::GetStyleColorVec4(ImGuiCol_CheckMark);
+                fill.w = 0.55f;
+                ImGui::PushStyleColor(ImGuiCol_Button, fill);
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, fill);
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, fill);
+            }
+            if (ImGui::Button((std::string(labels[i]) + "##" + id + std::to_string(i)).c_str(), ImVec2(each, 0)) && !active) {
+                value = i;
+                changed = true;
+            }
+            if (active) { ImGui::PopStyleColor(3); }
+        }
+        return changed;
+    }
+
+    // The Record / Stop button: tall, with a dot or a square drawn beside the word, and
+    // red while recording so it cannot be mistaken from across the room.
+    bool transportButton(const char* id, bool isRecording, bool disabled, float width) {
+        const float s = style::uiScale;
+        float height = ImGui::GetFrameHeight() * 1.6f;
+        ImVec2 pos = ImGui::GetCursorScreenPos();
+        bool pressed = ImGui::InvisibleButton(id, ImVec2(width, height)) && !disabled;
+        bool hovered = ImGui::IsItemHovered() && !disabled;
+        bool held = ImGui::IsItemActive() && !disabled;
+
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        ImVec2 corner(pos.x + width, pos.y + height);
+        ImU32 fill;
+        if (isRecording) {
+            ImVec4 red = held ? ImVec4(0.55f, 0.13f, 0.13f, 1.0f) : hovered ? ImVec4(0.75f, 0.2f, 0.2f, 1.0f) : ImVec4(0.64f, 0.16f, 0.16f, 1.0f);
+            fill = ImGui::GetColorU32(red);
+        }
+        else {
+            fill = ImGui::GetColorU32(held ? ImGuiCol_ButtonActive : hovered ? ImGuiCol_ButtonHovered : ImGuiCol_Button);
+        }
+        float rounding = std::max<float>(ImGui::GetStyle().FrameRounding, 4.0f * s);
+        dl->AddRectFilled(pos, corner, fill, rounding);
+
+        const char* label = isRecording ? "Stop" : "Record";
+        ImVec2 textSize = ImGui::CalcTextSize(label);
+        float icon = ImGui::GetFontSize() * 0.62f;
+        float spacing = 8.0f * s;
+        float totalW = icon + spacing + textSize.x;
+        float x = pos.x + ((width - totalW) / 2.0f);
+        float cy = pos.y + (height / 2.0f);
+        ImU32 textCol = isRecording ? ImGui::GetColorU32(ImVec4(1.0f, 1.0f, 1.0f, 1.0f)) : ImGui::GetColorU32(ImGuiCol_Text);
+        if (isRecording) {
+            dl->AddRectFilled(ImVec2(x, cy - (icon / 2.0f)), ImVec2(x + icon, cy + (icon / 2.0f)), textCol, 1.5f * s);
+        }
+        else {
+            ImVec4 dot = disabled ? ImVec4(0.9f, 0.3f, 0.3f, 0.35f) : ImVec4(0.93f, 0.27f, 0.25f, 1.0f);
+            dl->AddCircleFilled(ImVec2(x + (icon / 2.0f), cy), icon / 2.0f, ImGui::GetColorU32(dot), 20);
+        }
+        dl->AddText(ImVec2(x + icon + spacing, cy - (textSize.y / 2.0f)), textCol, label);
+        return pressed;
+    }
+
+    void drawSource() {
+        ImGui::SectionHeader("RECORD");
+
+        if (recording) { style::beginDisabled(); }
+        // Audio first: it is what most recordings are.
+        const char* modes[2] = { "Audio", "Baseband" };
+        int modeIdx = (recMode == RECORDER_MODE_AUDIO) ? 0 : 1;
+        if (segmented(CONCAT("recorder_mode_", name), modes, 2, modeIdx) && !recording) {
+            recMode = (modeIdx == 0) ? RECORDER_MODE_AUDIO : RECORDER_MODE_BASEBAND;
             config.acquire();
-            config.conf[_this->name]["mode"] = _this->recMode;
+            config.conf[name]["mode"] = recMode;
             config.release(true);
         }
-        ImGui::NextColumn();
-        if (ImGui::RadioButton(CONCAT("Audio##_recorder_mode_", _this->name), _this->recMode == RECORDER_MODE_AUDIO)) {
-            _this->recMode = RECORDER_MODE_AUDIO;
-            config.acquire();
-            config.conf[_this->name]["mode"] = _this->recMode;
-            config.release(true);
-        }
-        ImGui::Columns(1, CONCAT("EndRecorderModeColumns##_", _this->name), false);
-        ImGui::EndGroup();
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-            style::tooltip("Baseband records the raw IQ of the whole visible spectrum, which is\n"
-                              "large but can be replayed and retuned later. Audio records what you\n"
-                              "are listening to on one stream.");
+            style::tooltip("Audio records what you are listening to on one stream. Baseband records the\n"
+                           "raw IQ of the whole visible spectrum, which is large but can be replayed\n"
+                           "and retuned later.");
         }
 
-        // Which stream is the other half of "what to record", so it belongs here
-        // rather than three sections down under the meters.
-        if (_this->recMode == RECORDER_MODE_AUDIO) {
+        // Which stream is the other half of "what to record".
+        if (recMode == RECORDER_MODE_AUDIO) {
             ImGui::LeftLabel("Stream");
             ImGui::FillWidth();
-            if (ImGui::Combo(CONCAT("##_recorder_stream_", _this->name), &_this->streamId, _this->audioStreams.txt)) {
-                _this->selectStream(_this->audioStreams.value(_this->streamId));
+            if (ImGui::Combo(CONCAT("##_recorder_stream_", name), &streamId, audioStreams.txt)) {
+                selectStream(audioStreams.value(streamId));
                 config.acquire();
-                config.conf[_this->name]["audioStream"] = _this->audioStreams.key(_this->streamId);
+                config.conf[name]["audioStream"] = audioStreams.key(streamId);
                 config.release(true);
             }
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
                 style::tooltip("Which audio output to record. Each radio and each secondary output is\nits own stream.");
             }
         }
+        if (recording) { style::endDisabled(); }
+    }
 
+    void drawTransport() {
+        std::lock_guard<std::recursive_mutex> lck(recMtx);
+        const float s = style::uiScale;
+        float width = ImGui::GetContentRegionAvail().x;
+        ImGui::Dummy(ImVec2(0.0f, 2.0f * s));
+
+        // The guard used to be worked out and then ignored, so pressing Record with a
+        // bad folder did nothing at all and the panel went on saying "Idle".
+        std::string blocked = recordBlockedReason();
+        if (!recording) {
+            if (transportButton(CONCAT("##_recorder_rec_", name), false, !blocked.empty(), width)) { start(); }
+        }
+        else {
+            if (transportButton(CONCAT("##_recorder_rec_", name), true, false, width)) { stop(); }
+        }
+
+        if (!recording) {
+            if (!blocked.empty()) {
+                ImGui::PushTextWrapPos(0.0f);
+                ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.3f, 1.0f), "%s", blocked.c_str());
+                ImGui::PopTextWrapPos();
+                return;
+            }
+            if (!lastError.empty()) {
+                ImGui::PushTextWrapPos(0.0f);
+                ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.4f, 1.0f), "%s", lastError.c_str());
+                ImGui::PopTextWrapPos();
+            }
+            else if (!currentPath.empty()) {
+                ImGui::PushTextWrapPos(0.0f);
+                ImGui::TextDisabled("Saved %s, %s", std::filesystem::path(currentPath).filename().string().c_str(), formatBytes(recordedBytes()).c_str());
+                ImGui::PopTextWrapPos();
+                if (ImGui::IsItemHovered()) { style::tooltip("%s", currentPath.c_str()); }
+                if (encoded && encoded->writeFailed()) {
+                    ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.4f, 1.0f), "Part of it could not be written. Is the disk full?");
+                }
+            }
+            drawSummary(currentSamplerate());
+            return;
+        }
+
+        // ---- Recording: the clock large, with a light that says whether audio is
+        // actually going into the file.
+        uint64_t frames = recordedFrames();
+        uint64_t seconds = (samplerate > 0) ? (frames / samplerate) : 0;
+        uint64_t bytes = recordedBytes();
+        bool waiting = ignoreSilence && ignoringSilence;
+        double now = ImGui::GetTime();
+
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        ImVec2 pos = ImGui::GetCursorScreenPos();
+        ImGui::PushFont(style::mediumFont);
+        float clockH = ImGui::GetTextLineHeight();
+        std::string clock = formatClock(seconds);
+        ImVec2 clockSize = ImGui::CalcTextSize(clock.c_str());
+        ImGui::PopFont();
+
+        float dotR = 5.0f * s;
+        ImVec4 red(0.93f, 0.27f, 0.25f, 1.0f);
+        ImVec4 amber(1.0f, 0.72f, 0.25f, 1.0f);
+        // A slow pulse while writing; steady amber while skip silence is holding off.
+        float pulse = waiting ? 1.0f : (0.55f + (0.45f * (float)(0.5 + (0.5 * cos(now * 4.0)))));
+        ImVec2 dotC(pos.x + dotR + (1.0f * s), pos.y + (clockH / 2.0f));
+        dl->AddCircleFilled(dotC, dotR, withAlpha(waiting ? amber : red, pulse), 16);
+
+        const char* state = waiting ? "WAITING" : "REC";
+        ImGui::PushFont(style::tinyFont);
+        ImVec2 stateSize = ImGui::CalcTextSize(state);
+        float stateX = dotC.x + dotR + (6.0f * s);
+        dl->AddText(ImVec2(stateX, pos.y + ((clockH - stateSize.y) / 2.0f)), ImGui::GetColorU32(waiting ? amber : red), state);
+        ImGui::PopFont();
+
+        float clockX = stateX + stateSize.x + (8.0f * s);
+        dl->AddText(style::mediumFont, style::mediumFont->FontSize, ImVec2(clockX, pos.y), ImGui::GetColorU32(ImGuiCol_Text), clock.c_str());
+
+        std::string size = formatBytes(bytes);
+        ImVec2 sizeSize = ImGui::CalcTextSize(size.c_str());
+        float sizeX = pos.x + width - sizeSize.x;
+        if (sizeX > clockX + clockSize.x + (8.0f * s)) {
+            dl->AddText(ImVec2(sizeX, pos.y + ((clockH - sizeSize.y) / 2.0f)), ImGui::GetColorU32(ImGuiCol_Text), size.c_str());
+        }
+        ImGui::Dummy(ImVec2(width, clockH));
+        if (waiting && ImGui::IsItemHovered()) {
+            style::tooltip("Skip silence is on and the audio is silent, so nothing is being written.\nThe clock carries on when the audio does.");
+        }
+
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextDisabled("%s", std::filesystem::path(currentPath).filename().string().c_str());
+        ImGui::PopTextWrapPos();
+        if (ImGui::IsItemHovered()) { style::tooltip("Writing to\n%s", currentPath.c_str()); }
+
+        // How much room is left, and the things that need doing something about.
+        uint64_t freeBytes = freeSpace();
+        double perSecond = recBytesPerSecond;
+        if (recFormat == AUDIO_FORMAT_FLAC && seconds >= 10 && bytes > 0) {
+            // FLAC's rate depends on the audio; once there is some, go by what it has done.
+            perSecond = (double)bytes / (double)seconds;
+        }
+        bool lowOnSpace = (freeBytes > 0) && (perSecond > 0.0) && (((double)freeBytes / perSecond) < 300.0);
+        ImGui::PushFont(style::tinyFont);
+        if (freeBytes > 0 && !lowOnSpace) {
+            ImGui::TextDisabled("%s | %s free", formatSummary(samplerate).c_str(), formatBytes(freeBytes).c_str());
+        }
+        else {
+            ImGui::TextDisabled("%s", formatSummary(samplerate).c_str());
+        }
+        ImGui::PopFont();
+
+        // A full RIFF container drops everything written after it without a word, so
+        // this is the only sign the recording has stopped growing.
+        if (!encoded && writer.isFull()) {
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "File hit the 4 GB WAV limit and has stopped growing. Stop and start a new one.");
+            ImGui::PopTextWrapPos();
+        }
+        if (encoded && encoded->writeFailed()) {
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "Writing to the file failed, so nothing more is reaching it. Is the disk full?");
+            ImGui::PopTextWrapPos();
+        }
+        if (lowOnSpace) {
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.4f, 1.0f), "%s free, about %s left",
+                               formatBytes(freeBytes).c_str(), formatSpan((uint64_t)((double)freeBytes / perSecond)).c_str());
+            ImGui::PopTextWrapPos();
+        }
+    }
+
+    // What the next recording will be, and how fast it fills a disk. Baseband at a few
+    // MS/s fills one far faster than anyone expects.
+    void drawSummary(uint64_t rate) {
+        if (rate == 0) { return; }
+        double perMinute = bytesPerSecond(rate) * 60.0;
+        std::string size = formatBytes((uint64_t)perMinute);
+        ImGui::PushFont(style::tinyFont);
+        if (effectiveFormat() == AUDIO_FORMAT_FLAC) {
+            ImGui::TextDisabled("%s | up to %s a minute", formatSummary(rate).c_str(), size.c_str());
+        }
+        else {
+            ImGui::TextDisabled("%s | %s a minute", formatSummary(rate).c_str(), size.c_str());
+        }
+        ImGui::PopFont();
+        if (ImGui::IsItemHovered()) {
+            if (effectiveFormat() == AUDIO_FORMAT_WAV) {
+                style::tooltip("A WAV file cannot go past 4 GB. At this rate that is about %s.",
+                               formatSpan((uint64_t)(4294967296.0 / std::max<double>(1.0, perMinute / 60.0))).c_str());
+            }
+            else if (effectiveFormat() == AUDIO_FORMAT_FLAC) {
+                style::tooltip("FLAC's size depends on the audio. Quiet or simple audio packs down a long\n"
+                               "way; noise hardly at all. It never comes to more than the same WAV would.");
+            }
+        }
+    }
+
+    void drawLevel() {
+        const float s = style::uiScale;
+        ImGui::SectionHeader("LEVEL");
+
+        double now = ImGui::GetTime();
+        float dt = std::clamp<float>(ImGui::GetIO().DeltaTime, 0.0f, 0.25f);
+        dsp::stereo_t raw = meter.getLevel();
+        meter.resetLevel();
+        meterL.update(raw.l, dt, now);
+        meterR.update(raw.r, dt, now);
+        // A mono file is the two channels mixed, so its meter is the louder of the two.
+        MeterChannel mono;
+        if (!stereo) {
+            mono = (meterL.level >= meterR.level) ? meterL : meterR;
+            mono.hold = std::max<float>(meterL.hold, meterR.hold);
+            mono.clipTime = std::max<double>(meterL.clipTime, meterR.clipTime);
+        }
+
+        float width = ImGui::GetContentRegionAvail().x;
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        ImVec2 origin = ImGui::GetCursorScreenPos();
+
+        ImGui::PushFont(style::tinyFont);
+        ImFont* tiny = ImGui::GetFont();
+        float tinySize = ImGui::GetFontSize();
+        float labelW = std::max<float>(ImGui::CalcTextSize("L").x, ImGui::CalcTextSize("R").x) + (6.0f * s);
+        const char* clipLabel = "CLIP";
+        ImVec2 clipText = ImGui::CalcTextSize(clipLabel);
+        ImGui::PopFont();
+
+        int rows = stereo ? 2 : 1;
+        float barH = (stereo ? 7.0f : 12.0f) * s;
+        float rowGap = 3.0f * s;
+        float barsH = (barH * (float)rows) + (rowGap * (float)(rows - 1));
+        float clipW = clipText.x + (10.0f * s);
+        float barX0 = origin.x + (stereo ? labelW : 0.0f);
+        float barX1 = origin.x + width - clipW - (6.0f * s);
+        float barW = std::max<float>(10.0f, barX1 - barX0);
+        auto xOf = [&](float db) {
+            float t = (std::clamp<float>(db, METER_MIN_DB, METER_MAX_DB) - METER_MIN_DB) / (METER_MAX_DB - METER_MIN_DB);
+            return barX0 + (t * barW);
+        };
+
+        ImVec4 green(0.25f, 0.78f, 0.38f, 1.0f);
+        ImVec4 amber(0.96f, 0.74f, 0.22f, 1.0f);
+        ImVec4 red(0.93f, 0.28f, 0.25f, 1.0f);
+        struct Zone { float from, to; ImVec4 col; };
+        const Zone zones[3] = { { METER_MIN_DB, METER_WARN_DB, green }, { METER_WARN_DB, METER_HOT_DB, amber }, { METER_HOT_DB, METER_MAX_DB, red } };
+
+        const MeterChannel* channels[2] = { stereo ? &meterL : &mono, &meterR };
+        const char* names[2] = { "L", "R" };
+        float rounding = 2.0f * s;
+        for (int r = 0; r < rows; r++) {
+            const MeterChannel& m = *channels[r];
+            float y0 = origin.y + ((barH + rowGap) * (float)r);
+            float y1 = y0 + barH;
+            if (stereo) {
+                dl->AddText(tiny, tinySize, ImVec2(origin.x, y0 + ((barH - tinySize) / 2.0f)), ImGui::GetColorU32(ImGuiCol_TextDisabled), names[r]);
+            }
+            dl->AddRectFilled(ImVec2(barX0, y0), ImVec2(barX0 + barW, y1), ImGui::GetColorU32(ImGuiCol_FrameBg), rounding);
+            // Every zone faintly, so the scale reads before anything is playing; then
+            // the lit part up to the level.
+            for (const Zone& z : zones) {
+                float zx0 = xOf(z.from), zx1 = xOf(z.to);
+                dl->AddRectFilled(ImVec2(zx0, y0), ImVec2(zx1, y1), withAlpha(z.col, 0.14f));
+                float litTo = std::min<float>(zx1, xOf(m.level));
+                if (m.level > METER_MIN_DB && litTo > zx0) {
+                    dl->AddRectFilled(ImVec2(zx0, y0), ImVec2(litTo, y1), ImGui::GetColorU32(z.col));
+                }
+            }
+            if (m.hold > METER_MIN_DB) {
+                float hx = xOf(m.hold);
+                // In the text colour, so it shows against the lit bar as well as the dark.
+                dl->AddRectFilled(ImVec2(std::max<float>(barX0, hx - (1.0f * s)), y0), ImVec2(std::min<float>(barX0 + barW, hx + (1.0f * s)), y1), ImGui::GetColorU32(ImGuiCol_Text));
+            }
+        }
+
+        // Clip light: lit for two seconds after any sample reaches full scale.
+        double lastClip = std::max<double>(meterL.clipTime, meterR.clipTime);
+        bool clipLit = (now - lastClip) < 2.0;
+        ImVec2 clipMin(origin.x + width - clipW, origin.y);
+        ImVec2 clipMax(origin.x + width, origin.y + barsH);
+        if (clipLit) { dl->AddRectFilled(clipMin, clipMax, ImGui::GetColorU32(red), rounding); }
+        else { dl->AddRect(clipMin, clipMax, ImGui::GetColorU32(ImGuiCol_Border), rounding); }
+        dl->AddText(tiny, tinySize, ImVec2(clipMin.x + ((clipW - clipText.x) / 2.0f), origin.y + ((barsH - tinySize) / 2.0f)),
+                    clipLit ? ImGui::GetColorU32(ImVec4(1.0f, 1.0f, 1.0f, 1.0f)) : ImGui::GetColorU32(ImGuiCol_TextDisabled), clipLabel);
+
+        // The scale under the bars, leaving out any label that would run into the last.
+        float scaleY = origin.y + barsH + (2.0f * s);
+        const float marks[] = { -60.0f, -48.0f, -36.0f, -24.0f, -18.0f, -12.0f, -6.0f, -3.0f, 0.0f };
+        float lastRight = -1e9f;
+        for (float db : marks) {
+            char txt[8];
+            snprintf(txt, sizeof txt, "%.0f", db);
+            float tw = tiny->CalcTextSizeA(tinySize, FLT_MAX, 0.0f, txt).x;
+            float cx = xOf(db);
+            float tx = std::clamp<float>(cx - (tw / 2.0f), barX0, barX0 + barW - tw);
+            if (tx < lastRight + (4.0f * s)) { continue; }
+            dl->AddLine(ImVec2(cx, scaleY), ImVec2(cx, scaleY + (2.0f * s)), ImGui::GetColorU32(ImGuiCol_TextDisabled));
+            dl->AddText(tiny, tinySize, ImVec2(tx, scaleY + (2.0f * s)), ImGui::GetColorU32(ImGuiCol_TextDisabled), txt);
+            lastRight = tx + tw;
+        }
+
+        float totalH = barsH + (4.0f * s) + tinySize;
+        ImGui::InvisibleButton(CONCAT("##_recorder_meter_", name), ImVec2(width, totalH));
+        if (ImGui::IsItemHovered()) {
+            float peak = stereo ? std::max<float>(meterL.hold, meterR.hold) : mono.hold;
+            if (peak > METER_MIN_DB) {
+                style::tooltip("Peak %.1f dBFS\n\nWhat goes into the file, after the gain below. Keep the peaks out of the\n"
+                               "red: CLIP lights when a sample reaches full scale, and anything louder than\n"
+                               "that is cut off in the file.", peak);
+            }
+            else {
+                style::tooltip("What goes into the file, after the gain below. Nothing is coming through.");
+            }
+        }
+
+        // Gain, in dB. Stored as the plain multiplier it always was, so an existing
+        // setting carries over.
+        ImGui::LeftLabel("Gain");
+        ImGui::FillWidth();
+        float gainDb = (audioVolume > 0.0f) ? std::max<float>(GAIN_OFF_DB, 20.0f * log10f(audioVolume)) : GAIN_OFF_DB;
+        if (ImGui::SliderFloat(CONCAT("##_recorder_vol_", name), &gainDb, GAIN_OFF_DB, 0.0f, (gainDb <= GAIN_OFF_DB) ? "off" : "%.1f dB")) {
+            audioVolume = (gainDb <= GAIN_OFF_DB) ? 0.0f : powf(10.0f, gainDb / 20.0f);
+            volume.setVolume(audioVolume);
+            config.acquire();
+            config.conf[name]["audioVolume"] = audioVolume;
+            config.release(true);
+        }
+        if (ImGui::IsItemHovered()) {
+            style::tooltip("Gain applied to what is written to the file, not to what you hear.\nCtrl+click to type a value.");
+        }
+    }
+
+    void drawFile() {
         ImGui::SectionHeader("FILE");
+        float markerRoom = 30.0f * style::uiScale;
 
-        // Recording path
-        if (_this->folderSelect.render("##_recorder_fold_" + _this->name)) {
-            if (_this->folderSelect.pathIsValid()) {
+        if (recording) { style::beginDisabled(); }
+
+        if (folderSelect.render("##_recorder_fold_" + name)) {
+            if (folderSelect.pathIsValid()) {
                 config.acquire();
-                config.conf[_this->name]["recPath"] = _this->folderSelect.path;
+                config.conf[name]["recPath"] = folderSelect.path;
                 config.release(true);
             }
         }
 
-        ImGui::LeftLabel("Name template");
-        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - (30.0f * style::uiScale));
-        if (ImGui::InputText(CONCAT("##_recorder_name_template_", _this->name), _this->nameTemplate, 1023)) {
+        ImGui::LeftLabel("Name");
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - markerRoom);
+        if (ImGui::InputText(CONCAT("##_recorder_name_template_", name), nameTemplate, 1023)) {
             config.acquire();
-            config.conf[_this->name]["nameTemplate"] = _this->nameTemplate;
+            config.conf[name]["nameTemplate"] = nameTemplate;
             config.release(true);
         }
-        ImGui::SameLine();
-        ImGui::TextDisabled("(?)");
-        if (ImGui::IsItemHovered()) {
-            style::tooltip("$t   audio or baseband\n"
-                              "$f   frequency, in Hz\n"
-                              "$r   mode (NFM, USB, ...)\n"
-                              "$h $m $s   hour, minute, second\n"
-                              "$d $M $y   day, month, year\n"
-                              "Anything else is kept as typed. .wav is added for you.");
-        }
+        ImGui::HelpMarker("$t   audio or baseband\n"
+                          "$f   frequency, in Hz\n"
+                          "$r   mode (NFM, USB, ...)\n"
+                          "$h $m $s   hour, minute, second\n"
+                          "$d $M $y   day, month, year\n"
+                          "Anything else is kept as typed. The extension is added for you.");
 
-        // One line for the file, in the same place whether it is the one being
-        // written or the one the template would produce next. The full path is a
-        // tooltip rather than another line of text.
-        {
-            bool live = _this->recording && !_this->currentPath.empty();
-            std::string shown = live ? std::filesystem::path(_this->currentPath).filename().string()
-                                     : _this->fileNamePreview();
+        // The file the template produces next. While recording, the one being written
+        // is shown up by the clock instead.
+        if (!recording) {
+            std::string shown = fileNamePreview();
             ImGui::PushTextWrapPos(0.0f);
             ImGui::TextDisabled("%s", shown.c_str());
             ImGui::PopTextWrapPos();
-            if (ImGui::IsItemHovered()) {
-                style::tooltip("%s\n%s", live ? "Writing to" : "Next recording goes to",
-                                  live ? _this->currentPath.c_str() : _this->previewPath.c_str());
-            }
+            if (ImGui::IsItemHovered()) { style::tooltip("Next recording goes to\n%s", previewPath.c_str()); }
         }
 
-        ImGui::LeftLabel("Container");
-        ImGui::FillWidth();
-        if (ImGui::Combo(CONCAT("##_recorder_container_", _this->name), &_this->containerId, _this->containers.txt)) {
-            config.acquire();
-            config.conf[_this->name]["container"] = _this->containers.key(_this->containerId);
-            config.release(true);
-        }
-
-        ImGui::LeftLabel("Sample type");
-        ImGui::FillWidth();
-        if (ImGui::Combo(CONCAT("##_recorder_st_", _this->name), &_this->sampleTypeId, _this->sampleTypes.txt)) {
-            config.acquire();
-            config.conf[_this->name]["sampleType"] = _this->sampleTypes.key(_this->sampleTypeId);
-            config.release(true);
-        }
-
-        // Baseband at a few Msps fills a disk far faster than anyone expects, and
-        // the format choices in front of this double or halve it.
-        uint64_t rate = _this->currentSamplerate();
-        if (rate > 0) {
-            double bytesPerMinute = (double)rate * (double)_this->bytesPerFrame() * 60.0;
-            ImGui::TextDisabled("%s per minute at %.0f kS/s", formatBytes((uint64_t)bytesPerMinute).c_str(), (double)rate / 1000.0);
-            if (ImGui::IsItemHovered()) {
-                style::tooltip("A WAV file cannot go past 4 GB. At this rate that is about %s.",
-                                  formatSpan((uint64_t)(4294967296.0 / std::max<double>(1.0, bytesPerMinute / 60.0))).c_str());
-            }
-        }
-
-        // Stereo doubles the size of the file and Skip silence decides what goes into
-        // it, so both belong with the format above rather than under the meters.
-        if (_this->recMode == RECORDER_MODE_AUDIO) {
-            if (ImGui::Checkbox(CONCAT("Stereo##_recorder_stereo_", _this->name), &_this->stereo)) {
+        // ---- Format
+        if (recMode == RECORDER_MODE_AUDIO) {
+            ImGui::LeftLabel("Format");
+            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - markerRoom);
+            if (ImGui::Combo(CONCAT("##_recorder_format_", name), &audioFormat, "WAV\0FLAC\0MP3\0")) {
+                audioFormat = std::clamp<int>(audioFormat, 0, AUDIO_FORMAT_COUNT - 1);
                 config.acquire();
-                config.conf[_this->name]["stereo"] = _this->stereo;
+                config.conf[name]["audioFormat"] = AUDIO_FORMAT_KEYS[audioFormat];
+                config.release(true);
+            }
+            ImGui::HelpMarker("WAV: uncompressed, exactly what came in.\n"
+                              "FLAC: lossless - the same audio as WAV, in less space.\n"
+                              "MP3: lossy - much smaller, and plays anywhere, but some detail is gone for good.");
+        }
+        else {
+            ImGui::LeftLabel("Format");
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextDisabled("WAV");
+            ImGui::HelpMarker("Baseband is always WAV. It is kept exactly as it arrived, so it can be\nreplayed and retuned later; a compressed format would lose that.");
+        }
+
+        int format = effectiveFormat();
+        if (format == AUDIO_FORMAT_WAV) {
+            ImGui::LeftLabel("Sample type");
+            ImGui::FillWidth();
+            if (ImGui::Combo(CONCAT("##_recorder_st_", name), &sampleTypeId, sampleTypes.txt)) {
+                config.acquire();
+                config.conf[name]["sampleType"] = sampleTypes.key(sampleTypeId);
+                config.release(true);
+            }
+        }
+        else if (format == AUDIO_FORMAT_FLAC) {
+            ImGui::LeftLabel("Bit depth");
+            ImGui::FillWidth();
+            if (ImGui::Combo(CONCAT("##_recorder_flac_bits_", name), &flacBitsId, "16-bit\0" "24-bit\0")) {
+                config.acquire();
+                config.conf[name]["flacBits"] = FLAC_BITS[flacBitsId];
+                config.release(true);
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                style::tooltip("16-bit is more than the audio from a receiver needs. 24-bit only makes a\nbigger file of it.");
+            }
+        }
+        else if (format == AUDIO_FORMAT_MP3) {
+            ImGui::LeftLabel("Bitrate");
+            ImGui::FillWidth();
+            const char* bitrates = "32 kbps\0" "48 kbps\0" "64 kbps\0" "96 kbps\0" "128 kbps\0" "160 kbps\0" "192 kbps\0" "256 kbps\0" "320 kbps\0";
+            if (ImGui::Combo(CONCAT("##_recorder_mp3_rate_", name), &mp3BitrateId, bitrates)) {
+                config.acquire();
+                config.conf[name]["mp3Bitrate"] = MP3_BITRATES[mp3BitrateId];
+                config.release(true);
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+                style::tooltip("64 kbps is plenty for speech from a scanner in mono. Music, or broadcast\nFM in stereo, wants 128 kbps or more.");
+            }
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextColored(ImVec4(1.0f, 0.72f, 0.3f, 1.0f), "MP3 is lossy.");
+            ImGui::SameLine();
+            ImGui::TextDisabled("Fine for listening back, but a digital mode or data decoded from the recording later may not survive it. Use WAV or FLAC for that.");
+            ImGui::PopTextWrapPos();
+        }
+
+        // Stereo doubles the audio in the file, so it belongs with the format.
+        if (recMode == RECORDER_MODE_AUDIO) {
+            if (ImGui::Checkbox(CONCAT("Stereo##_recorder_stereo_", name), &stereo)) {
+                config.acquire();
+                config.conf[name]["stereo"] = stereo;
                 config.release(true);
             }
             ImGui::HelpMarker("Two channels instead of one. Twice the file for no more information\nunless the source really is stereo, as broadcast FM is.");
         }
 
-        if (_this->recording) { style::endDisabled(); }
+        if (recording) { style::endDisabled(); }
 
         // Outside the block above on purpose: unlike everything else about the file,
         // this one is decided per buffer as it is written, so it can be turned on and
         // off part way through a recording.
-        if (_this->recMode == RECORDER_MODE_AUDIO) {
-            if (ImGui::Checkbox(CONCAT("Skip silence##_recorder_ignore_silence_", _this->name), &_this->ignoreSilence)) {
+        if (recMode == RECORDER_MODE_AUDIO) {
+            if (ImGui::Checkbox(CONCAT("Skip silence##_recorder_ignore_silence_", name), &ignoreSilence)) {
                 config.acquire();
-                config.conf[_this->name]["ignoreSilence"] = _this->ignoreSilence;
+                config.conf[name]["ignoreSilence"] = ignoreSilence;
                 config.release(true);
             }
             ImGui::HelpMarker("Write nothing while the audio is below about -100 dB, so a quiet\n"
                               "channel does not fill the file. The recording clock stops with it,\n"
                               "so the file has no gaps and no idea how long the silence was.");
         }
+    }
 
-        // The meters and the gain that feeds them are the one part of this panel that
-        // can be touched while it is recording, which is easier to see when they are
-        // not interleaved with four settings that cannot.
-        if (_this->recMode == RECORDER_MODE_AUDIO) {
-            ImGui::SectionHeader("LEVEL");
-
-            _this->updateAudioMeter(_this->audioLvl);
-            ImGui::FillWidth();
-            ImGui::VolumeMeter(_this->audioLvl.l, _this->audioLvl.l, -60, 10);
-            ImGui::FillWidth();
-            ImGui::VolumeMeter(_this->audioLvl.r, _this->audioLvl.r, -60, 10);
-
-            ImGui::FillWidth();
-            if (ImGui::SliderFloat(CONCAT("##_recorder_vol_", _this->name), &_this->audioVolume, 0, 1, "")) {
-                _this->volume.setVolume(_this->audioVolume);
-                config.acquire();
-                config.conf[_this->name]["audioVolume"] = _this->audioVolume;
-                config.release(true);
-            }
-            if (ImGui::IsItemHovered()) {
-                style::tooltip("Gain applied to what is written to the file, not to what you hear.\nKeep the meters off the right hand end.");
-            }
-        }
-
-        ImGui::Separator();
-
-        // Record button. The guard used to be worked out here and then ignored, so
-        // pressing Record with a bad folder did nothing at all and the panel went
-        // on saying "Idle".
-        std::string blocked = _this->recordBlockedReason();
-        if (!_this->recording) {
-            if (!blocked.empty()) { style::beginDisabled(); }
-            if (ImGui::Button(CONCAT("Record##_recorder_rec_", _this->name), ImVec2(menuWidth, 0))) {
-                _this->start();
-            }
-            if (!blocked.empty()) { style::endDisabled(); }
-
-            if (!blocked.empty()) {
-                ImGui::PushTextWrapPos(0.0f);
-                ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.3f, 1.0f), "%s", blocked.c_str());
-                ImGui::PopTextWrapPos();
-            }
-            else if (!_this->lastError.empty()) {
-                ImGui::PushTextWrapPos(0.0f);
-                ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.4f, 1.0f), "%s", _this->lastError.c_str());
-                ImGui::PopTextWrapPos();
-            }
-            else if (!_this->currentPath.empty()) {
-                ImGui::TextDisabled("Saved  %s", std::filesystem::path(_this->currentPath).filename().string().c_str());
-                if (ImGui::IsItemHovered()) { style::tooltip("%s", _this->currentPath.c_str()); }
-            }
-            else {
-                ImGui::TextDisabled("Idle  --:--:--");
-            }
-        }
-        else {
-            if (ImGui::Button(CONCAT("Stop##_recorder_rec_", _this->name), ImVec2(menuWidth, 0))) {
-                _this->stop();
-            }
-
-            uint64_t written = _this->writer.getSamplesWritten();
-            uint64_t seconds = (_this->samplerate > 0) ? (written / _this->samplerate) : 0;
-            uint64_t bytes = written * (uint64_t)_this->recBytesPerFrame;
-
-            // State, elapsed, size and headroom on one line. Only the things that
-            // need doing something about get a line of their own.
-            uint64_t freeBytes = _this->freeSpace();
-            double perSecond = (double)_this->samplerate * (double)_this->recBytesPerFrame;
-            bool lowOnSpace = (freeBytes > 0) && (perSecond > 0.0) && (((double)freeBytes / perSecond) < 300.0);
-
-            if (_this->ignoreSilence && _this->ignoringSilence) {
-                ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), "Paused  %s", formatClock(seconds).c_str());
-            }
-            else {
-                ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "Recording  %s", formatClock(seconds).c_str());
-            }
-            ImGui::SameLine();
-            ImGui::TextDisabled("%s", formatBytes(bytes).c_str());
-            if (freeBytes > 0 && !lowOnSpace) {
-                ImGui::SameLine();
-                ImGui::TextDisabled("%s free", formatBytes(freeBytes).c_str());
-            }
-
-            // A full RIFF container drops everything written after it without a
-            // word, so this is the only sign the recording has stopped growing.
-            if (_this->writer.isFull()) {
-                ImGui::PushTextWrapPos(0.0f);
-                ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "File hit the 4 GB WAV limit and has stopped growing. Stop and start a new one.");
-                ImGui::PopTextWrapPos();
-            }
-            if (lowOnSpace) {
-                ImGui::PushTextWrapPos(0.0f);
-                ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.4f, 1.0f), "%s free, about %s left",
-                                   formatBytes(freeBytes).c_str(), formatSpan((uint64_t)((double)freeBytes / perSecond)).c_str());
-                ImGui::PopTextWrapPos();
-            }
-        }
+    static void menuHandler(void* ctx) {
+        RecorderModule* _this = (RecorderModule*)ctx;
+        // What to record, then the button and what it is doing, then the level going
+        // into the file, then how the file is written - roughly the order they are
+        // reached for, with the one thing used while recording near the top.
+        _this->drawSource();
+        _this->drawTransport();
+        if (_this->recMode == RECORDER_MODE_AUDIO) { _this->drawLevel(); }
+        _this->drawFile();
     }
 
     void selectStream(std::string name) {
@@ -664,18 +1093,6 @@ private:
         }
     }
 
-    void updateAudioMeter(dsp::stereo_t& lvl) {
-        // Note: Yes, using the natural log is on purpose, it just gives a more beautiful result.
-        double frameTime = 1.0 / ImGui::GetIO().Framerate;
-        lvl.l = std::clamp<float>(lvl.l - (frameTime * 50.0), -90.0f, 10.0f);
-        lvl.r = std::clamp<float>(lvl.r - (frameTime * 50.0), -90.0f, 10.0f);
-        dsp::stereo_t rawLvl = meter.getLevel();
-        meter.resetLevel();
-        dsp::stereo_t dbLvl = { 10.0f * logf(rawLvl.l), 10.0f * logf(rawLvl.r) };
-        if (dbLvl.l > lvl.l) { lvl.l = dbLvl.l; }
-        if (dbLvl.r > lvl.r) { lvl.r = dbLvl.r; }
-    }
-
     std::string genFileName(std::string templ, int recMode, std::string name) {
         // Get data
         time_t now = time(0);
@@ -737,6 +1154,13 @@ private:
         return std::regex_replace(input, std::regex("//"), "/");
     }
 
+    // The sinks feeding these are stopped before the file is closed or replaced, so the
+    // file they write to cannot change under them.
+    void writeAudio(float* data, int frames) {
+        if (encoded) { encoded->write(data, frames); }
+        else { writer.write(data, frames); }
+    }
+
     static void complexHandler(dsp::complex_t* data, int count, void* ctx) {
         RecorderModule* _this = (RecorderModule*)ctx;
         _this->writer.write((float*)data, count);
@@ -755,7 +1179,7 @@ private:
             _this->ignoringSilence = (absMax < SILENCE_LVL);
             if (_this->ignoringSilence) { return; }
         }
-        _this->writer.write((float*)data, count);
+        _this->writeAudio((float*)data, count);
     }
 
     static void monoHandler(float* data, int count, void* ctx) {
@@ -769,20 +1193,46 @@ private:
             _this->ignoringSilence = (absMax < SILENCE_LVL);
             if (_this->ignoringSilence) { return; }
         }
-        _this->writer.write(data, count);
+        _this->writeAudio(data, count);
     }
 
     std::string handleDebugCommand(const std::string& cmd, const std::string& args) {
         if (cmd == "start") {
             if (!recording) { start(); }
-            return recording ? "{\"status\":\"recording\"}" : "{\"status\":\"failed\"}";
+            if (recording) { return "{\"status\":\"recording\"}"; }
+            json err;
+            err["status"] = "failed";
+            err["error"] = lastError;
+            return err.dump();
         }
         if (cmd == "stop") {
             if (recording) { stop(); }
             return "{\"status\":\"stopped\"}";
         }
         if (cmd == "status") {
-            return "{\"recording\":" + std::string(recording ? "true" : "false") + "}";
+            std::lock_guard<std::recursive_mutex> lck(recMtx);
+            json st;
+            st["recording"] = recording;
+            st["format"] = AUDIO_FORMAT_KEYS[recording ? recFormat : effectiveFormat()];
+            st["path"] = currentPath;
+            st["frames"] = recordedFrames();
+            st["bytes"] = recordedBytes();
+            st["writeFailed"] = (bool)(encoded && encoded->writeFailed());
+            return st.dump();
+        }
+        // Audio format for the next recording: WAV, FLAC or MP3.
+        if (cmd == "set_format") {
+            if (recording) { return "{\"error\":\"recording\"}"; }
+            for (int i = 0; i < AUDIO_FORMAT_COUNT; i++) {
+                if (args == AUDIO_FORMAT_KEYS[i]) {
+                    audioFormat = i;
+                    config.acquire();
+                    config.conf[name]["audioFormat"] = AUDIO_FORMAT_KEYS[i];
+                    config.release(true);
+                    return "{\"status\":\"ok\"}";
+                }
+            }
+            return "{\"error\":\"unknown format\"}";
         }
         return "{}";
     }
@@ -819,11 +1269,14 @@ private:
     int recMode = RECORDER_MODE_AUDIO;
     int containerId;
     int sampleTypeId;
+    int audioFormat = AUDIO_FORMAT_WAV;
+    int flacBitsId = 0;     // 16-bit
+    int mp3BitrateId = 4;   // 128 kbps
     bool stereo = false;
     std::string selectedStreamName = "";
     float audioVolume = 1.0f;
     bool ignoreSilence = false;
-    dsp::stereo_t audioLvl = { -100.0f, -100.0f };
+    MeterChannel meterL, meterR;
 
     bool recording = false;
     bool ignoringSilence = false;
@@ -831,6 +1284,8 @@ private:
     std::string lastError;   // why the last attempt to record did not take
     std::string currentPath; // file being written right now
     int recBytesPerFrame = 4;
+    int recFormat = AUDIO_FORMAT_WAV;   // what the current or last recording was written as
+    double recBytesPerSecond = 0.0;
 
     std::string previewKey;
     std::string previewName;
@@ -840,6 +1295,8 @@ private:
     double spaceTime = -1000.0;
 
     wav::Writer writer;
+    // The FLAC or MP3 file of an audio recording in one of those; null for WAV.
+    std::shared_ptr<recorder_audio::EncodedFile> encoded;
     std::recursive_mutex recMtx;
     dsp::stream<dsp::complex_t>* basebandStream;
     dsp::stream<dsp::stereo_t> stereoStream;
