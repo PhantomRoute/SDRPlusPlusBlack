@@ -177,47 +177,47 @@ short MY_B4_FFT::base4_fft(Complex_num *x, int sign) {
 }
 
 MY_B4_FFT::~MY_B4_FFT() {
-	if (!m_Buffer_cos) {
+	if (m_Buffer_cos) {
 		delete[] m_Buffer_cos;
 		m_Buffer_cos = NULL;
 	}
-	if (!m_Buffer_sin) {
+	if (m_Buffer_sin) {
 		delete[] m_Buffer_sin;
 		m_Buffer_sin = NULL;
 	}
-	if (!m_sort4_count) {
+	if (m_sort4_count) {
 		delete[] m_sort4_count;
 		m_sort4_count = NULL;
 	}
-	if (!m_sort_temp_r) {
+	if (m_sort_temp_r) {
 		delete[] m_sort_temp_r;
 		m_sort_temp_r = NULL;
 	}
-	if (!m_sort_temp_i) {
+	if (m_sort_temp_i) {
 		delete[] m_sort_temp_i;
 		m_sort_temp_i = NULL;
 	}
-	if (!m_e1_position) {
+	if (m_e1_position) {
 		delete[] m_e1_position;
 		m_e1_position = NULL;
 	}
-	if (!m_o1_position) {
+	if (m_o1_position) {
 		delete[] m_o1_position;
 		m_o1_position = NULL;
 	}
-	if (!m_yr) {
+	if (m_yr) {
 		delete[] m_yr;
 		m_yr = NULL;
 	}
-	if (!m_e2_position) {
+	if (m_e2_position) {
 		delete[] m_e2_position;
 		m_e2_position = NULL;
 	}
-	if (!m_o2_position) {
+	if (m_o2_position) {
 		delete[] m_o2_position;
 		m_o2_position = NULL;
 	}
-	if (!m_yi) {
+	if (m_yi) {
 		delete[] m_yi;
 		m_yi = NULL;
 	}

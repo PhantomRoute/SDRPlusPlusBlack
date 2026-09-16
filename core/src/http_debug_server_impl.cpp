@@ -8,6 +8,7 @@
 #include <string>
 #include <thread>
 #include <future>
+#include <functional>
 #include <chrono>
 #include <atomic>
 #include <filesystem>
@@ -441,6 +442,31 @@ namespace httpdebug {
 // answered 404: /click, /mouse, /key, /type, /drag, /vfo/set_offset and the module
 // commands. The whole GUI automation surface was unreachable, which is easy to miss
 // because the endpoints that take nothing - /status, /layout, /windows - worked fine.
+// Runs fn on the UI thread and waits for its answer. Creating, deleting, enabling and
+// disabling modules all touch DSP chains, menus and waterfall handlers the UI thread is
+// using as it draws; from the server thread that is a race of its own, and would be
+// reported as a module bug.
+static std::string runOnUIThread(std::function<std::string()> fn) {
+    auto reply = std::make_shared<std::promise<std::string>>();
+    auto answer = reply->get_future();
+    gui::mainWindow.addMainThreadTask([fn, reply]() { reply->set_value(fn()); });
+    if (answer.wait_for(std::chrono::seconds(10)) != std::future_status::ready) {
+        return "{\"error\": \"timed out waiting for the UI thread\"}";
+    }
+    return answer.get();
+}
+
+static void saveModuleInstances() {
+    core::configManager.acquire();
+    json instances;
+    for (auto& [name, inst] : core::moduleManager.instances) {
+        instances[name]["module"] = inst.module.info->name;
+        instances[name]["enabled"] = inst.instance->isEnabled();
+    }
+    core::configManager.conf["moduleInstances"] = instances;
+    core::configManager.release(true);
+}
+
 static bool pathIs(const struct Request* request, const char* want) {
     size_t n = strlen(want);
     if (strncmp(request->path, want, n) != 0) { return false; }
@@ -565,20 +591,23 @@ struct Response* createResponseForRequest(const struct Request* request, struct 
         return responseAllocJSON("{\"action\": \"click_id\"}");
     }
 
-    if (pathIs(request, "/sdr/start")) {
-        httpdebug::requestSdrStart();
-        return responseAllocJSON("{\"action\": \"sdr_start\"}");
-    }
-
-    if (pathIs(request, "/sdr/stop")) {
-        httpdebug::requestSdrStop();
-        return responseAllocJSON("{\"action\": \"sdr_stop\"}");
+    // Status used to report a flag set when play was requested, so it still said
+    // playing after a start that failed, or after the no-samples watchdog stopped
+    // the source. Both now run on the UI thread and report whether it is running.
+    if (pathIs(request, "/sdr/start") || pathIs(request, "/sdr/stop")) {
+        bool start = pathIs(request, "/sdr/start");
+        std::string res = runOnUIThread([start]() -> std::string {
+            gui::mainWindow.setPlayState(start);
+            return std::string("{\"action\": \"") + (start ? "sdr_start" : "sdr_stop") + "\", \"playing\": " + (gui::mainWindow.sdrIsRunning() ? "true" : "false") + "}";
+        });
+        return responseAllocJSON(res.c_str());
     }
 
     if (pathIs(request, "/sdr/status")) {
-        return responseAllocJSONWithFormat(
-            "{\"playing\": %s}",
-            httpdebug::isSdrPlaying() ? "true" : "false");
+        std::string res = runOnUIThread([]() -> std::string {
+            return std::string("{\"playing\": ") + (gui::mainWindow.sdrIsRunning() ? "true" : "false") + "}";
+        });
+        return responseAllocJSON(res.c_str());
     }
 
     // List available sink providers: GET /sinks
@@ -665,6 +694,40 @@ struct Response* createResponseForRequest(const struct Request* request, struct 
         return responseAllocJSON(json.c_str());
     }
 
+    // Create a module instance the way Module Manager does:
+    // /module-create?name=Radio%202&module=radio
+    if (pathIs(request, "/module-create")) {
+        char* nameParam = strdupDecodeGETParam("name=", request, "");
+        char* modParam = strdupDecodeGETParam("module=", request, "");
+        std::string name(nameParam), mod(modParam);
+        free(nameParam);
+        free(modParam);
+        std::string res = runOnUIThread([name, mod]() -> std::string {
+            if (core::moduleManager.createInstance(name, mod)) {
+                return "{\"error\": \"could not create '" + name + "' of '" + mod + "', see the log\"}";
+            }
+            core::moduleManager.postInit(name);
+            saveModuleInstances();
+            return "{\"status\": \"ok\", \"instance\": \"" + name + "\"}";
+        });
+        return responseAllocJSON(res.c_str());
+    }
+
+    // Delete a module instance the way Module Manager does: /module-delete?name=Radio%202
+    if (pathIs(request, "/module-delete")) {
+        char* nameParam = strdupDecodeGETParam("name=", request, "");
+        std::string name(nameParam);
+        free(nameParam);
+        std::string res = runOnUIThread([name]() -> std::string {
+            if (core::moduleManager.deleteInstance(name)) {
+                return "{\"error\": \"no instance '" + name + "'\"}";
+            }
+            saveModuleInstances();
+            return "{\"status\": \"ok\"}";
+        });
+        return responseAllocJSON(res.c_str());
+    }
+
     // /module/<instance_name>/enable or /module/<instance_name>/disable
     {
         std::string reqPath(request->path);
@@ -697,6 +760,22 @@ struct Response* createResponseForRequest(const struct Request* request, struct 
                 }
                 instanceName = decoded;
 
+                if (isEnable || isDisable) {
+                    std::string res = runOnUIThread([instanceName, isEnable]() -> std::string {
+                        auto it = core::moduleManager.instances.find(instanceName);
+                        if (it == core::moduleManager.instances.end()) {
+                            return "{\"error\": \"instance '" + instanceName + "' not found\"}";
+                        }
+                        if (it->second.instance->isEnabled() != isEnable) {
+                            if (isEnable) { it->second.instance->enable(); }
+                            else { it->second.instance->disable(); }
+                            saveModuleInstances();
+                        }
+                        return std::string("{\"status\": \"ok\", \"instance\": \"") + instanceName + "\", \"enabled\": " + (isEnable ? "true" : "false") + "}";
+                    });
+                    return responseAllocJSON(res.c_str());
+                }
+
                 auto& instances = core::moduleManager.instances;
                 auto it = instances.find(instanceName);
                 if (it == instances.end()) {
@@ -710,32 +789,6 @@ struct Response* createResponseForRequest(const struct Request* request, struct 
                     return responseAllocJSONWithFormat(
                         "{\"instance\": \"%s\", \"enabled\": %s}",
                         instanceName.c_str(), enabled ? "true" : "false");
-                }
-
-                if (isEnable) {
-                    if (it->second.instance->isEnabled()) {
-                        return responseAllocJSONWithFormat(
-                            "{\"status\": \"ok\", \"instance\": \"%s\", \"enabled\": true, \"note\": \"already enabled\"}",
-                            instanceName.c_str());
-                    }
-                    it->second.instance->enable();
-                    core::configManager.conf["moduleInstances"][instanceName]["enabled"] = true;
-                    return responseAllocJSONWithFormat(
-                        "{\"status\": \"ok\", \"instance\": \"%s\", \"enabled\": true}",
-                        instanceName.c_str());
-                }
-
-                if (isDisable) {
-                    if (!it->second.instance->isEnabled()) {
-                        return responseAllocJSONWithFormat(
-                            "{\"status\": \"ok\", \"instance\": \"%s\", \"enabled\": false, \"note\": \"already disabled\"}",
-                            instanceName.c_str());
-                    }
-                    it->second.instance->disable();
-                    core::configManager.conf["moduleInstances"][instanceName]["enabled"] = false;
-                    return responseAllocJSONWithFormat(
-                        "{\"status\": \"ok\", \"instance\": \"%s\", \"enabled\": false}",
-                        instanceName.c_str());
                 }
             }
         }

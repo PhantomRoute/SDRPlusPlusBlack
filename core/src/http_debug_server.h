@@ -51,29 +51,8 @@ namespace httpdebug {
     void signalMainLoopStarted();
     void stopApp();
 
-    inline std::atomic<bool> sdrStartRequest{ false };
-    inline std::atomic<bool> sdrStopRequest{ false };
-    inline std::atomic<bool> sdrPlaying{ false };
     inline std::string sourceChangeRequest{ "" };
 
-    inline void requestSdrStart() {
-        sdrStartRequest.store(true, std::memory_order_release);
-    }
-    inline void requestSdrStop() {
-        sdrStopRequest.store(true, std::memory_order_release);
-    }
-    inline bool getSdrStartRequest() {
-        return sdrStartRequest.exchange(false, std::memory_order_acq_rel);
-    }
-    inline bool getSdrStopRequest() {
-        return sdrStopRequest.exchange(false, std::memory_order_acq_rel);
-    }
-    inline void setSdrPlaying(bool playing) {
-        sdrPlaying.store(playing, std::memory_order_release);
-    }
-    inline bool isSdrPlaying() {
-        return sdrPlaying.load(std::memory_order_acquire);
-    }
     inline void requestSourceChange(const std::string& sourceName) {
         sourceChangeRequest = sourceName;
     }

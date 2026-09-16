@@ -68,11 +68,11 @@ short  LSA_denoise::Denoise_process( short* data_in, short* data_out , int block
 }
 LSA_denoise::~LSA_denoise()
 {
-	if (!m_ns_hn) {
+	if (m_ns_hn) {
 		delete[] m_ns_hn;
 		m_ns_hn = NULL;
 	}
-	if (!m_winData) {
+	if (m_winData) {
 		delete[] m_winData;
 		m_winData = NULL;
 	}

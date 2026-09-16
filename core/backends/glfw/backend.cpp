@@ -282,6 +282,14 @@ namespace backend {
 
             glfwPollEvents();
 
+            // Minimised, the swap no longer waits for vsync and the loop drew frames
+            // nobody could see as fast as it could: about 10% of a core, radio stopped
+            // or not. Twenty passes a second still run the UI-thread work - the source
+            // watchdog, queued tasks, the debug server's commands.
+            if (glfwGetWindowAttrib(window, GLFW_ICONIFIED)) {
+                glfwWaitEventsTimeout(0.05);
+            }
+
             // Synthetic pointer input has to be handed over before NewFrame.
             //
             // NewFrame is what turns io.MouseDown into clicks, drag distances and
@@ -404,15 +412,6 @@ namespace backend {
                 ImGui::SetNextWindowPos(ImVec2(0, 0));
                 ImGui::SetNextWindowSize(ImVec2(_winWidth, _winHeight));
                 gui::mainWindow.draw();
-
-                if (httpdebug::getSdrStartRequest()) {
-                    gui::mainWindow.setPlayState(true);
-                    httpdebug::setSdrPlaying(true);
-                }
-                if (httpdebug::getSdrStopRequest()) {
-                    gui::mainWindow.setPlayState(false);
-                    httpdebug::setSdrPlaying(false);
-                }
 
                 std::string srcReq = httpdebug::getSourceChangeRequest();
                 if (!srcReq.empty()) {

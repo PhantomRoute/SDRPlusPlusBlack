@@ -24,24 +24,24 @@ private:
 	int m_linc, m_linc_move;
 	int m_lwlen, N_wlen1;
 	int m_cosen_pmax, m_w_global, m_wt_global;
-	short* m_dataBuf;
-	int*m_init_S_min, *m_init_S, *m_init_S_tmp;
-	int* m_arr_temp;
-	int *m_init_p1, *m_S_f;
-	short *m_EN_cos, *m_EN_sin;
-	int *m_post_SNR, *m_E_pr_SNR, *m_pr_SNR;
-	int *m_v, *m_integra;
-	int *m_Gh1, *m_G;
-	int *m_q, *m_pp;
-	short* m_h_global;
-	int *m_cosen, *m_old_cosen;
-	int* m_cosen_local, *m_cosen_global;
-	int* m_plocal, *m_pglobal;
+	short* m_dataBuf = nullptr;
+	int*m_init_S_min = nullptr, *m_init_S = nullptr, *m_init_S_tmp = nullptr;
+	int* m_arr_temp = nullptr;
+	int *m_init_p1 = nullptr, *m_S_f = nullptr;
+	short *m_EN_cos = nullptr, *m_EN_sin = nullptr;
+	int *m_post_SNR = nullptr, *m_E_pr_SNR = nullptr, *m_pr_SNR = nullptr;
+	int *m_v = nullptr, *m_integra = nullptr;
+	int *m_Gh1 = nullptr, *m_G = nullptr;
+	int *m_q = nullptr, *m_pp = nullptr;
+	short* m_h_global = nullptr;
+	int *m_cosen = nullptr, *m_old_cosen = nullptr;
+	int* m_cosen_local = nullptr, *m_cosen_global = nullptr;
+	int* m_plocal = nullptr, *m_pglobal = nullptr;
 
-	short* m_ns_storage;
-	unsigned int* m_abs_Y, *m_M;
-	int* m_int_value, *m_expsub_value, *m_G_value; //��������ݴ�ռ�
-	int* m_lamda_d;
+	short* m_ns_storage = nullptr;
+	unsigned int* m_abs_Y = nullptr, *m_M = nullptr;
+	int* m_int_value = nullptr, *m_expsub_value = nullptr, *m_G_value = nullptr; //��������ݴ�ռ�
+	int* m_lamda_d = nullptr;
 
 	template<class T>
 	T* file_read(const char* Filename);  //��ȡ�ļ�����ģ��

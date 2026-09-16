@@ -171,27 +171,29 @@ short Datablock_Read::Data_procese(short* pInBuffer, short* pOutBuffer,int read_
 	 
 Datablock_Read::~Datablock_Read()
 {
-	if (!m_data_storage) {
+	delete[] m_process_storage;
+	m_process_storage = NULL;
+	if (m_data_storage) {
 		delete[] m_data_storage;
 		m_data_storage = NULL;
 	}
-	if (!m_data_in) {
+	if (m_data_in) {
 		delete[] m_data_in;
 		m_data_in = NULL;
 	}
-	if (!m_data_resize) {
+	if (m_data_resize) {
 		delete[] m_data_resize;
 		m_data_resize = NULL;
 	}
-	if (!m_buffer) {
+	if (m_buffer) {
 		delete[] m_buffer;
 		m_buffer = NULL;
 	}
-	if (!m_DoubDataBuffer) {
+	if (m_DoubDataBuffer) {
 		delete[] m_DoubDataBuffer;
 		m_DoubDataBuffer = NULL;
 	}
-	if (!m_data_out) {
+	if (m_data_out) {
 		delete[] m_data_out;
 		m_data_out = NULL;
 	}

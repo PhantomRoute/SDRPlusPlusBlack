@@ -376,6 +376,16 @@ public:
         if (enabled) {
             disable();
         }
+        // Nothing else frees it, and disable() only stops it: every radio removed left
+        // its whole demodulator behind, about 230 MB of buffers for WFM. Unhooked from
+        // the audio chain first, the same way switching demodulator does it.
+        if (selectedDemod) {
+            afChain.setInput(&dummyAudioStream, [=](dsp::stream<dsp::stereo_t>* out){ afsplitter.setInput(out); });
+            demod::Demodulator* old = selectedDemod;
+            selectedDemod = NULL;
+            old->stop();
+            delete old;
+        }
 
         for(int i=0; i<streams.size(); i++) {
             sigpath::sinkManager.unregisterStream(SinkManager::makeSecondaryStreamName(name, i));

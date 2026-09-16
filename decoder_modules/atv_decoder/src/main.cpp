@@ -60,13 +60,15 @@ class ATVDecoderModule : public ModuleManager::Instance {
     }
 
     ~ATVDecoderModule() {
-        if (vfo) {
-            sigpath::vfoManager.deleteVFO(vfo);
-        }
+        // The blocks go first: agc reads the VFO's output stream, and stopping it after
+        // the VFO was deleted called into freed memory, crashing on every delete.
         agc.stop();
         demod.stop();
         sync.stop();
         sink.stop();
+        if (vfo) {
+            sigpath::vfoManager.deleteVFO(vfo);
+        }
         gui::menu.removeEntry(name);
     }
 

@@ -26,13 +26,13 @@ public:
 	void fftfix(Complex_num *x, int sign);
 private:
 	Cordic coc;
-	int* m_Buffer_cos, *m_Buffer_sin;
-	int* m_sort4_count;
-	int *m_e1_position, *m_o1_position;
-	int *m_e2_position, *m_o2_position;
-	int* m_yr,*m_yi;
-	int* m_sort_temp_r;
-	int* m_sort_temp_i;
+	int* m_Buffer_cos = nullptr, *m_Buffer_sin = nullptr;
+	int* m_sort4_count = nullptr;
+	int *m_e1_position = nullptr, *m_o1_position = nullptr;
+	int *m_e2_position = nullptr, *m_o2_position = nullptr;
+	int* m_yr = nullptr, *m_yi = nullptr;
+	int* m_sort_temp_r = nullptr;
+	int* m_sort_temp_i = nullptr;
 	int m_fly_tempr, m_fly_tempi;
 	int m_fwlen, m_finc, m_M4;
 	int m_value_bit;

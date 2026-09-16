@@ -23,7 +23,7 @@ private:
 	MY_B4_FFT MyN_fft;
 	short m_lwlen;
 	short m_linc13, m_linc23;
-	int* m_ns_hn;
-	Complex_num* m_winData;
+	int* m_ns_hn = nullptr;
+	Complex_num* m_winData = nullptr;
 };
 

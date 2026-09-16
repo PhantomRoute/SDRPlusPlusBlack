@@ -350,131 +350,133 @@ short G_calculate::G_calculate_process(Complex_num* winData, int blockInd) {  //
 
 G_calculate::~G_calculate()
 {
-	if (!m_arr_temp) {
+	delete[] m_integra;
+	m_integra = NULL;
+	if (m_arr_temp) {
 		delete[] m_arr_temp;
 		m_arr_temp = NULL;
 	}
-	if (!m_S_f) {
+	if (m_S_f) {
 		delete[] m_S_f;
 		m_S_f = NULL;
 	}
 
-	if (!m_abs_Y) {
+	if (m_abs_Y) {
 		delete[] m_abs_Y;
 		m_abs_Y = NULL;
 	}
-	if (!m_dataBuf) {
+	if (m_dataBuf) {
 		delete[] m_dataBuf;
 		m_dataBuf = NULL;
 	}
-	if (!m_init_S) {
+	if (m_init_S) {
 		delete[] m_init_S;
 		m_init_S = NULL;
 	}
-	if (!m_init_S_min) {
+	if (m_init_S_min) {
 		delete[] m_init_S_min;
 		m_init_S_min = NULL;
 	}
-	if (!m_init_S_tmp) {
+	if (m_init_S_tmp) {
 		delete[] m_init_S_tmp;
 		m_init_S_tmp = NULL;
 	}
-	if (!m_init_p1) {
+	if (m_init_p1) {
 		delete[] m_init_p1;
 		m_init_p1 = NULL;
 	}
-	if (!m_EN_cos) {
+	if (m_EN_cos) {
 		delete[] m_EN_cos;
 		m_EN_cos = NULL;
 	}
-	if (!m_EN_sin) {
+	if (m_EN_sin) {
 		delete[] m_EN_sin;
 		m_EN_sin = NULL;
 	}
-	if (!m_post_SNR) {
+	if (m_post_SNR) {
 		delete[] m_post_SNR;
 		m_post_SNR = NULL;
 	}
-	if (!m_pr_SNR) {
+	if (m_pr_SNR) {
 		delete[] m_pr_SNR;
 		m_pr_SNR = NULL;
 	}
-	if (!m_E_pr_SNR) {
+	if (m_E_pr_SNR) {
 		delete[] m_E_pr_SNR;
 		m_E_pr_SNR = NULL;
 	}
-	if (!m_v) {
+	if (m_v) {
 		delete[] m_v;
 		m_v = NULL;
 	}
-	if (!m_Gh1) {
+	if (m_Gh1) {
 		delete[] m_Gh1;
 		m_Gh1 = NULL;
 	}
-	if (!m_q) {
+	if (m_q) {
 		delete[] m_q;
 		m_q = NULL;
 	}
-	if (!m_pp) {
+	if (m_pp) {
 		delete[] m_pp;
 		m_pp = NULL;
 	}
 
-	if (!m_G) {
+	if (m_G) {
 		delete[] m_G;
 		m_G = NULL;
 	}
 
-	if (!m_M) {
+	if (m_M) {
 		delete[] m_M;
 		m_M = NULL;
 	}
 
-	if (!m_ns_storage) {
+	if (m_ns_storage) {
 		delete[] m_ns_storage;
 		m_ns_storage = NULL;
 	}
-	if (!m_cosen_local) {
+	if (m_cosen_local) {
 		delete[] m_cosen_local;
 		m_cosen_local = NULL;
 	}
-	if (!m_cosen_global) {
+	if (m_cosen_global) {
 		delete[] m_cosen_global;
 		m_cosen_global = NULL;
 	}
-	if (!m_plocal) {
+	if (m_plocal) {
 		delete[] m_plocal;
 		m_plocal = NULL;
 	}
-	if (!m_pglobal) {
+	if (m_pglobal) {
 		delete[] m_pglobal;
 		m_pglobal = NULL;
 	}
-	if (!m_h_global) {
+	if (m_h_global) {
 		delete[] m_h_global;
 		m_h_global = NULL;
 	}
-	if (!m_cosen) {
+	if (m_cosen) {
 		delete[] m_cosen;
 		m_cosen = NULL;
 	}
-	if (!m_old_cosen) {
+	if (m_old_cosen) {
 		delete[] m_old_cosen;
 		m_old_cosen = NULL;
 	}
-	if (!m_int_value) {
+	if (m_int_value) {
 		delete[] m_int_value;
 		m_int_value = NULL;
 	}
-	if (!m_expsub_value) {
+	if (m_expsub_value) {
 		delete[] m_expsub_value;
 		m_expsub_value = NULL;
 	}
-	if (!m_G_value) {
+	if (m_G_value) {
 		delete[] m_G_value;
 		m_G_value = NULL;
 	}
-	if (!m_lamda_d) {
+	if (m_lamda_d) {
 		delete[] m_lamda_d;
 		m_lamda_d = NULL;
 	}

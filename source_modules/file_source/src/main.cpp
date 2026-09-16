@@ -52,6 +52,7 @@ public:
         handler.menuHandler = menuHandler;
         handler.startHandler = start;
         handler.stopHandler = stop;
+        handler.runningHandler = isRunning;
         handler.tuneHandler = tune;
         handler.stream = &stream;
         sigpath::sourceManager.registerSource("File", &handler);
@@ -206,8 +207,22 @@ public:
 #ifndef BUILD_TESTS
 private:
 #endif
+    // The saved file used to be opened only by the menu's draw code, so with the menu
+    // closed - the usual state on a phone - play started nothing, and five seconds
+    // later the no-samples watchdog blamed the USB cable.
+    void openSavedPathIfNeeded() {
+        if (reader != NULL) { return; }
+        config.acquire();
+        std::string path = config.conf.contains("path") && config.conf["path"].is_string() ? (std::string)config.conf["path"] : "";
+        config.release();
+        std::error_code ec;
+        if (path.empty() || !std::filesystem::is_regular_file(path, ec)) { return; }
+        openPath(path);
+    }
+
     static void menuSelected(void* ctx) {
         FileSourceModule* _this = (FileSourceModule*)ctx;
+        _this->openSavedPathIfNeeded();
         core::setInputSampleRate(_this->sampleRate);
         if (_this->centerFreqSet) {
             tuner::tune(tuner::TUNER_MODE_IQ_ONLY, "", _this->centerFreq);
@@ -228,9 +243,14 @@ private:
         flog::info("FileSourceModule '{0}': Menu Deselect!", _this->name);
     }
 
+    static bool isRunning(void* ctx) {
+        return ((FileSourceModule*)ctx)->running;
+    }
+
     static void start(void* ctx) {
         FileSourceModule* _this = (FileSourceModule*)ctx;
         if (_this->running) { return; }
+        _this->openSavedPathIfNeeded();
         if (_this->reader == NULL) { return; }
         _this->running = true;
         _this->workerThread = _this->float32Mode ? std::thread(floatWorker, _this) : std::thread(worker, _this);

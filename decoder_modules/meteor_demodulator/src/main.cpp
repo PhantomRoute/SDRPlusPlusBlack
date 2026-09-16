@@ -93,7 +93,7 @@ public:
         reshape.stop();
         symSink.stop();
         sink.stop();
-        sigpath::vfoManager.deleteVFO(vfo);
+        if (vfo) { sigpath::vfoManager.deleteVFO(vfo); }
         gui::menu.removeEntry(name);
     }
 
@@ -122,7 +122,10 @@ public:
         symSink.stop();
         sink.stop();
 
-        sigpath::vfoManager.deleteVFO(vfo);
+        // Cleared, so deleting the module while disabled does not delete the pointer
+        // again - by then it may be another module's VFO at the same address.
+        if (vfo) { sigpath::vfoManager.deleteVFO(vfo); }
+        vfo = NULL;
         enabled = false;
     }
 

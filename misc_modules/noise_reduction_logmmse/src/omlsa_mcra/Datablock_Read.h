@@ -19,13 +19,13 @@ public:
 	short m_inc, m_wlen,m_blockInd,m_inc_move;
 	short m_channels,m_wlen15,m_inc2;
 	int m_sample_rate,m_data_rest_length ;
-	short* m_data_in;
-	short* m_data_storage;
-	int* m_process_storage;
-	short* m_buffer;
-	short* m_data_resize;
-	short* m_DoubDataBuffer;
-	short* m_data_out;
+	short* m_data_in = nullptr;
+	short* m_data_storage = nullptr;
+	int* m_process_storage = nullptr;
+	short* m_buffer = nullptr;
+	short* m_data_resize = nullptr;
+	short* m_DoubDataBuffer = nullptr;
+	short* m_data_out = nullptr;
 	LSA_denoise LSA;
 	short Initial(int MaxDataLen);
 

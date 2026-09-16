@@ -26,12 +26,15 @@ SDR++ includes an embedded HTTP debug server from [EmbeddableWebServer](https://
 | `GET /type?text=<>` | Queue text input |
 | `GET /sdr/start` | Start SDR playback |
 | `GET /sdr/stop` | Stop SDR playback |
-| `GET /sdr/status` | Get SDR playing status (true/false) |
+| `GET /sdr/status` | Whether the source is really running (false after a failed start or a no-samples stop) |
 | `GET /sinks` | List available audio sink providers |
 | `GET /streams` | List registered audio streams and current sink assignments |
 | `POST /sink/select` | Assign a sink provider to a stream |
 | `GET /vfo/set_offset?name=<>&offset=<>` | Set a VFO offset relative to source center frequency |
 | `GET /modules` | List all module instances with their module names |
+| `GET /module-create?name=<>&module=<>` | Create and post-init a module instance, as Module Manager does |
+| `GET /module-delete?name=<>` | Delete a module instance, as Module Manager does |
+| `GET /module/<instance>/enable` / `disable` | Enable or disable an instance (runs on the UI thread) |
 | `GET /module/<instance>/command` | Run a module debug command via query params |
 | `POST /module/<instance>/command` | Run a module debug command via JSON body |
 | `GET /log` | Retrieve current in-memory SDR++ log batch and clear it |
@@ -51,13 +54,13 @@ SDR++ includes an embedded HTTP debug server from [EmbeddableWebServer](https://
 `GET /sdr/start`:
 
 ```json
-{"action": "sdr_start"}
+{"action": "sdr_start", "playing": true}
 ```
 
 `GET /sdr/stop`:
 
 ```json
-{"action": "sdr_stop"}
+{"action": "sdr_stop", "playing": false}
 ```
 
 `GET /sdr/status`:
