@@ -291,6 +291,157 @@ namespace thememenu {
         return ImVec4(rgba[0] / 255.0f, rgba[1] / 255.0f, rgba[2] / 255.0f, rgba[3] / 255.0f);
     }
 
+    // ---- Main colours
+    //
+    // A theme file has getting on for eighty colours in it, and making one by setting
+    // each in turn was hours of work that mostly went on hover and active shades nobody
+    // wants to choose. The editor leads with the handful that set the look instead, and
+    // works the rest out from them. Every colour is still there to fine-tune.
+
+    bool showAllColors = false;
+
+    static ImVec4 mixColor(const ImVec4& a, const ImVec4& b, float t) {
+        return ImVec4(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t, a.w + (b.w - a.w) * t);
+    }
+
+    static ImVec4 withAlpha(ImVec4 c, float a) {
+        c.w = a;
+        return c;
+    }
+
+    static void setEditColor(const std::string& key, const ImVec4& col) {
+        editData[key] = ThemeManager::encodeRGBA(col);
+    }
+
+    // Everything in the UI proper follows from four colours. Shades move toward the
+    // text colour rather than toward white, so the same rules give a hover that is
+    // lighter on a dark theme and darker on a light one.
+    static void deriveInterface() {
+        ImVec4 bg = withAlpha(getEditColor("WindowBg"), 1.0f);
+        ImVec4 panel = withAlpha(getEditColor("FrameBg"), 1.0f);
+        ImVec4 text = withAlpha(getEditColor("Text"), 1.0f);
+        ImVec4 accent = withAlpha(getEditColor("CheckMark"), 1.0f);
+        ImVec4 clear(0.0f, 0.0f, 0.0f, 0.0f);
+
+        setEditColor("WindowBg", bg);
+        setEditColor("ClearColor", bg);
+        setEditColor("ChildBg", clear);
+        setEditColor("PopupBg", withAlpha(mixColor(bg, text, 0.04f), 0.97f));
+        setEditColor("MenuBarBg", mixColor(bg, text, 0.06f));
+        setEditColor("TitleBg", bg);
+        setEditColor("TitleBgActive", mixColor(bg, text, 0.16f));
+        setEditColor("TitleBgCollapsed", withAlpha(bg, 0.5f));
+        setEditColor("ScrollbarBg", withAlpha(mixColor(bg, text, 0.02f), 0.5f));
+        setEditColor("ModalWindowDimBg", ImVec4(0.0f, 0.0f, 0.0f, 0.5f));
+        setEditColor("NavWindowingDimBg", withAlpha(mixColor(bg, text, 0.8f), 0.2f));
+
+        setEditColor("Text", text);
+        setEditColor("TextDisabled", mixColor(text, bg, 0.5f));
+        setEditColor("TextSelectedBg", withAlpha(accent, 0.35f));
+
+        setEditColor("FrameBg", panel);
+        setEditColor("FrameBgHovered", mixColor(panel, text, 0.08f));
+        setEditColor("FrameBgActive", mixColor(panel, text, 0.14f));
+        setEditColor("Button", panel);
+        setEditColor("ButtonHovered", mixColor(panel, text, 0.12f));
+        setEditColor("ButtonActive", mixColor(panel, accent, 0.45f));
+        setEditColor("Header", mixColor(panel, text, 0.05f));
+        setEditColor("HeaderHovered", mixColor(panel, text, 0.14f));
+        setEditColor("HeaderActive", mixColor(panel, accent, 0.4f));
+        setEditColor("Border", mixColor(panel, text, 0.18f));
+        setEditColor("BorderShadow", clear);
+        setEditColor("Separator", mixColor(panel, text, 0.18f));
+        setEditColor("SeparatorHovered", withAlpha(accent, 0.78f));
+        setEditColor("SeparatorActive", accent);
+        setEditColor("ScrollbarGrab", mixColor(panel, text, 0.12f));
+        setEditColor("ScrollbarGrabHovered", mixColor(panel, text, 0.24f));
+        setEditColor("ScrollbarGrabActive", mixColor(panel, text, 0.36f));
+        setEditColor("TableHeaderBg", mixColor(bg, panel, 0.7f));
+        setEditColor("TableBorderStrong", mixColor(panel, text, 0.2f));
+        setEditColor("TableBorderLight", mixColor(panel, text, 0.1f));
+        setEditColor("TableRowBg", clear);
+        setEditColor("TableRowBgAlt", withAlpha(text, 0.04f));
+
+        setEditColor("CheckMark", accent);
+        setEditColor("SliderGrab", accent);
+        setEditColor("SliderGrabActive", mixColor(accent, text, 0.25f));
+        setEditColor("Tab", mixColor(panel, accent, 0.45f));
+        setEditColor("TabHovered", accent);
+        setEditColor("TabActive", mixColor(panel, accent, 0.7f));
+        setEditColor("TabUnfocused", mixColor(panel, accent, 0.2f));
+        setEditColor("TabUnfocusedActive", mixColor(panel, accent, 0.4f));
+        setEditColor("ResizeGrip", withAlpha(accent, 0.25f));
+        setEditColor("ResizeGripHovered", withAlpha(accent, 0.67f));
+        setEditColor("ResizeGripActive", withAlpha(accent, 0.95f));
+        setEditColor("NavHighlight", accent);
+        setEditColor("NavWindowingHighlight", withAlpha(accent, 0.7f));
+        setEditColor("DragDropTarget", accent);
+        setEditColor("PlotHistogram", accent);
+        setEditColor("PlotHistogramHovered", mixColor(accent, text, 0.3f));
+    }
+
+    static void deriveSpectrum() {
+        ImVec4 wf = withAlpha(getEditColor("WaterfallBackground"), 1.0f);
+        ImVec4 text = withAlpha(getEditColor("Text"), 1.0f);
+        ImVec4 trace = getEditColor("PlotLines");
+        setEditColor("WaterfallBackground", wf);
+        setEditColor("FFTGridColor", mixColor(wf, text, 0.2f));
+        setEditColor("FFTBorderColor", mixColor(wf, text, 0.2f));
+        setEditColor("PlotLinesHovered", mixColor(trace, text, 0.3f));
+    }
+
+    struct MainColor {
+        const char* key;
+        const char* name;
+        const char* desc;
+        bool spectrum;
+    };
+
+    const MainColor MAIN_COLORS[] = {
+        { "WindowBg", "Background", "Behind the menus and panels.", false },
+        { "FrameBg", "Panels and buttons", "Buttons, sliders, input boxes and section headers.", false },
+        { "Text", "Text", "Greyed out text is worked out from this and the background.", false },
+        { "CheckMark", "Accent", "Check marks, slider handles, tabs and anything selected.", false },
+        { "WaterfallBackground", "Spectrum background", "Behind the spectrum and the waterfall. The grid is drawn a shade lighter.", true },
+        { "PlotLines", "Spectrum trace", "The line of the live spectrum.", true },
+        { "VFOSelectedLineColor", "Selected VFO", "The centre line of the VFO you are tuning.", true },
+    };
+
+    static bool drawMainColors() {
+        bool changed = false;
+        for (const auto& mc : MAIN_COLORS) {
+            ImGui::PushID(mc.key);
+            ImVec4 value = getEditColor(mc.key);
+            if (ImGui::ColorEdit3("##main", (float*)&value,
+                                  ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel)) {
+                // The alpha stays whatever the theme had: the trace and VFO line use it.
+                value.w = getEditColor(mc.key).w;
+                setEditColor(mc.key, value);
+                if (std::string(mc.key) == "Text") {
+                    deriveInterface();
+                    deriveSpectrum();
+                }
+                else if (mc.spectrum) {
+                    deriveSpectrum();
+                }
+                else {
+                    deriveInterface();
+                }
+                changed = true;
+            }
+            ImGui::SameLine();
+            ImGui::BeginGroup();
+            ImGui::TextUnformatted(mc.name);
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextDisabled("%s", mc.desc);
+            ImGui::PopTextWrapPos();
+            ImGui::EndGroup();
+            ImGui::PopID();
+            ImGui::Spacing();
+        }
+        return changed;
+    }
+
     static bool drawColorGroup(const ThemeColorGroup& group, bool defaultOpen) {
         bool changed = false;
         if (!ImGui::CollapsingHeader(group.name.c_str(), defaultOpen ? ImGuiTreeNodeFlags_DefaultOpen : 0)) {
@@ -577,11 +728,23 @@ namespace thememenu {
 
         bool changed = false;
         ImGui::BeginChild("##theme_edit_colors", ImVec2(0, -reserved), false);
-        for (const auto& group : gui::themeManager.getCustomColorGroups()) {
-            changed |= drawColorGroup(group, true);
-        }
-        for (const auto& group : ThemeManager::getImGuiColorGroups()) {
-            changed |= drawColorGroup(group, false);
+        changed |= drawMainColors();
+
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextDisabled("The waterfall color map and the trace and fill styles are in the Theme menu.");
+        ImGui::PopTextWrapPos();
+        ImGui::Spacing();
+        ImGui::Checkbox("Fine-tune every color##theme_edit_all", &showAllColors);
+        if (showAllColors) {
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextDisabled("Changing a main color above works these out again, so set the main colors first.");
+            ImGui::PopTextWrapPos();
+            for (const auto& group : gui::themeManager.getCustomColorGroups()) {
+                changed |= drawColorGroup(group, false);
+            }
+            for (const auto& group : ThemeManager::getImGuiColorGroups()) {
+                changed |= drawColorGroup(group, false);
+            }
         }
         ImGui::EndChild();
 

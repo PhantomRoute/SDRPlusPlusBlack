@@ -5,9 +5,100 @@
 #include <gui/icons.h>
 
 #include <core.h>
+#include <gui/gui.h>
+#include <gui/dialogs/dialog_box.h>
 #include "signal_path.h"
 
 #define CONCAT(a, b) ((std::string(a) + b).c_str())
+
+namespace {
+    bool isRadioInstance(const std::string& name) {
+        auto it = core::moduleManager.instances.find(name);
+        return it != core::moduleManager.instances.end() && std::string(it->second.module.info->name) == "radio";
+    }
+
+    int countRadios() {
+        int n = 0;
+        for (auto& [name, inst] : core::moduleManager.instances) {
+            if (std::string(inst.module.info->name) == "radio") { n++; }
+        }
+        return n;
+    }
+
+    void saveModuleInstances() {
+        core::configManager.acquire();
+        json instances;
+        for (auto& [name, inst] : core::moduleManager.instances) {
+            instances[name]["module"] = inst.module.info->name;
+            instances[name]["enabled"] = inst.instance->isEnabled();
+        }
+        core::configManager.conf["moduleInstances"] = instances;
+        core::configManager.release(true);
+    }
+
+    // A whole second radio: its own module instance, so its own VFO on the waterfall,
+    // its own mode and bandwidth, and its own audio stream to send wherever it likes.
+    void addRadio() {
+        std::string name;
+        for (int i = 2;; i++) {
+            name = "Radio " + std::to_string(i);
+            if (core::moduleManager.instances.find(name) == core::moduleManager.instances.end() &&
+                !sigpath::vfoManager.vfoExists(name)) { break; }
+        }
+
+        // Put the new VFO beside the one in use rather than on top of it, where it
+        // would hide under the old one and look as if nothing had happened.
+        double viewBW = gui::waterfall.getViewBandwidth();
+        double viewOffset = gui::waterfall.getViewOffset();
+        double lower = viewOffset - viewBW / 2.0;
+        double upper = viewOffset + viewBW / 2.0;
+        double base = viewOffset;
+        auto sel = gui::waterfall.vfos.find(gui::waterfall.selectedVFO);
+        if (sel != gui::waterfall.vfos.end()) { base = sel->second->centerOffset; }
+        double step = viewBW / 8.0;
+        double offset = (base + step < upper - step) ? base + step : base - step;
+        offset = std::clamp<double>(offset, lower + step / 2.0, upper - step / 2.0);
+
+        // Its menu goes under the last radio's rather than at the very bottom, below
+        // every decoder, where it would look as though it had not been added.
+        int after = -1;
+        for (int i = 0; i < (int)gui::menu.order.size(); i++) {
+            if (isRadioInstance(gui::menu.order[i].name)) { after = i; }
+        }
+        bool listed = false;
+        for (auto& opt : gui::menu.order) {
+            if (opt.name == name) { listed = true; }
+        }
+        if (after >= 0 && !listed) {
+            Menu::MenuOption_t opt;
+            opt.name = name;
+            opt.open = true;
+            gui::menu.order.insert(gui::menu.order.begin() + after + 1, opt);
+        }
+
+        core::configManager.acquire();
+        core::configManager.conf["vfoOffsets"][name] = offset;
+        json arr = json::array();
+        for (int i = 0; i < (int)gui::menu.order.size(); i++) {
+            arr[i]["name"] = gui::menu.order[i].name;
+            arr[i]["open"] = gui::menu.order[i].open;
+        }
+        core::configManager.conf["menuElements"] = arr;
+        core::configManager.release(true);
+
+        if (core::moduleManager.createInstance(name, "radio")) {
+            flog::error("Could not add {}", name);
+            return;
+        }
+        core::moduleManager.postInit(name);
+        saveModuleInstances();
+
+        if (gui::waterfall.vfos.find(name) != gui::waterfall.vfos.end()) {
+            gui::waterfall.selectedVFO = name;
+            gui::waterfall.selectedVFOChanged = true;
+        }
+    }
+}
 
 SinkManager::SinkManager() : defaultInputAudio(nullptr) {
     SinkManager::SinkProvider prov;
@@ -429,18 +520,25 @@ void SinkManager::showMenu() {
         showVolumeSlider(name, "##_sdrpp_sink_menu_vol_", menuWidth);
         auto v2 = ImGui::GetContentRegionAvail();
 
-        if (!SinkManager::isSecondaryStream(name)) {
-            if (ImGui::Button(("Add secondary for " + name).c_str(), ImVec2(menuWidth, v1.y-v2.y))) {
-                auto name0 = name;
-                postActions.emplace_back([=]{onAddSubstream.emit(name0);});
-            }
-            if (ImGui::IsItemHovered()) {
-                style::tooltip("Send this same audio to a second output as well, with its own device\nand volume: headphones and a network stream at once, say.");
-            }
-        } else {
-            if (ImGui::Button("Remove secondary", ImVec2(menuWidth, v1.y - v2.y))) {
+        // Extra outputs of one radio used to be what the add button made. New ones are
+        // whole radios now, but a config that still has the old kind keeps them, and
+        // they can still be taken away here.
+        if (SinkManager::isSecondaryStream(name)) {
+            if (ImGui::Button(CONCAT("Remove this output##_sdrpp_sink_rmout_", name), ImVec2(menuWidth, 0))) {
                 auto name0 = name;
                 postActions.emplace_back([=]{onRemoveSubstream.emit(name0);});
+            }
+            if (ImGui::IsItemHovered()) {
+                style::tooltip("An extra copy of %s's audio. Removing it leaves the radio as it is.", primaryName.c_str());
+            }
+        }
+        else if (isRadioInstance(name) && countRadios() > 1) {
+            if (ImGui::Button(CONCAT("Remove " + name + "##_sdrpp_sink_rmradio_", name), ImVec2(menuWidth, 0))) {
+                radioToRemove = name;
+                confirmRemoveRadio = true;
+            }
+            if (ImGui::IsItemHovered()) {
+                style::tooltip("Take %s off the waterfall and forget its settings.", name.c_str());
             }
         }
 
@@ -451,6 +549,29 @@ void SinkManager::showMenu() {
             ImGui::Separator();
         }
         ImGui::Spacing();
+    }
+
+    if (core::moduleManager.modules.find("radio") != core::moduleManager.modules.end()) {
+        ImGui::Spacing();
+        if (ImGui::Button("Add another radio##_sdrpp_sink_addradio", ImVec2(menuWidth, 0))) {
+            // Not now: this is drawn from inside the loop over the menu entries, and
+            // a new radio adds an entry of its own to the list being walked.
+            gui::mainWindow.addMainThreadTask([]{ addRadio(); });
+        }
+        if (ImGui::IsItemHovered()) {
+            style::tooltip("A second receiver with its own VFO on the waterfall, its own mode and\nbandwidth, and its own audio output. Listen to two frequencies at once\nwithin what the SDR is receiving.");
+        }
+    }
+
+    if (ImGui::GenericDialog("sink_mgr_remove_radio_", confirmRemoveRadio, GENERIC_DIALOG_BUTTONS_YES_NO, [this]() {
+            ImGui::Text("Remove \"%s\" and its settings?", radioToRemove.c_str());
+        }) == GENERIC_DIALOG_BUTTON_YES) {
+        auto name0 = radioToRemove;
+        gui::mainWindow.addMainThreadTask([=]{
+            if (!isRadioInstance(name0) || countRadios() <= 1) { return; }
+            core::moduleManager.deleteInstance(name0);
+            saveModuleInstances();
+        });
     }
 
     for(auto &_: postActions) _();  // to optionally modify the streams list after loop over it.

@@ -179,7 +179,8 @@ void ThemeManager::initCustomColors() {
         } },
         { "VFOs and squelch", {
             { "VFOSelectedLineColor", "Centre line of the selected VFO", &vfoSelectedLineColor, vfoSelectedLineColor },
-            { "VFOLineColor", "Centre line of the other VFOs", &vfoLineColor, vfoLineColor },
+            { "VFORadioLineColor", "Centre line of another radio", &vfoRadioLineColor, vfoRadioLineColor },
+            { "VFOLineColor", "Centre line of a decoder's VFO", &vfoLineColor, vfoLineColor },
             { "SquelchColor", "Squelch threshold marker", &squelchColor, squelchColor },
             { "NotchColor", "Notch filter marker", &notchColor, notchColor },
         } },

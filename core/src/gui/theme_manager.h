@@ -154,6 +154,9 @@ public:
     ImVec4 fftCenterMarkerColor = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
     ImVec4 vfoSelectedLineColor = ImVec4(1.0f, 0.0f, 0.0f, 1.0f);
     ImVec4 vfoLineColor = ImVec4(1.0f, 1.0f, 0.0f, 1.0f);
+    // A radio that is not the one being tuned. Not the yellow of the other VFOs, so
+    // with two radios on, the second is not mistaken for a decoder's VFO.
+    ImVec4 vfoRadioLineColor = ImVec4(1.0f, 0.25f, 1.0f, 1.0f);
     ImVec4 notchColor = ImVec4(1.0f, 0.0f, 0.0f, 127.0f / 255.0f);
 
     ImVec4 bandPlanTextColor = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);

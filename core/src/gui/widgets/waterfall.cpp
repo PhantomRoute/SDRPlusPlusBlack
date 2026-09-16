@@ -16,6 +16,20 @@
 #include "utils/strings.h"
 #include <gui/menus/display.h>
 
+namespace {
+    // Selected: red. Another radio: its own colour. Anything else, a decoder's VFO: yellow.
+    bool isRadioVFO(const std::string& name) {
+        auto it = core::moduleManager.instances.find(name);
+        return it != core::moduleManager.instances.end() && std::string(it->second.module.info->name) == "radio";
+    }
+
+    ImU32 vfoLineColor(bool selected, bool radio) {
+        if (selected) { return ImGui::ColorConvertFloat4ToU32(gui::themeManager.vfoSelectedLineColor); }
+        if (radio) { return ImGui::ColorConvertFloat4ToU32(gui::themeManager.vfoRadioLineColor); }
+        return ImGui::ColorConvertFloat4ToU32(gui::themeManager.vfoLineColor);
+    }
+}
+
 #define MEASURE_LOCK_GUARD(mtx)                                       \
     auto t0 = currentTimeMillis();                                    \
     std::lock_guard lck(mtx);                                         \
@@ -386,7 +400,7 @@ namespace ImGui {
                 window->DrawList->AddRectFilled(vfo->wfRectMin, vfo->wfRectMax, vfo->color);
                 if (!vfo->lineVisible) { continue; }
                 window->DrawList->AddLine(vfo->wfLineMin, vfo->wfLineMax,
-                                          ImGui::ColorConvertFloat4ToU32((name == selectedVFO) ? gui::themeManager.vfoSelectedLineColor : gui::themeManager.vfoLineColor),
+                                          vfoLineColor(name == selectedVFO, isRadioVFO(name)),
                                           style::uiScale);
             }
         }
@@ -421,7 +435,7 @@ namespace ImGui {
 
     void WaterFall::drawVFOs() {
         for (auto const& [name, vfo] : vfos) {
-            vfo->draw(window, name == selectedVFO);
+            vfo->draw(window, name == selectedVFO, isRadioVFO(name));
         }
     }
 
@@ -2065,11 +2079,11 @@ namespace ImGui {
         notchMax = ImVec2(gui::waterfall.fftAreaMin.x + notch + gripSize, gui::waterfall.fftAreaMax.y - 1);
     }
 
-    void WaterfallVFO::draw(ImGuiWindow* window, bool selected) {
+    void WaterfallVFO::draw(ImGuiWindow* window, bool selected, bool radio) {
         window->DrawList->AddRectFilled(rectMin, rectMax, color);
         if (lineVisible) {
             window->DrawList->AddLine(lineMin, lineMax,
-                                      ImGui::ColorConvertFloat4ToU32(selected ? gui::themeManager.vfoSelectedLineColor : gui::themeManager.vfoLineColor),
+                                      vfoLineColor(selected, radio),
                                       style::uiScale);
         }
 

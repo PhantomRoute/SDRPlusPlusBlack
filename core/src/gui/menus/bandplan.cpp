@@ -19,6 +19,12 @@ namespace bandplanmenu {
             return;
         }
 
+        // General v2 replaced the old General plan and took its name, so anyone who had
+        // picked it by its old name keeps it rather than dropping to the first in the list.
+        if (core::configManager.conf["bandPlan"] == "General v2") {
+            core::configManager.conf["bandPlan"] = "General";
+        }
+
         if (bandplan::bandplans.find(core::configManager.conf["bandPlan"]) != bandplan::bandplans.end()) {
             std::string name = core::configManager.conf["bandPlan"];
             bandplanId = std::distance(bandplan::bandplanNames.begin(), std::find(bandplan::bandplanNames.begin(),

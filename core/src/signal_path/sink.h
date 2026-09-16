@@ -236,5 +236,8 @@ private:
     std::string providerNamesTxt;
     std::vector<std::string> streamNames;
 
+    bool confirmRemoveRadio = false;
+    std::string radioToRemove;
+
     EventHandler<bool> txHandler;
 };

@@ -26,7 +26,7 @@ namespace ImGui {
         void setNotchOffset(double offset);
         void setNotchVisible(bool visible);
         void updateDrawingVars(double viewBandwidth, float dataWidth, double viewOffset, ImVec2 widgetPos, int fftHeight); // NOTE: Datawidth double???
-        void draw(ImGuiWindow* window, bool selected);
+        void draw(ImGuiWindow* window, bool selected, bool radio = false);
 
         enum {
             REF_LOWER,
