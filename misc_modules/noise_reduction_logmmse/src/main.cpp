@@ -62,6 +62,17 @@ public:
         ifnrProcessor.setDisableCpuDeactivation(disableCpuDeactivation);
 
         gui::menu.registerEntry(name, menuHandler, this, NULL);
+
+        // A removed radio's blocks are freed only once it is gone: before that its
+        // chains are still running them. Its checkboxes go from the menu with them.
+        instanceDeletedHandler.ctx = this;
+        instanceDeletedHandler.handler = [](std::string v, void* ctx) {
+            auto _this = (NRModule*)ctx;
+            _this->afnrProcessors.erase(v);
+            _this->afnrProcessors2.erase(v);
+        };
+        core::moduleManager.onInstanceDeleted.bindHandler(&instanceDeletedHandler);
+
         updateBindings();
         actuateIFNR();
 
@@ -75,6 +86,20 @@ public:
         httpdebug::procfs::unregister(path + "/baseband_nr");
         httpdebug::procfs::unregister(path + "/cpu_usage");
         gui::menu.removeEntry(name);
+
+        // Deleting this instance from the module manager used to leave its baseband
+        // processor in the IQ front end, its handlers bound to events that outlive it,
+        // and its audio blocks in every radio's chain - all pointing into this object.
+        // The next buffer, tune or new radio then ran freed memory.
+        enabled = false;
+        updateBindings();
+        core::moduleManager.onInstanceDeleted.unbindHandler(&instanceDeletedHandler);
+        std::vector<std::string> radios;
+        for (auto& [radioName, proc] : afnrProcessors) { radios.push_back(radioName); }
+        for (auto& [radioName, proc] : afnrProcessors2) {
+            if (afnrProcessors.find(radioName) == afnrProcessors.end()) { radios.push_back(radioName); }
+        }
+        for (auto& radioName : radios) { detachAFFromRadio(radioName); }
     }
 
     void postInit() {}
@@ -108,6 +133,9 @@ private:
     bool afnrEnabled = false;
 
     void attachAFToRadio(const std::string& instanceName) {
+        // Already in this radio's chains. Making new ones would drop the only reference
+        // to the old blocks while the radio is still running them.
+        if (afnrProcessors.find(instanceName) != afnrProcessors.end()) { return; }
         auto afnrlogmmse = std::make_shared<dsp::AFNRLogMMSE>();
         afnrProcessors[instanceName] = afnrlogmmse;
         afnrlogmmse->init(nullptr);
@@ -138,14 +166,17 @@ private:
         actuateAFNR();
     }
 
+    // The radio has to be told before the block is freed, so this is addressed to the
+    // radio (instanceName). It was addressed to this module's own name, which is not a
+    // radio, so the call did nothing and the radio kept a pointer to a freed block.
     void detachAFFromRadio(const std::string& instanceName) {
         if (afnrProcessors.find(instanceName) != afnrProcessors.end()) {
-            core::modComManager.callInterface(name, RADIO_IFACE_CMD_REMOVE_FROM_IFCHAIN,
+            core::modComManager.callInterface(instanceName, RADIO_IFACE_CMD_REMOVE_FROM_IFCHAIN,
                                               afnrProcessors[instanceName].get(), NULL);
             afnrProcessors.erase(instanceName);
         }
         if (afnrProcessors2.find(instanceName) != afnrProcessors2.end()) {
-            core::modComManager.callInterface(name, RADIO_IFACE_CMD_REMOVE_FROM_AFCHAIN,
+            core::modComManager.callInterface(instanceName, RADIO_IFACE_CMD_REMOVE_FROM_AFCHAIN,
                                               afnrProcessors2[instanceName].get(), NULL);
             afnrProcessors2.erase(instanceName);
         }
@@ -153,6 +184,8 @@ private:
 
     void updateBindings() {
         if (enabled) {
+            if (bound) { return; }
+            bound = true;
             flog::info("Enabling noise reduction things");
             sigpath::iqFrontEnd.addPreprocessor(&ifnrProcessor, false);
 
@@ -181,7 +214,11 @@ private:
             };
         }
         else {
+            if (!bound) { return; }
+            bound = false;
             sigpath::iqFrontEnd.removePreprocessor(&ifnrProcessor);
+            sigpath::sourceManager.onTuneChanged.unbindHandler(&currentFrequencyChangedHandler);
+            core::moduleManager.onInstanceCreated.unbindHandler(&instanceCreatedHandler);
         }
     }
 
@@ -298,6 +335,8 @@ private:
     bool enabled = true;
     EventHandler<double> currentFrequencyChangedHandler;
     EventHandler<std::string> instanceCreatedHandler;
+    EventHandler<std::string> instanceDeletedHandler;
+    bool bound = false;
 };
 
 
