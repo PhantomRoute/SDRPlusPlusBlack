@@ -125,6 +125,7 @@ protected:
     bool autostart = false;
 
     EventHandler<VFOManager::VFO*> vfoCreatedHandler;
+    EventHandler<std::string> instanceDeletedHandler;
 
     void updateWaterfallZoomBandwidth(float bw);
     void handleWaterfallInput(ImGui::WaterfallVFO* vfo);

@@ -217,6 +217,7 @@ namespace server {
             core::moduleManager.createInstance(name, mod);
             if (!enabled) { core::moduleManager.disableInstance(name); }
         }
+        core::moduleManager.forgetOrphanedSettings();
 
         // Do post-init
         core::moduleManager.doPostInitAll();

@@ -576,6 +576,8 @@ MOD_EXPORT void _INIT_() {
     config.setPath(std::string(core::getRoot()) + "/new_audio_sink_config.json");
     config.load(json::object());
     config.enableAutoSave();
+    // Keyed by audio stream, which is named after the instance that owns it.
+    core::moduleManager.forgetSettingsOnDelete(&config, "");
 }
 
 MOD_EXPORT void* _CREATE_INSTANCE_(std::string name) {
@@ -588,6 +590,7 @@ MOD_EXPORT void _DELETE_INSTANCE_(void* instance) {
 }
 
 MOD_EXPORT void _END_() {
+    core::moduleManager.stopForgettingSettings(&config);
     config.disableAutoSave();
     config.save();
 }

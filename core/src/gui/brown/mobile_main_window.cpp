@@ -1154,8 +1154,9 @@ struct QSOAudioRecorder {
     const int MAX_SECONDS_SIZE = 60 * 3;    // 180 seconds loop
     std::mutex qsoAudioRecordingBufferMutex;
     std::vector<dsp::stereo_t> qsoAudioRecordingBuffer;
-    dsp::stream<dsp::stereo_t> *radioStream;
+    dsp::stream<dsp::stereo_t> *radioStream = nullptr;
     dsp::stream<dsp::stereo_t> micStream;
+    EventHandler<std::string> streamUnregisterHandler;
     bool running = false;
     std::string boundStream;
     bool prevQsoInProcess = false;
@@ -1165,6 +1166,15 @@ struct QSOAudioRecorder {
     void init(dsp::routing::Splitter<dsp::stereo_t> *audioInProcessed) {
 //        flog::info("Init insider QSOAudioRecorder");
         this->audioInProcessed = audioInProcessed;
+        // The stream goes when the radio that owns it is removed. Unbinding from it at
+        // exit then threw - from a new stream of the same name, or from none - and
+        // the uncaught exception ended the program before its settings were saved.
+        streamUnregisterHandler.ctx = this;
+        streamUnregisterHandler.handler = [](std::string name, void* ctx) {
+            auto _this = (QSOAudioRecorder*)ctx;
+            if (name == _this->boundStream) { _this->boundStream.clear(); }
+        };
+        sigpath::sinkManager.onStreamUnregister.bindHandler(&streamUnregisterHandler);
         auto names = sigpath::sinkManager.getStreamNames();
 //        flog::info("Init insider QSOAudioRecorder p.2 ");
         if (!names.empty()) {
@@ -1188,11 +1198,19 @@ struct QSOAudioRecorder {
 
     void end() {
         running = false;
-        radioStream->stopReader();
-        radioStream->stopWriter();
+        sigpath::sinkManager.onStreamUnregister.unbindHandler(&streamUnregisterHandler);
+        if (radioStream) {
+            radioStream->stopReader();
+            radioStream->stopWriter();
+        }
         micStream.stopReader();
         micStream.stopWriter();
-        sigpath::sinkManager.unbindStream(boundStream, radioStream);
+        // An orphaned stream is left alone: the splitter it was bound to was never
+        // freed either, and the program is closing.
+        if (radioStream && !boundStream.empty()) {
+            sigpath::sinkManager.unbindStream(boundStream, radioStream);
+        }
+        radioStream = nullptr;
         audioInProcessed->unbindStream(&micStream);
     }
 

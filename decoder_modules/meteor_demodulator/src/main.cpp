@@ -277,6 +277,8 @@ MOD_EXPORT void _INIT_() {
     config.setPath(root + "/meteor_demodulator_config.json");
     config.load(def);
     config.enableAutoSave();
+    // Settings kept per instance; removed with the instance. See ModuleManager.
+    core::moduleManager.forgetSettingsOnDelete(&config, "meteor_demodulator");
 }
 
 MOD_EXPORT ModuleManager::Instance* _CREATE_INSTANCE_(std::string name) {
@@ -288,6 +290,7 @@ MOD_EXPORT void _DELETE_INSTANCE_(void* instance) {
 }
 
 MOD_EXPORT void _END_() {
+    core::moduleManager.stopForgettingSettings(&config);
     config.disableAutoSave();
     config.save();
 }

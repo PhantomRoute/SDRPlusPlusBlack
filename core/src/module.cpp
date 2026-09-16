@@ -1,7 +1,10 @@
 #include <module.h>
 #include <filesystem>
+#include <algorithm>
 #include <utils/wstr.h>
 #include <utils/flog.h>
+#include <core.h>
+#include <signal_path/sink.h>
 
 ModuleManager::Module_t ModuleManager::loadModule(std::string path) {
     Module_t mod;
@@ -197,10 +200,96 @@ int ModuleManager::deleteInstance(std::string name) {
     }
     onInstanceDelete.emit(name);
     Instance_t inst = instances[name];
+    std::string moduleName = inst.module.info->name;
     inst.module.deleteInstance(inst.instance);
     instances.erase(name);
     onInstanceDeleted.emit(name);
+    forgetSettings(name, moduleName);
     return 0;
+}
+
+void ModuleManager::forgetSettingsOnDelete(ConfigManager* config, const std::string& moduleName) {
+    stopForgettingSettings(config);
+    settingsToForget.push_back({ config, moduleName });
+}
+
+void ModuleManager::stopForgettingSettings(ConfigManager* config) {
+    settingsToForget.erase(std::remove_if(settingsToForget.begin(), settingsToForget.end(),
+                                          [config](const auto& e) { return e.first == config; }),
+                           settingsToForget.end());
+}
+
+// The instance's own key, and the keys of any extra audio outputs it had.
+static bool keyBelongsTo(const std::string& key, const std::string& name) {
+    if (key == name) { return true; }
+    return SinkManager::isSecondaryStream(key) && SinkManager::getSecondaryStreamIndex(key).first == name;
+}
+
+static bool eraseKeysOf(json& obj, const std::string& name) {
+    if (!obj.is_object()) { return false; }
+    std::vector<std::string> doomed;
+    for (auto it = obj.begin(); it != obj.end(); ++it) {
+        if (keyBelongsTo(it.key(), name)) { doomed.push_back(it.key()); }
+    }
+    for (auto& k : doomed) { obj.erase(k); }
+    return !doomed.empty();
+}
+
+void ModuleManager::forgetOrphanedSettings() {
+    core::configManager.acquire();
+    json saved = core::configManager.conf.contains("moduleInstances") ? core::configManager.conf["moduleInstances"] : json();
+    core::configManager.release();
+    // No list to go by - a broken or brand new config - means nothing is an orphan.
+    if (!saved.is_object() || saved.empty()) { return; }
+
+    std::vector<std::string> names;
+    for (auto it = saved.begin(); it != saved.end(); ++it) { names.push_back(it.key()); }
+    for (auto& [name, inst] : instances) { names.push_back(name); }
+
+    for (auto& [config, mod] : settingsToForget) {
+        config->acquire();
+        std::vector<std::string> doomed;
+        if (config->conf.is_object()) {
+            for (auto it = config->conf.begin(); it != config->conf.end(); ++it) {
+                bool owned = false;
+                for (auto& n : names) {
+                    if (keyBelongsTo(it.key(), n)) { owned = true; break; }
+                }
+                if (!owned) { doomed.push_back(it.key()); }
+            }
+        }
+        for (auto& k : doomed) {
+            flog::info("Removing settings left by deleted instance '{0}'", k);
+            config->conf.erase(k);
+        }
+        config->release(!doomed.empty());
+    }
+}
+
+void ModuleManager::forgetSettings(const std::string& name, const std::string& moduleName) {
+    for (auto& [config, mod] : settingsToForget) {
+        if (!mod.empty() && mod != moduleName) { continue; }
+        config->acquire();
+        bool changed = eraseKeysOf(config->conf, name);
+        config->release(changed);
+    }
+
+    // What the core keeps under the name: where its VFO sat, where its audio went, its
+    // place in the menu. The instance list itself is saved by whoever deleted it.
+    core::configManager.acquire();
+    auto& conf = core::configManager.conf;
+    bool changed = false;
+    if (conf.contains("vfoOffsets")) { changed |= eraseKeysOf(conf["vfoOffsets"], name); }
+    if (conf.contains("streams")) { changed |= eraseKeysOf(conf["streams"], name); }
+    if (conf.contains("menuElements") && conf["menuElements"].is_array()) {
+        json kept = json::array();
+        for (auto& e : conf["menuElements"]) {
+            if (e.is_object() && e.contains("name") && e["name"] == name) { changed = true; continue; }
+            kept.push_back(e);
+        }
+        conf["menuElements"] = kept;
+    }
+    core::configManager.release(changed);
 }
 
 int ModuleManager::deleteInstance(ModuleManager::Instance* instance) {

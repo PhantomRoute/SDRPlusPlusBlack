@@ -3,6 +3,8 @@
 #include <map>
 #include <json.hpp>
 #include <utils/event.h>
+#include <vector>
+#include <utility>
 #include "sdrpp_export.h"
 
 
@@ -93,6 +95,23 @@ public:
 
     int countModuleInstances(std::string module);
 
+    // A module that keeps settings under each instance's name registers its config
+    // here, and deleteInstance() removes that instance's entry. Deleting is the only
+    // trigger - closing the program deletes nothing - so settings are never lost on
+    // exit. Without this every removed radio or decoder stayed in the files for good,
+    // and a new one given the same name came back with the old one's settings.
+    //
+    // moduleName limits it to instances of that module. Empty means any instance: for
+    // configs keyed by audio stream, whose names are those of the instances that own
+    // them, including a radio's extra outputs.
+    void forgetSettingsOnDelete(class ConfigManager* config, const std::string& moduleName);
+    void stopForgettingSettings(class ConfigManager* config);
+
+    // Once at startup, after the instances are created: removes from those configs the
+    // entries of instances that no longer exist, left from before deletion cleaned up
+    // after itself. Anything named in the saved instance list is kept, loaded or not.
+    void forgetOrphanedSettings();
+
     template <typename T>
     std::vector<T*> getAllInterfaces(const std::string &interfaceName) {
         std::vector<T *> retval;
@@ -141,6 +160,11 @@ public:
     std::map<std::string, ModuleManager::Module_t> modules;
     std::map<std::string, ModuleManager::Instance_t> instances;
 
+private:
+    void forgetSettings(const std::string& name, const std::string& moduleName);
+    std::vector<std::pair<class ConfigManager*, std::string>> settingsToForget;
+
+public:
 #ifdef BUILD_TESTS
     // Plugin whitelist for test mode
     std::vector<std::string> pluginWhitelist;

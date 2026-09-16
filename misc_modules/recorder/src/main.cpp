@@ -1333,6 +1333,8 @@ MOD_EXPORT void _INIT_() {
     config.setPath(root + "/recorder_config.json");
     config.load(def);
     config.enableAutoSave();
+    // Settings kept per instance; removed with the instance. See ModuleManager.
+    core::moduleManager.forgetSettingsOnDelete(&config, "recorder");
 }
 
 MOD_EXPORT ModuleManager::Instance* _CREATE_INSTANCE_(std::string name) {
@@ -1344,6 +1346,7 @@ MOD_EXPORT void _DELETE_INSTANCE_(ModuleManager::Instance* inst) {
 }
 
 MOD_EXPORT void _END_() {
+    core::moduleManager.stopForgettingSettings(&config);
     config.disableAutoSave();
     config.save();
 }

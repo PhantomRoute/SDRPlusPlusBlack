@@ -110,6 +110,19 @@ void MainWindow::init() {
     vfoCreatedHandler.ctx = this;
     sigpath::vfoManager.onVfoCreated.bindHandler(&vfoCreatedHandler);
 
+    // A deleted instance keeps its place in the menu order, which is written back to
+    // the config with every change to the menu. Dropped once it is gone - later, as
+    // Module Manager deletes from inside the loop over that same list.
+    instanceDeletedHandler.handler = [](std::string name, void* ctx) {
+        ((MainWindow*)ctx)->addMainThreadTask([name]() {
+            if (core::moduleManager.instances.find(name) != core::moduleManager.instances.end()) { return; }
+            auto& order = gui::menu.order;
+            order.erase(std::remove_if(order.begin(), order.end(), [&](const Menu::MenuOption_t& o) { return o.name == name; }), order.end());
+        });
+    };
+    instanceDeletedHandler.ctx = this;
+    core::moduleManager.onInstanceDeleted.bindHandler(&instanceDeletedHandler);
+
     flog::info("Loading modules");
 
     // Load modules from /module directory
@@ -156,6 +169,7 @@ void MainWindow::init() {
         core::moduleManager.createInstance(name, mod);
         if (!enabled) { core::moduleManager.disableInstance(name); }
     }
+    core::moduleManager.forgetOrphanedSettings();
 
     // Load color maps
     LoadingScreen::show("Loading color maps");

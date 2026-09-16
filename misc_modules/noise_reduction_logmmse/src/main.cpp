@@ -70,6 +70,13 @@ public:
             auto _this = (NRModule*)ctx;
             _this->afnrProcessors.erase(v);
             _this->afnrProcessors2.erase(v);
+            // Its settings for the radio that went, or a new radio of that name
+            // starts out with them.
+            config.acquire();
+            bool had = config.conf.contains("AF_NRF_" + v) || config.conf.contains("AF_NR2_" + v);
+            config.conf.erase("AF_NRF_" + v);
+            config.conf.erase("AF_NR2_" + v);
+            config.release(had);
         };
         core::moduleManager.onInstanceDeleted.bindHandler(&instanceDeletedHandler);
 

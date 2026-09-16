@@ -1513,6 +1513,8 @@ MOD_EXPORT void _INIT_() {
     config.setPath(std::string(core::getRoot()) + "/ft8_decoder_config.json");
     config.load(def);
     config.enableAutoSave();
+    // Settings kept per instance; removed with the instance. See ModuleManager.
+    core::moduleManager.forgetSettingsOnDelete(&config, "ft8_decoder");
     mshv_init();
 
 }
@@ -1526,6 +1528,7 @@ MOD_EXPORT void _DELETE_INSTANCE_(void* instance) {
 }
 
 MOD_EXPORT void _END_() {
+    core::moduleManager.stopForgettingSettings(&config);
     config.disableAutoSave();
     config.save();
 }
