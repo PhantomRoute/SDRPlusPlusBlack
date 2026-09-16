@@ -3,6 +3,7 @@
 #include <vector>
 #include <map>
 #include <module.h>
+#include <functional>
 
 #define MAX_MENU_COUNT 1024
 
@@ -23,7 +24,10 @@ public:
 
     void registerEntry(std::string name, void (*drawHandler)(void* ctx), void* ctx = NULL, ModuleManager::Instance* inst = NULL);
     void removeEntry(std::string name);
-    bool draw(bool updateStates);
+    // filter, when given, draws only the entries it accepts. Used to split the menu
+    // in two on a phone; dragging to reorder is off while filtered, since the order
+    // would be worked out from half the list.
+    bool draw(bool updateStates, const std::function<bool(const std::string&)>& filter = nullptr);
 
     std::vector<MenuOption_t> order;
 

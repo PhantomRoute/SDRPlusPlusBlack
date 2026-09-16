@@ -139,6 +139,19 @@ protected:
     std::vector<ButtomWindow> bottomWindows;
 
     void drawDebugMenu();
+    void drawMenuColumn();
+
+    // A phone held upright: Big controls on and the window taller than it is wide.
+    // Worked out at the top of each frame. The desktop layout does not fit there -
+    // three columns side by side leave the waterfall a sliver and push the frequency
+    // readout off the right of the top bar - so that case gets a layout of its own
+    // with only what a phone is used for: tune, listen, change mode, zoom.
+    bool phonePortrait = false;
+    float phoneTopHeight = 0.0f;
+    void drawPhoneBody(ImGui::WaterfallVFO* vfo);
+    void drawPhoneControls();
+    void drawPhoneUpperLine(ImGui::WaterfallVFO* vfo, float origY);
+    void drawTuningModeButton();
 
     void ShowLogWindow();
 };

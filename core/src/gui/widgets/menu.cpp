@@ -26,7 +26,7 @@ void Menu::removeEntry(std::string name) {
     items.erase(name);
 }
 
-bool Menu::draw(bool updateStates) {
+bool Menu::draw(bool updateStates, const std::function<bool(const std::string&)>& filter) {
 
     static auto CollapsingHeader = [](const char *chname) -> bool {
         auto &style = ImGui::GetStyle();
@@ -50,6 +50,9 @@ bool Menu::draw(bool updateStates) {
     for (MenuOption_t& opt : order) {
         rawId++;
         if (items.find(opt.name) == items.end()) {
+            continue;
+        }
+        if (filter && !filter(opt.name)) {
             continue;
         }
         if (opt.name == draggedMenuName) {
@@ -104,13 +107,13 @@ bool Menu::draw(bool updateStates) {
         }
 
         bool menuDragged = (menuClicked && ImGui::IsMouseDragging(ImGuiMouseButton_Left) && draggedMenuName.empty() && clickedMenuName == opt.name);
-        if (menuDragged && !locked) {
+        if (menuDragged && !locked && !filter) {
             draggedMenuName = opt.name;
             draggedId = rawId - 1;
             draggedOpt = opt;
             continue;
         }
-        else if (menuDragged) {
+        else if (menuDragged && !filter) {
             style::tooltip("Menu Order Locked!");
         }
 

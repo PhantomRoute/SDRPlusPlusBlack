@@ -395,7 +395,15 @@ void MainWindow::drawUpperLine(ImGui::WaterfallVFO* vfo) {
     ImGui::SameLine();
     float origY = ImGui::GetCursorPosY();
 
-    sigpath::sinkManager.showVolumeSlider(gui::waterfall.selectedVFO, "##_sdrpp_main_volume_", 248 * style::uiScale, btnSize.x, 5, true);
+    if (phonePortrait) {
+        drawPhoneUpperLine(vfo, origY);
+        return;
+    }
+
+    // Narrower with Big controls: on a phone turned sideways the full width left the
+    // SNR meter so little room that its scale numbers were printed over each other.
+    float volumeW = (displaymenu::phoneLayout ? 150.0f : 248.0f) * style::uiScale;
+    sigpath::sinkManager.showVolumeSlider(gui::waterfall.selectedVFO, "##_sdrpp_main_volume_", volumeW, btnSize.x, 5, true);
 
     ImGui::SameLine();
 
@@ -405,6 +413,76 @@ void MainWindow::drawUpperLine(ImGui::WaterfallVFO* vfo) {
     ImGui::SameLine();
 
     ImGui::SetCursorPosY(origY);
+    drawTuningModeButton();
+
+    ImGui::SameLine();
+
+    // Right margin the meter keeps clear. 48 of the original 87 were the logo
+    // button that used to sit out there; with it gone the meter can use that space,
+    // so it now sits further right and gets wider until it hits its 300 clamp.
+    int snrOffset = 39.0f * style::uiScale;
+    int snrWidth = std::clamp<int>(ImGui::GetWindowSize().x - ImGui::GetCursorPosX() - snrOffset, 100.0f * style::uiScale, 300.0f * style::uiScale);
+    int snrPos = std::max<int>(ImGui::GetWindowSize().x - (snrWidth + snrOffset), ImGui::GetCursorPosX());
+
+    // Its ten scale numbers need about this much; below it they overlap into an
+    // unreadable smear, and no meter is better than that.
+    if (ImGui::GetWindowSize().x - snrPos - snrOffset < 170.0f * style::uiScale) { return; }
+
+    ImGui::SetCursorPosX(snrPos);
+    ImGui::SetCursorPosY(origY + (5.0f * style::uiScale));
+    ImGui::SetNextItemWidth(snrWidth);
+    // Zero while stopped rather than the last value measured. Nothing is arriving to
+    // update selectedVFOSNR, so it holds, and a meter sitting at 30 dB with the radio
+    // switched off reads as a live measurement.
+    ImGui::SNRMeter((vfo != NULL && sdrIsRunning()) ? gui::waterfall.selectedVFOSNR : 0);
+}
+
+// Menu, play and volume across the top, then the frequency on a row of its own: in
+// one row it was pushed off the right edge, and it is the one thing on the screen
+// everyone needs. The SNR meter goes under it, full width.
+void MainWindow::drawPhoneUpperLine(ImGui::WaterfallVFO* vfo, float origY) {
+    ImVec2 btnSize(30 * style::uiScale, 30 * style::uiScale);
+    float spacing = ImGui::GetStyle().ItemSpacing.x;
+    float winW = ImGui::GetWindowSize().x;
+    float padX = ImGui::GetStyle().WindowPadding.x;
+
+    // What is left of the row after the tuning mode button at its right end.
+    float tuneBtnW = btnSize.x + 10.0f;
+    float volW = winW - padX - ImGui::GetCursorPosX() - tuneBtnW - spacing;
+    sigpath::sinkManager.showVolumeSlider(gui::waterfall.selectedVFO, "##_sdrpp_main_volume_", volW, btnSize.x, 5, true);
+    ImGui::SameLine();
+    ImGui::SetCursorPosX(winW - padX - tuneBtnW);
+    ImGui::SetCursorPosY(origY);
+    drawTuningModeButton();
+
+    float rowBottom = origY + btnSize.y + 10.0f;
+
+    ImGui::PushFont(style::bigFont);
+    ImVec2 digitSz = ImGui::CalcTextSize("0");
+    ImVec2 commaSz = ImGui::CalcTextSize(".");
+    ImGui::PopFont();
+    int digits = displaymenu::phoneLayout ? 10 : 12;
+    float freqW = digits * digitSz.x + 3 * commaSz.x;
+    // FrequencySelect draws its digits above the cursor by this much, so it lines up
+    // with the buttons in the desktop row. Undo it to put the digits under the row.
+    float lift = (digitSz.y / 2.0f) - ceilf(15 * style::uiScale) - 5;
+    float freqY = rowBottom + lift;
+    ImGui::SetCursorPos(ImVec2(std::max<float>(padX, (winW - freqW) / 2.0f), freqY));
+    gui::freqSelect.draw();
+
+    float snrY = rowBottom + digitSz.y + 2.0f * style::uiScale;
+    ImGui::SetCursorPos(ImVec2(padX, snrY));
+    // The meter writes its last scale number centred on its right end, so leave it
+    // room or the 90 is cut off at the edge of the screen.
+    ImGui::SetNextItemWidth(winW - padX * 2 - 14.0f * style::uiScale);
+    ImGui::SNRMeter((vfo != NULL && sdrIsRunning()) ? gui::waterfall.selectedVFOSNR : 0);
+
+    phoneTopHeight = (snrY + 30.0f * style::uiScale) - 10.0f * style::uiScale;
+}
+
+void MainWindow::drawTuningModeButton() {
+    ImVec2 btnSize(30 * style::uiScale, 30 * style::uiScale);
+    ImVec4 textCol = ImGui::GetStyleColorVec4(ImGuiCol_Text);
     if (tuningMode == tuner::TUNER_MODE_CENTER) {
         ImGui::PushID(ImGui::GetID("sdrpp_ena_st_btn"));
         if (ImGui::ImageButton(icons::CENTER_TUNING, btnSize, ImVec2(0, 0), ImVec2(1, 1), 5, ImVec4(0, 0, 0, 0), textCol)) {
@@ -438,23 +516,6 @@ void MainWindow::drawUpperLine(ImGui::WaterfallVFO* vfo) {
                               "Click this button for centre tuning instead.");
         }
     }
-
-    ImGui::SameLine();
-
-    // Right margin the meter keeps clear. 48 of the original 87 were the logo
-    // button that used to sit out there; with it gone the meter can use that space,
-    // so it now sits further right and gets wider until it hits its 300 clamp.
-    int snrOffset = 39.0f * style::uiScale;
-    int snrWidth = std::clamp<int>(ImGui::GetWindowSize().x - ImGui::GetCursorPosX() - snrOffset, 100.0f * style::uiScale, 300.0f * style::uiScale);
-    int snrPos = std::max<int>(ImGui::GetWindowSize().x - (snrWidth + snrOffset), ImGui::GetCursorPosX());
-
-    ImGui::SetCursorPosX(snrPos);
-    ImGui::SetCursorPosY(origY + (5.0f * style::uiScale));
-    ImGui::SetNextItemWidth(snrWidth);
-    // Zero while stopped rather than the last value measured. Nothing is arriving to
-    // update selectedVFOSNR, so it holds, and a meter sitting at 30 dB with the radio
-    // switched off reads as a live measurement.
-    ImGui::SNRMeter((vfo != NULL && sdrIsRunning()) ? gui::waterfall.selectedVFOSNR : 0);
 }
 
 long long lastDrawTime = 0;
@@ -585,6 +646,10 @@ void MainWindow::draw() {
     ImGui::WaterfallVFO* vfo;
     this->preDraw(&vfo);
     ImGui::Begin("Main", NULL, WINDOW_FLAGS);
+    {
+        ImVec2 mainSize = ImGui::GetWindowSize();
+        phonePortrait = displaymenu::phoneLayout && mainSize.y > mainSize.x * 1.15f;
+    }
     ImVec4 textCol = ImGui::GetStyleColorVec4(ImGuiCol_Text);
     // To Bar
     // ImGui::BeginChild("TopBarChild", ImVec2(0, 49.0f * style::uiScale), false, ImGuiWindowFlags_HorizontalScrollbar);
@@ -708,14 +773,15 @@ void MainWindow::draw() {
     // rode up over the play and volume buttons. Reserve the height explicitly. Zero
     // width, so the space the button occupied is still given back.
     ImGui::SetCursorPosY(10.0f * style::uiScale);
-    ImGui::Dummy(ImVec2(0.0f, 32.0f * style::uiScale));
+    ImGui::Dummy(ImVec2(0.0f, phonePortrait ? phoneTopHeight : 32.0f * style::uiScale));
 
     lockWaterfallControls = false;
 
     // Handle menu resize
     ImVec2 winSize = ImGui::GetWindowSize();
     ImVec2 mousePos = ImGui::GetMousePos();
-    if (!lockWaterfallControls && showMenu && ImGui::GetTopMostPopupModal() == NULL) {
+    // Not on a phone upright, where the menu is the whole screen rather than a column.
+    if (!lockWaterfallControls && showMenu && !phonePortrait && ImGui::GetTopMostPopupModal() == NULL) {
         float curY = ImGui::GetCursorPosY();
         bool click = ImGui::IsMouseClicked(ImGuiMouseButton_Left);
         bool down = ImGui::IsMouseDown(ImGuiMouseButton_Left);
@@ -745,6 +811,10 @@ void MainWindow::draw() {
     // Process menu keybinds
     displaymenu::checkKeybinds();
 
+    if (phonePortrait) {
+        drawPhoneBody(vfo);
+    }
+    else {
     // Left Column
     if (showMenu) {
         ImGui::Columns(3, "WindowColumns", false);
@@ -753,35 +823,7 @@ void MainWindow::draw() {
         ImGui::SetColumnWidth(2, 60.0f * style::uiScale);
 
         ImGui::BeginChild("Left Column");
-
-
-        if (gui::menu.draw(firstMenuRender)) {
-            core::configManager.acquire();
-            json arr = json::array();
-            for (int i = 0; i < gui::menu.order.size(); i++) {
-                arr[i]["name"] = gui::menu.order[i].name;
-                arr[i]["open"] = gui::menu.order[i].open;
-            }
-            core::configManager.conf["menuElements"] = arr;
-
-            // Update enabled and disabled modules
-            for (auto [_name, inst] : core::moduleManager.instances) {
-                if (!core::configManager.conf["moduleInstances"].contains(_name)) { continue; }
-                core::configManager.conf["moduleInstances"][_name]["enabled"] = inst.instance->isEnabled();
-            }
-
-            core::configManager.release(true);
-        }
-        if (startedWithMenuClosed) {
-            startedWithMenuClosed = false;
-        }
-        else {
-            firstMenuRender = false;
-        }
-
-
-        this->drawDebugMenu();
-
+        drawMenuColumn();
         ImGui::EndChild();
     }
     else {
@@ -944,6 +986,7 @@ void MainWindow::draw() {
     ImGui::EndChild();
 
     this->drawBottomWindows(0);
+    }
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 5.f);
     ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(43.f / 255.f, 43.f / 255.f, 43.f / 255.f, 100.f / 255.f));
@@ -975,6 +1018,216 @@ void MainWindow::draw() {
     }
 
     lastDrawTime = (currentTimeNanos() - ctm) / 1000;
+}
+
+// What a phone is used for, shown first when the menu is the whole screen. Everything
+// else is still there under More, closed, so it does not have to be scrolled past.
+static bool phoneEssentialMenu(const std::string& name) {
+    if (name == "Source" || name == "Audio") { return true; }
+    auto it = core::moduleManager.instances.find(name);
+    if (it == core::moduleManager.instances.end()) { return false; }
+    std::string mod = it->second.module.info->name;
+    return mod == "radio" || mod == "frequency_manager" || mod == "recorder";
+}
+
+void MainWindow::drawMenuColumn() {
+    bool changed;
+    if (phonePortrait) {
+        changed = gui::menu.draw(firstMenuRender, phoneEssentialMenu);
+        ImGui::Spacing();
+        // As tall as the section headers above it, which Big controls pads out.
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(ImGui::GetStyle().FramePadding.x, ImGui::GetStyle().FramePadding.y + style::baseFont->FontSize / 3.0f));
+        bool moreOpen = ImGui::CollapsingHeader("More##phone_menu_more");
+        ImGui::PopStyleVar();
+        if (moreOpen) {
+            ImGui::Indent(6.0f * style::uiScale);
+            changed |= gui::menu.draw(firstMenuRender, [](const std::string& name) { return !phoneEssentialMenu(name); });
+            this->drawDebugMenu();
+            ImGui::Unindent(6.0f * style::uiScale);
+        }
+    }
+    else {
+        changed = gui::menu.draw(firstMenuRender);
+    }
+    if (changed) {
+        core::configManager.acquire();
+        json arr = json::array();
+        for (int i = 0; i < gui::menu.order.size(); i++) {
+            arr[i]["name"] = gui::menu.order[i].name;
+            arr[i]["open"] = gui::menu.order[i].open;
+        }
+        core::configManager.conf["menuElements"] = arr;
+
+        // Update enabled and disabled modules
+        for (auto [_name, inst] : core::moduleManager.instances) {
+            if (!core::configManager.conf["moduleInstances"].contains(_name)) { continue; }
+            core::configManager.conf["moduleInstances"][_name]["enabled"] = inst.instance->isEnabled();
+        }
+
+        core::configManager.release(true);
+    }
+    if (startedWithMenuClosed) {
+        startedWithMenuClosed = false;
+    }
+    else {
+        firstMenuRender = false;
+    }
+
+    if (!phonePortrait) { this->drawDebugMenu(); }
+}
+
+// On a phone held upright the menu is the whole screen, the way a phone app's drawer
+// is, and the menu button goes back: squeezed in as a column beside the waterfall it
+// left both too narrow to use. The waterfall and a strip of the controls a phone is
+// actually used for take the rest.
+void MainWindow::drawPhoneBody(ImGui::WaterfallVFO* vfo) {
+    if (showMenu) {
+        ImGui::BeginChild("Left Column");
+        drawMenuColumn();
+        ImGui::EndChild();
+        return;
+    }
+
+    this->displayVariousWindows();
+
+    // Taller rows than the desktop, sized for a thumb.
+    const float rowPad = 9.0f * style::uiScale;
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(ImGui::GetStyle().FramePadding.x, rowPad));
+    const std::string& sel = gui::waterfall.selectedVFO;
+    bool radio = !sel.empty() && core::modComManager.interfaceExists(sel) && core::modComManager.getModuleName(sel) == "radio";
+    int rows = radio ? 4 : 2;
+    float controlsH = rows * ImGui::GetFrameHeightWithSpacing() + ImGui::GetStyle().ItemSpacing.y;
+    ImGui::PopStyleVar();
+
+    ImGui::BeginChild("Waterfall", ImVec2(0, -controlsH));
+    gui::waterfall.draw();
+    onWaterfallDrawn.emit(GImGui);
+    ImGui::EndChild();
+
+    this->handleWaterfallInput(vfo);
+
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(ImGui::GetStyle().FramePadding.x, rowPad));
+    ImGui::BeginChild("PhoneControls", ImVec2(0, 0), false, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+    drawPhoneControls();
+    ImGui::EndChild();
+    ImGui::PopStyleVar();
+}
+
+void MainWindow::drawPhoneControls() {
+    const float spacing = ImGui::GetStyle().ItemSpacing.x;
+    const std::string sel = gui::waterfall.selectedVFO;
+    bool radio = !sel.empty() && core::modComManager.interfaceExists(sel) && core::modComManager.getModuleName(sel) == "radio";
+
+    // The modes nearly everything is listened to in, one tap each. The rest, and
+    // bandwidth, squelch and the like, are in the radio's own menu.
+    if (radio) {
+        struct PhoneMode { const char* label; int id; };
+        // DemodID values from the radio module's interface header.
+        static const PhoneMode modes[] = { { "NFM", 0 }, { "WFM", 1 }, { "AM", 2 }, { "USB", 4 }, { "LSB", 6 }, { "CW", 5 } };
+        const int count = sizeof(modes) / sizeof(modes[0]);
+        int current = -1;
+        core::modComManager.callInterface(sel, RADIO_IFACE_CMD_GET_MODE, NULL, &current);
+        float w = (ImGui::GetContentRegionAvail().x - spacing * (count - 1)) / count;
+        for (int i = 0; i < count; i++) {
+            if (i) { ImGui::SameLine(); }
+            bool on = (modes[i].id == current);
+            if (on) {
+                ImVec4 accent = ImGui::GetStyleColorVec4(ImGuiCol_CheckMark);
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(accent.x, accent.y, accent.z, 0.55f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(accent.x, accent.y, accent.z, 0.65f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(accent.x, accent.y, accent.z, 0.75f));
+            }
+            if (ImGui::Button((std::string(modes[i].label) + "##phone_mode").c_str(), ImVec2(w, 0)) && !on) {
+                int id = modes[i].id;
+                core::modComManager.callInterface(sel, RADIO_IFACE_CMD_SET_MODE, &id, NULL);
+            }
+            if (on) { ImGui::PopStyleColor(3); }
+        }
+
+        // Squelch: on or off, and where. The tone squelch and the rest of it are in
+        // the radio's menu.
+        bool sqOn = false;
+        float sqLevel = -100.0f;
+        core::modComManager.callInterface(sel, RADIO_IFACE_CMD_GET_SQUELCH_ENABLED, NULL, &sqOn);
+        core::modComManager.callInterface(sel, RADIO_IFACE_CMD_GET_SQUELCH_LEVEL, NULL, &sqLevel);
+        const char* sqLabel = sqOn ? "Squelch on##phone_sq" : "Squelch off##phone_sq";
+        float sqBtnW = ImGui::CalcTextSize("Squelch off").x + ImGui::GetStyle().FramePadding.x * 2.0f;
+        if (sqOn) {
+            ImVec4 accent = ImGui::GetStyleColorVec4(ImGuiCol_CheckMark);
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(accent.x, accent.y, accent.z, 0.55f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(accent.x, accent.y, accent.z, 0.65f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(accent.x, accent.y, accent.z, 0.75f));
+        }
+        if (ImGui::Button(sqLabel, ImVec2(sqBtnW, 0))) {
+            bool v = !sqOn;
+            core::modComManager.callInterface(sel, RADIO_IFACE_CMD_SET_SQUELCH_ENABLED, &v, NULL);
+        }
+        if (sqOn) { ImGui::PopStyleColor(3); }
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+        if (!sqOn) { style::beginDisabled(); }
+        if (ImGui::SliderFloat("##phone_sq_level", &sqLevel, -100.0f, 0.0f, "Level %.0f dB") && sqOn) {
+            core::modComManager.callInterface(sel, RADIO_IFACE_CMD_SET_SQUELCH_LEVEL, &sqLevel, NULL);
+        }
+        if (!sqOn) { style::endDisabled(); }
+    }
+
+    // The three sliders the desktop stands up in a column, laid down: a column is a
+    // tenth of a phone's width, and a vertical drag on a phone scrolls.
+    auto shortFreq = [](double hz) {
+        char buf[32];
+        if (hz >= 1000000.0) { snprintf(buf, sizeof buf, "%.3g MHz", hz / 1000000.0); }
+        else if (hz >= 1000.0) { snprintf(buf, sizeof buf, "%.3g kHz", hz / 1000.0); }
+        else { snprintf(buf, sizeof buf, "%.0f Hz", hz); }
+        return std::string(buf);
+    };
+    std::string zoomLabel = "Zoom: " + shortFreq(gui::waterfall.getViewBandwidth()) + " across";
+    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+    // Left is everything the SDR receives, right is zoomed in.
+    if (ImGui::SliderFloat("##phone_zoom", &bw, 1.0f, 0.0f, zoomLabel.c_str())) {
+        core::configManager.acquire();
+        core::configManager.conf["zoomBw"] = bw;
+        core::configManager.release(true);
+        updateWaterfallZoomBandwidth(bw);
+    }
+
+    float autoW = ImGui::CalcTextSize("Auto").x + ImGui::GetStyle().FramePadding.x * 4.0f;
+    if (ImGui::Button("Auto##phone_auto_range", ImVec2(autoW, 0))) {
+        const std::pair<int, int>& range = gui::waterfall.autoRange();
+        if (!(range.first == 0 && range.second == 0)) {
+            fftMin = range.first;
+            fftMax = std::max<float>(range.second, fftMin + 10);
+            core::configManager.acquire();
+            core::configManager.conf["min"] = fftMin;
+            core::configManager.conf["max"] = fftMax;
+            core::configManager.release(true);
+            gui::waterfall.setFFTMin(fftMin);
+            gui::waterfall.setWaterfallMin(fftMin);
+            gui::waterfall.setFFTMax(fftMax);
+            gui::waterfall.setWaterfallMax(fftMax);
+        }
+    }
+    float sliderW = (ImGui::GetContentRegionAvail().x - autoW - spacing * 2) / 2.0f;
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(sliderW);
+    if (ImGui::SliderFloat("##phone_min", &fftMin, -200.0f, 0.0f, "Min %.0f")) {
+        fftMin = std::min<float>(fftMax - 10, fftMin);
+        core::configManager.acquire();
+        core::configManager.conf["min"] = fftMin;
+        core::configManager.release(true);
+        gui::waterfall.setFFTMin(fftMin);
+        gui::waterfall.setWaterfallMin(fftMin);
+    }
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(sliderW);
+    if (ImGui::SliderFloat("##phone_max", &fftMax, -180.0f, 0.0f, "Max %.0f")) {
+        fftMax = std::max<float>(fftMax, fftMin + 10);
+        core::configManager.acquire();
+        core::configManager.conf["max"] = fftMax;
+        core::configManager.release(true);
+        gui::waterfall.setFFTMax(fftMax);
+        gui::waterfall.setWaterfallMax(fftMax);
+    }
 }
 
 void MainWindow::setPlayState(bool _playing) {
@@ -1449,7 +1702,11 @@ void MainWindow::updateBottomWindowLayout() {
         // a desktop monitor both, and with the strip taking a fixed share there was
         // very little travel left in the spectrum/waterfall splitter above it - which
         // is what made that one feel as though it snapped between two positions.
-        bottomWindows[i].size.y = fullHeight * displaymenu::bottomWindowFrac;
+        // A phone turned sideways has little height to give: the strip took half of it
+        // and left the waterfall a slot. Capped there, whatever the desktop setting says.
+        float frac = displaymenu::bottomWindowFrac;
+        if (displaymenu::phoneLayout) { frac = std::min<float>(frac, 0.25f); }
+        bottomWindows[i].size.y = fullHeight * frac;
         scan += size;
     }
 }
