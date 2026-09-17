@@ -1,6 +1,7 @@
 #include <backend.h>log
 #include "android_backend.h"
 #include <core.h>
+#include <http_debug_server.h>
 #include <gui/menus/display.h>
 #include <gui/widgets/waterfall.h>
 #include <gui/gui.h>
@@ -314,6 +315,12 @@ namespace backend {
                     gui::mainWindow.setPlayState(false);
                     return 0;
                 }
+            }
+
+            // Quit from the settings problems dialog. Android closes an app by finishing
+            // its activity, which comes back through destroyRequested above.
+            if (httpdebug::shouldExit.exchange(false)) {
+                ANativeActivity_finish(app->activity);
             }
 
             if (_EglDisplay == EGL_NO_DISPLAY) { continue; }

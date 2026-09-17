@@ -147,24 +147,54 @@ void ConfigManager::load(json def, bool lock) {
     }
     catch (const std::exception& e) {
         flog::error("Config file '{}' with size={} is corrupted ({}), resetting it", path, (int64_t)filesize, e.what());
-        keepCorruptCopy();
+        bool kept = keepCorruptCopy();
+        reportProblem(std::filesystem::path(path).filename().string(),
+                      filesize == 0 ? "The file was empty, so every setting in it went back to its default." + keptNote(kept)
+                                    : "The file was damaged and could not be read, so every setting in it went back to its default." + keptNote(kept),
+                      true);
         conf = def;
         save(false);
     }
     // Valid JSON but not a settings object at all - "null", a bare number, a list.
     if (def.is_object() && !conf.is_object()) {
         flog::error("Config file '{}' does not hold settings, resetting it", path);
-        keepCorruptCopy();
+        bool kept = keepCorruptCopy();
+        reportProblem(std::filesystem::path(path).filename().string(),
+                      "The file did not contain settings, so every setting in it went back to its default." + keptNote(kept), true);
         conf = def;
         save(false);
     }
-    else if (fillDefaults(conf, def, std::filesystem::path(path).filename().string(), false)) {
+    else if (fillDefaults(conf, def, std::filesystem::path(path).filename().string())) {
         save(false);
     }
     if (lock) { mtx.unlock(); }
 }
 
-void ConfigManager::keepCorruptCopy() {
+std::string ConfigManager::keptNote(bool kept) {
+    return kept ? " The damaged file was kept as '" + std::filesystem::path(path).filename().string() + ".corrupt' next to it."
+                : " A copy of the damaged file could not be kept.";
+}
+
+namespace {
+    std::mutex problemsMtx;
+    std::vector<ConfigProblem> problems;
+    std::atomic<bool> haveProblems = false;
+}
+
+void ConfigManager::reportProblem(const std::string& file, const std::string& what, bool fileReset) {
+    std::lock_guard<std::mutex> lck(problemsMtx);
+    problems.push_back({ file, what, fileReset });
+    haveProblems = true;
+}
+
+std::vector<ConfigProblem> ConfigManager::takeProblems() {
+    if (!haveProblems) { return {}; }
+    std::lock_guard<std::mutex> lck(problemsMtx);
+    haveProblems = false;
+    return std::move(problems);
+}
+
+bool ConfigManager::keepCorruptCopy() {
     // Resetting overwrites the file, and whatever settings could still be read out
     // of it by hand would go with it. Keep the damaged one beside it instead.
     std::error_code ec;
@@ -172,15 +202,20 @@ void ConfigManager::keepCorruptCopy() {
                                std::filesystem::copy_options::overwrite_existing, ec);
     if (ec) {
         flog::error("Could not keep a copy of '{}': {}", path, ec.message());
+        return false;
     }
-    else {
-        flog::warn("The damaged file was kept as '{}.corrupt'", path);
-    }
+    flog::warn("The damaged file was kept as '{}.corrupt'", path);
+    return true;
 }
 
 bool ConfigManager::fillDefaults(json& target, const json& defaults, const std::string& what, bool fixTypes) {
     if (!defaults.is_object()) { return false; }
     if (!target.is_object()) {
+        // Null is simply new - a first start, a new radio. Anything else was there
+        // and could not be used.
+        if (!target.is_null()) {
+            reportProblem(what, "The settings were not readable and all went back to their defaults.", true);
+        }
         target = defaults;
         return true;
     }
@@ -198,6 +233,7 @@ bool ConfigManager::fillDefaults(json& target, const json& defaults, const std::
         bool sameKind = cur.type() == def.type() || (cur.is_number() && def.is_number());
         if (fixTypes && !def.is_null() && !sameKind) {
             flog::warn("Setting '{}' in {} has the wrong type, using the default", it.key(), what);
+            reportProblem(what, "'" + it.key() + "' held a value of the wrong kind and went back to its default.");
             target[it.key()] = def;
             changed = true;
         }

@@ -694,7 +694,10 @@ private:
 MOD_EXPORT void _INIT_() {
     json def = json({});
     def["devices"] = json({});
-    def["device"] = 0;
+    // The selected device's name. This was 0, which the module turned into "" on
+    // first start anyway, and a default of the wrong type would now be put back over
+    // the saved name every time the file loads.
+    def["device"] = "";
     config.setPath(std::string(core::getRoot()) + "/rtl_sdr_config.json");
     config.load(def);
     config.enableAutoSave();

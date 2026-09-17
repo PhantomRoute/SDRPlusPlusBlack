@@ -2409,6 +2409,7 @@ MOD_EXPORT void _INIT_() {
     for (auto [listName, list] : config.conf["lists"].items()) {
         if (!list.is_object()) {
             flog::error("Bookmark list '{0}' is not a list, emptying it", listName);
+            ConfigManager::reportProblem("frequency_manager_config.json", "The bookmark list '" + listName + "' was not readable. Its bookmarks are gone.", true);
             list = json::object();
         }
         // The old type is the bookmarks themselves, with neither key. A current list
@@ -2421,7 +2422,10 @@ MOD_EXPORT void _INIT_() {
             list = newList;
         }
         if (!list.contains("showOnWaterfall") || !list["showOnWaterfall"].is_boolean()) { list["showOnWaterfall"] = true; }
-        if (!list.contains("bookmarks") || !list["bookmarks"].is_object()) { list["bookmarks"] = json::object(); }
+        if (!list.contains("bookmarks") || !list["bookmarks"].is_object()) {
+            ConfigManager::reportProblem("frequency_manager_config.json", "The bookmarks in the list '" + listName + "' were missing or not readable. The list is now empty.", true);
+            list["bookmarks"] = json::object();
+        }
 
         // Every reader takes a bookmark's frequency and bandwidth as numbers.
         std::vector<std::string> broken;
@@ -2436,6 +2440,7 @@ MOD_EXPORT void _INIT_() {
         }
         for (auto& bmName : broken) {
             flog::error("Bookmark '{0}' in list '{1}' has no frequency, removing it", bmName, listName);
+            ConfigManager::reportProblem("frequency_manager_config.json", "The bookmark '" + bmName + "' in the list '" + listName + "' had no usable frequency and was removed.");
             list["bookmarks"].erase(bmName);
         }
         config.conf["lists"][listName] = list;

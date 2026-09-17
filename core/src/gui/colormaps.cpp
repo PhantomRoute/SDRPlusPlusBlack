@@ -1,6 +1,7 @@
 #include <gui/colormaps.h>
 #include <filesystem>
 #include <utils/flog.h>
+#include <config.h>
 #include <fstream>
 #include <json.hpp>
 #include <cctype>
@@ -39,6 +40,7 @@ namespace colormaps {
         }
         catch (const std::exception& e) {
             flog::error("Could not load {0}: {1}", path, e.what());
+            ConfigManager::reportProblem("colour maps", "The colour map file '" + std::filesystem::path(path).filename().string() + "' is damaged and is not available.");
             return;
         }
 

@@ -166,6 +166,7 @@ void MainWindow::init() {
         // in the config, so its settings are not forgotten as an orphan either.
         if (!_module.is_object() || !_module.contains("module") || !_module["module"].is_string()) {
             flog::error("Module instance '{0}' in config does not name its module, skipping it", name);
+            ConfigManager::reportProblem("config.json", "'" + name + "' does not say which module it is, so it was not loaded. Its settings have been kept.");
             continue;
         }
         std::string mod = _module["module"];

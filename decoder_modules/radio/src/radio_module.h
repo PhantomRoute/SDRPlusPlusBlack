@@ -907,6 +907,7 @@ private:
         // Default config
         double bw = demod->getDefaultBandwidth();
         config.acquire();
+        bool repaired = dropMistypedSettings(demod->getName());
         if (!config.conf[name].contains(demod->getName())) {
             config.conf[name][demod->getName()]["bandwidth"] = bw;
             config.conf[name][demod->getName()]["snapInterval"] = demod->getDefaultSnapInterval();
@@ -915,7 +916,8 @@ private:
             config.release(true);
         }
         else {
-            config.release();
+            // Saved when something was repaired, or it would be reported again next start.
+            config.release(repaired);
         }
         // Against the range the switch actually allows, not the demodulator's own.
         // Clamping to the raw maximum here would have thrown away a saved bandwidth
@@ -931,6 +933,57 @@ private:
         demod->init(name, &config, ifChain.out, bw, streams.front()->getSampleRate());
 
         return demod;
+    }
+
+    // Every per-mode setting is read as the type it is saved as, and a value of another
+    // type - a hand edit - threw out of demodulator selection and closed the app at
+    // startup. A setting that is the wrong type is dropped, so the reader falls back to
+    // its default. Called with config held.
+    bool dropMistypedSettings(const std::string& demodName) {
+        bool dropped = false;
+        if (config.conf[name].contains("unlockBandwidth") && !config.conf[name]["unlockBandwidth"].is_boolean()) {
+            config.conf[name].erase("unlockBandwidth");
+            dropped = true;
+        }
+        if (!config.conf[name].contains(demodName)) { return dropped; }
+        json& conf = config.conf[name][demodName];
+        if (!conf.is_object()) {
+            flog::warn("Radio '{}': {} settings are not a list of settings, using the defaults", name, demodName);
+            ConfigManager::reportProblem("radio_config.json", "The " + demodName + " settings of '" + name + "' were not readable and went back to their defaults.", true);
+            config.conf[name].erase(demodName);
+            return true;
+        }
+        static const std::vector<std::pair<const char*, json::value_t>> kinds = {
+            { "squelchEnabled", json::value_t::boolean }, { "noiseBlankerEnabled", json::value_t::boolean },
+            { "FMIFNREnabled", json::value_t::boolean }, { "toneIdEnabled", json::value_t::boolean },
+            { "toneFilterEnabled", json::value_t::boolean }, { "toneSquelchEnabled", json::value_t::boolean },
+            { "toneSquelchTailClose", json::value_t::boolean }, { "toneSquelchDcsInverted", json::value_t::boolean },
+            { "carrierAgc", json::value_t::boolean }, { "stereo", json::value_t::boolean },
+            { "lowPass", json::value_t::boolean }, { "highPass", json::value_t::boolean },
+            { "rds", json::value_t::boolean }, { "rdsInfo", json::value_t::boolean },
+            { "bandwidth", json::value_t::number_float }, { "snapInterval", json::value_t::number_float },
+            { "squelchLevel", json::value_t::number_float }, { "noiseBlankerLevel", json::value_t::number_float },
+            { "toneSquelchMode", json::value_t::number_float }, { "toneSquelchCtcss", json::value_t::number_float },
+            { "toneSquelchDcsCode", json::value_t::number_float }, { "agcAttack", json::value_t::number_float },
+            { "agcDecay", json::value_t::number_float }, { "agcHang", json::value_t::number_float },
+            { "tone", json::value_t::number_float },
+            { "deempMode", json::value_t::string }, { "fmifnrPreset", json::value_t::string },
+            { "rdsRegion", json::value_t::string },
+        };
+        for (auto& [key, kind] : kinds) {
+            if (!conf.contains(key)) { continue; }
+            const json& v = conf[key];
+            bool ok = (kind == json::value_t::boolean) ? v.is_boolean()
+                    : (kind == json::value_t::string) ? v.is_string()
+                    : v.is_number();
+            if (!ok) {
+                flog::warn("Radio '{}': {} setting '{}' has the wrong type, using the default", name, demodName, key);
+                ConfigManager::reportProblem("radio_config.json", "'" + std::string(key) + "' in the " + demodName + " settings of '" + name + "' held a value of the wrong kind and went back to its default.");
+                conf.erase(key);
+                dropped = true;
+            }
+        }
+        return dropped;
     }
 
     void selectDemod(demod::Demodulator* demod) {

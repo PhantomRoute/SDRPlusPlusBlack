@@ -2,10 +2,13 @@
 #include <fstream>
 #include <utils/wstr.h>
 #include <utils/flog.h>
+#include <config.h>
 #include <filesystem>
 #include <sstream>
 #include <iomanip>
 #include <exception>
+#include <stdexcept>
+#include <algorithm>
 
 namespace bandplan {
     std::map<std::string, BandPlan_t> bandplans;
@@ -63,8 +66,10 @@ namespace bandplan {
 
     void from_json(const json& j, BandPlanColor_t& ct) {
         std::string col = j.get<std::string>();
-        if (col[0] != '#' || !std::all_of(col.begin() + 1, col.end(), ::isxdigit)) {
-            return;
+        // #RRGGBBAA exactly: anything shorter read past the end, and an empty string
+        // indexed col[0] of nothing.
+        if (col.size() != 9 || col[0] != '#' || !std::all_of(col.begin() + 1, col.end(), [](char c) { return isxdigit((unsigned char)c) != 0; })) {
+            throw std::runtime_error("'" + col + "' is not a #RRGGBBAA colour");
         }
         uint8_t r, g, b, a;
         r = std::stoi(col.substr(1, 2), NULL, 16);
@@ -127,6 +132,24 @@ namespace bandplan {
     }
 
     void loadColorTable(json table) {
-        colorTable = table.get<std::map<std::string, BandPlanColor_t>>();
+        // One entry at a time, so a bad colour only loses that band type's colour
+        // rather than stopping the app at startup.
+        colorTable.clear();
+        if (!table.is_object()) {
+            flog::error("Band colours in config are not a list of colours, ignoring them");
+            ConfigManager::reportProblem("config.json", "The band plan colours were not readable. Bands will be drawn without their colours.");
+            return;
+        }
+        for (auto& [type, value] : table.items()) {
+            try {
+                if (!value.is_string()) { throw std::runtime_error("not text"); }
+                colorTable[type] = value.get<BandPlanColor_t>();
+            }
+            catch (const std::exception& e) {
+                // core has already repaired the config's colours, so this is only
+                // reached for a table from somewhere else; log it and move on.
+                flog::error("Band colour for '{}' ignored: {}", type, e.what());
+            }
+        }
     }
 };

@@ -167,9 +167,20 @@ namespace sourcemenu {
         core::configManager.acquire();
 
         // Load custom offsets
-        auto ofs = core::configManager.conf["offsets"].items();
-        for (auto& o : ofs) {
+        // An offset that is not a number cannot be used, so it is removed and the file
+        // saved - otherwise it would be reported again on every start.
+        std::vector<std::string> badOffsets;
+        for (auto& o : core::configManager.conf["offsets"].items()) {
+            if (!o.value().is_number()) {
+                badOffsets.push_back(o.key());
+                continue;
+            }
             namedOffsets[o.key()] = (double)o.value();
+        }
+        for (auto& name : badOffsets) {
+            flog::error("Offset '{}' in config is not a number, removing it", name);
+            ConfigManager::reportProblem("config.json", "The frequency offset '" + name + "' was not a number and was removed.");
+            core::configManager.conf["offsets"].erase(name);
         }
 
         // Define custom offsets
@@ -178,7 +189,7 @@ namespace sourcemenu {
         }
 
         // Release the config file
-        core::configManager.release();
+        core::configManager.release(!badOffsets.empty());
     }
 
     void init() {

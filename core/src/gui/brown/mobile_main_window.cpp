@@ -3,6 +3,7 @@
 
 #include "mobile_main_window.h"
 #include <gui/gui.h>
+#include <gui/dialogs/settings_problems.h>
 #include <imgui_internal.h>
 #include <imgui.h>
 #include <implot/implot.h>
@@ -224,6 +225,7 @@ void readQSOList() {
                 }
                 catch (const std::exception& e) {
                     flog::warn("Skipping unreadable QSO log line: {}", e.what());
+                    ConfigManager::reportProblem("QSO log", "A damaged entry in the QSO log could not be read and is not shown.");
                 }
             } else {
                 splitStringV(line, " ", f);
@@ -272,7 +274,15 @@ template<typename X>
 void getConfig(const std::string &key, X &value) {
     core::configManager.acquire();
     if (core::configManager.conf.find(key) != core::configManager.conf.end()) {
-        value = core::configManager.conf[key];
+        // A hand edited value of the wrong type keeps the caller's default rather
+        // than throwing out of startup.
+        try {
+            value = core::configManager.conf[key].get<X>();
+        }
+        catch (const std::exception& e) {
+            flog::warn("Setting '{}' in config.json has the wrong type, using the default", key);
+            ConfigManager::reportProblem("config.json", "'" + key + "' held a value of the wrong kind and went back to its default.");
+        }
     }
     core::configManager.release(false);
 }
@@ -1719,6 +1729,9 @@ void MobileMainWindow::draw() {
 
     // Both layouts pass through here, unlike MainWindow::draw().
     runMainThreadTasks();
+
+    // Anything wrong with the settings, as soon as there is a window to say it in.
+    dialogs::drawSettingsProblems();
 
     // Which is exactly why the watchdog goes here and not there: MainWindow::draw()
     // is only reached in the default layout, so a source dying while the transceiver

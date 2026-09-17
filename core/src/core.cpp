@@ -21,6 +21,7 @@
 #include <thread>
 #include <mutex>
 #include <unordered_map>
+#include <algorithm>
 
 #include "../../tests/test_utils.h"
 
@@ -853,8 +854,45 @@ int sdrpp_main(int argc, char* argv[]) {
         }
     }
 
+    // Settings that are only written once someone changes them, so they have no
+    // default to be checked against when the file loads. Their readers convert
+    // straight to the type they saved, and a value of any other type threw before the
+    // window opened. A wrong one is dropped and the reader keeps its own default.
+    {
+        enum Kind { BOOL, NUMBER, TEXT, OBJECT };
+        static const std::vector<std::pair<const char*, Kind>> optional = {
+            { "audioWaterfallSplit", NUMBER }, { "audioWaterfallSplitFrac", NUMBER },
+            { "bottomWindowHeight", NUMBER }, { "buttonsWidthScale", NUMBER },
+            { "detectSignals", BOOL }, { "encoderWidth", NUMBER }, { "fftAccel", BOOL },
+            { "glSleepTime", NUMBER }, { "iqPlotEnvelopeSpan", NUMBER }, { "iqPlotScopeSamples", NUMBER },
+            { "iqPlotScopeSpan", NUMBER }, { "iqPlotView", NUMBER }, { "mobileRadioMode", TEXT },
+            { "occupancyThresholdDb", NUMBER }, { "secondsAdjustment", NUMBER },
+            { "showAudioWaterfall", BOOL }, { "showBattery", BOOL }, { "showFFT", BOOL },
+            { "showIQPlot", BOOL }, { "showMicHistogram", BOOL }, { "showOccupancy", BOOL },
+            { "showSNRChart", BOOL }, { "showTooltips", BOOL },
+        };
+        auto& conf = core::configManager.conf;
+        std::vector<std::string> wrong;
+        for (auto it = conf.begin(); it != conf.end(); ++it) {
+            const json& v = it.value();
+            bool ok = true;
+            if (it.key().rfind("mobileRadioMode_", 0) == 0) { ok = v.is_object(); }
+            for (auto& [key, kind] : optional) {
+                if (it.key() != key) { continue; }
+                ok = (kind == BOOL) ? v.is_boolean() : (kind == NUMBER) ? v.is_number() : (kind == TEXT) ? v.is_string() : v.is_object();
+            }
+            if (!ok) { wrong.push_back(it.key()); }
+        }
+        for (auto& key : wrong) {
+            flog::warn("Setting '{}' in config.json has the wrong type, using the default", key);
+            ConfigManager::reportProblem("config.json", "'" + key + "' held a value of the wrong kind and went back to its default.");
+            conf.erase(key);
+        }
+    }
+
     if (!core::configManager.conf["moduleInstances"].is_object()) {
         flog::error("moduleInstances in config is not a list of instances, restoring the default");
+        ConfigManager::reportProblem("config.json", "The list of loaded modules was not readable and went back to the default set. Radios or modules you added are gone, and their settings will be removed.", true);
         core::configManager.conf["moduleInstances"] = defConfig["moduleInstances"];
     }
 
@@ -864,6 +902,7 @@ int sdrpp_main(int argc, char* argv[]) {
             // Without this, a hand edit or an old config that lost the flag stops
             // the app at launch, before there is any UI to put it right from.
             if (!inst.contains("enabled") || !inst["enabled"].is_boolean()) {
+                ConfigManager::reportProblem("config.json", "Whether '" + _name + "' is switched on was not readable, so it was switched on.");
                 core::configManager.conf["moduleInstances"][_name]["enabled"] = true;
             }
             continue;
@@ -902,8 +941,31 @@ int sdrpp_main(int argc, char* argv[]) {
     sdrppResourcesDirectory = strdup(resDir.c_str());
     std::string modDir = core::configManager.conf["modulesDirectory"];
     sdrppModulesDirectory = strdup(modDir.c_str());
+    // A band colour that is not #RRGGBBAA goes back to its default, or is dropped if
+    // it has none, and the file is saved - reported once rather than ignored and
+    // reported again on every start.
+    bool bandColorsRepaired = false;
+    if (core::configManager.conf["bandColors"].is_object()) {
+        std::vector<std::string> badColors;
+        for (auto& [type, value] : core::configManager.conf["bandColors"].items()) {
+            bool ok = value.is_string();
+            if (ok) {
+                std::string col = value;
+                ok = col.size() == 9 && col[0] == '#' && std::all_of(col.begin() + 1, col.end(), [](char c) { return isxdigit((unsigned char)c) != 0; });
+            }
+            if (!ok) { badColors.push_back(type); }
+        }
+        for (auto& type : badColors) {
+            bool hasDefault = defConfig["bandColors"].contains(type);
+            flog::error("Band colour for '{}' is not a colour, {}", type, hasDefault ? "using the default" : "removing it");
+            ConfigManager::reportProblem("config.json", "The band plan colour for '" + type + "' was not a colour and " + (hasDefault ? "went back to its default." : "was removed."));
+            if (hasDefault) { core::configManager.conf["bandColors"][type] = defConfig["bandColors"][type]; }
+            else { core::configManager.conf["bandColors"].erase(type); }
+            bandColorsRepaired = true;
+        }
+    }
     json bandColors = core::configManager.conf["bandColors"];
-    core::configManager.release();
+    core::configManager.release(bandColorsRepaired);
 
     // Apply migration (sdrpp -> sdrpp_brown) before checking existence
     resDir = core::getMigrationPath(resDir, "sdrpp", "sdrpp_brown");
