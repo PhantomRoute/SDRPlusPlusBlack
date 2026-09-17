@@ -211,13 +211,12 @@ RadiosondeDecoderModule::RadiosondeDecoderModule(std::string name) {
 
     bool created = false;
     config.acquire();
-    if (!config.conf.contains(name)) {
-        config.conf[name]["sondeType"] = 0;
-        config.conf[name]["logEnabled"] = false;
-        config.conf[name]["frameLogEnabled"] = false;
-        config.conf[name]["logPath"] = (std::string(core::getRoot()) + "/radiosonde.gpx");
-        created = true;
-    }
+    json def;
+    def["sondeType"] = 0;
+    def["logEnabled"] = false;
+    def["frameLogEnabled"] = false;
+    def["logPath"] = (std::string(core::getRoot()) + "/radiosonde.gpx");
+    created = ConfigManager::fillDefaults(config.conf[name], def, name);
     selectedType = config.conf[name].contains("sondeType") ? (int)config.conf[name]["sondeType"] : 0;
     logEnabled = config.conf[name].contains("logEnabled") && config.conf[name]["logEnabled"].is_boolean()
                      ? (bool)config.conf[name]["logEnabled"]

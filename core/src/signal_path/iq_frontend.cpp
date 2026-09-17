@@ -213,6 +213,9 @@ void IQFrontEnd::setFFTSize(int size) {
 }
 
 void IQFrontEnd::setFFTRate(double rate) {
+    // genReshapeParams divides by the rate and sizes the reshaper's skip from it; zero
+    // or negative corrupted the heap. Every caller should already keep it in range.
+    if (!(rate >= 1.0)) { rate = 1.0; }
     _fftRate = rate;
     updateFFTPath();
 }

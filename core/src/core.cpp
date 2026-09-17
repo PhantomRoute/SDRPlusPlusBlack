@@ -853,8 +853,21 @@ int sdrpp_main(int argc, char* argv[]) {
         }
     }
 
+    if (!core::configManager.conf["moduleInstances"].is_object()) {
+        flog::error("moduleInstances in config is not a list of instances, restoring the default");
+        core::configManager.conf["moduleInstances"] = defConfig["moduleInstances"];
+    }
+
     // Update to new module representation in config if needed
     for (auto [_name, inst] : core::configManager.conf["moduleInstances"].items()) {
+        if (inst.is_object()) {
+            // Without this, a hand edit or an old config that lost the flag stops
+            // the app at launch, before there is any UI to put it right from.
+            if (!inst.contains("enabled") || !inst["enabled"].is_boolean()) {
+                core::configManager.conf["moduleInstances"][_name]["enabled"] = true;
+            }
+            continue;
+        }
         if (!inst.is_string()) { continue; }
         std::string mod = inst;
         json newMod;

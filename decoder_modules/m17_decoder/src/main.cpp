@@ -38,9 +38,7 @@ public:
 
         // Load config
         config.acquire();
-        if (!config.conf.contains(name)) {
-            config.conf[name]["showLines"] = false;
-        }
+        ConfigManager::fillDefaults(config.conf[name], json({ { "showLines", false } }), name);
         showLines = config.conf[name]["showLines"];
         if (showLines) {
             diag.lines.push_back(-1.0);

@@ -3,6 +3,8 @@
 #include <utils/flog.h>
 #include <fstream>
 #include <json.hpp>
+#include <cctype>
+#include <stdexcept>
 #include "utils/wstr.h"
 
 using nlohmann::json;
@@ -16,21 +18,27 @@ namespace colormaps {
             return;
         }
 
-        std::ifstream file(wstr::str2wstr(path));
-        json data;
-        file >> data;
-        file.close();
-
         Map map;
         std::vector<std::string> mapTxt;
 
         try {
+            std::ifstream file(wstr::str2wstr(path));
+            json data;
+            file >> data;
+            file.close();
             map.name = data["name"];
             map.author = data["author"];
             mapTxt = data["map"].get<std::vector<std::string>>();
+            // Checked here so the conversion below can't throw half way through.
+            for (auto const& col : mapTxt) {
+                if (col.size() < 7) { throw std::runtime_error("colour '" + col + "' is not #RRGGBB"); }
+                for (int c = 1; c < 7; c++) {
+                    if (!isxdigit((unsigned char)col[c])) { throw std::runtime_error("colour '" + col + "' is not #RRGGBB"); }
+                }
+            }
         }
-        catch (const std::exception&) {
-            flog::error("Could not load {0}", path);
+        catch (const std::exception& e) {
+            flog::error("Could not load {0}: {1}", path, e.what());
             return;
         }
 

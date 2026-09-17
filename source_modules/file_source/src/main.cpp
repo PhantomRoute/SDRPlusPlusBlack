@@ -90,6 +90,7 @@ public:
     ~FileSourceModule() {
         stop(this);
         sigpath::sourceManager.unregisterSource("File");
+        closeReader();
     }
 
     std::vector<std::string> getWavFiles(const std::string& directoryPath) {
@@ -311,15 +312,13 @@ private:
         // Skip config sync when dialog is open (dialog will set path when done)
         if (!_this->fileSelect.dialogOpen) {
             config.acquire();
-            std::string cfgPath = config.conf["path"];
+            std::string cfgPath = config.conf["path"].is_string() ? (std::string)config.conf["path"] : "";
             config.release();
             if (!_this->fileSelect.pathIsValid() || (cfgPath != _this->fileSelect.path && !cfgPath.empty())) {
                 _this->fileSelect.setPath(cfgPath, true);
-                if (_this->fileSelect.pathIsValid()) {
-                    if (_this->reader != NULL) {
-                        _this->reader->close();
-                        delete _this->reader;
-                    }
+                // Play may already have opened this file without the menu, and be
+                // reading it: opening it again would pull the reader out from under it.
+                if (_this->fileSelect.pathIsValid() && _this->fileSelect.path != _this->openedPath) {
                     try {
                         _this->openPathFromFileSelect();
                     }
@@ -332,10 +331,6 @@ private:
 
         if (_this->fileSelect.render("##file_source_" + _this->name)) {
             if (_this->fileSelect.pathIsValid()) {
-                if (_this->reader != NULL) {
-                    _this->reader->close();
-                    delete _this->reader;
-                }
                 try {
                     _this->openPathFromFileSelect();
                 }
@@ -374,17 +369,34 @@ private:
     }
 
 
+    void closeReader() {
+        if (reader != NULL) {
+            reader->close();
+            delete reader;
+            reader = NULL;
+        }
+        openedPath = "";
+    }
+
     void openPath(const std::string& path) {
+        // The worker reads from the reader for as long as it runs, so a new file is
+        // only swapped in with it stopped - and playback carries on with the new one.
+        bool wasRunning = running;
+        if (wasRunning) { stop(this); }
+        closeReader();
         try {
             lastError = "";
             reader = new wav::Reader(path);
-            sampleRate = reader->getSampleRate();
+            if (!reader->isValid()) {
+                std::string why = reader->error;
+                closeReader();
+                throw std::runtime_error("Not a WAV file (" + why + ")");
+            }
             if (reader->getSampleRate() == 0) {
-                reader->close();
-                delete reader;
-                reader = NULL;
+                closeReader();
                 throw std::runtime_error("Sample rate may not be zero");
             }
+            sampleRate = reader->getSampleRate();
             core::setInputSampleRate(sampleRate);
             std::string filename = getFileName(path);
             double newFrequency = getFrequency(filename);
@@ -396,6 +408,7 @@ private:
             if (isServer) {
                 server::sendCenterFrequency(centerFreq);
             }
+            openedPath = path;
             flog::info("FileSourceModule: Opened file: {0} @ {1} Hz", path, (int)sampleRate);
             if (fineTune) {
                 // restore the fine tune. When working with file source and restarting the app, the fine tune is lost
@@ -405,6 +418,7 @@ private:
             lastError = e.what();
             flog::error("FileSourceModule: Error opening file: {0}", e.what());
         }
+        if (wasRunning && reader != NULL) { start(this); }
     }
 
     void openPathFromFileSelect() {
@@ -519,6 +533,7 @@ private:
     SourceManager::SourceHandler handler;
     EventHandler<std::string> onSourceSelectedHandler;
     wav::Reader* reader = NULL;
+    std::string openedPath;
     bool running = false;
     bool enabled = true;
     float sampleRate = 1000000;

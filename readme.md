@@ -13,12 +13,77 @@ I built this fork for myself, because the existing versions didn't have everythi
 
 Parts of this fork are written with AI assistance - mostly the hairier decoder work, where I'd rather say so than pretend otherwise. Worth knowing that the original SDR++ forbids AI-generated contributions as a matter of policy. If you feel the same way, that's a perfectly good reason to use it instead.
 
-Both digital voice modes in the Radio module now have a **Protocols** dropdown. Leave everything ticked and it auto-detects; untick a protocol to stop it syncing on that one.
+> **Pre-release.** This is under rapid development. Things move, settings get renamed, and the
+> README will be rewritten properly, with screenshots, once there is a beta.
+
+## What's different
+
+A quick tour of what this fork adds on top of SDR++Brown. Most of it lives in the menus named below.
+
+### Radio
+
+* **More than one radio.** **Audio > Add another radio** adds a full Radio instance with its own
+  VFO, mode and audio, all on the same SDR. Remove it the same way. Deleting a radio or any other
+  module also deletes its saved settings, so a new radio with the same name starts clean.
+* **CTCSS and DCS tone squelch** (NFM). The radio identifies the tone or code it hears, can open
+  only on a chosen tone, on any tone, or on a custom list of them, and can strip the tone from the
+  audio the way a handheld does, harmonic buzz included. The tone is saved with a bookmark.
+* **Any bandwidth** unlocks each mode's bandwidth limits.
+* **AM AGC hang** holds the gain through the pauses between words so static doesn't swell up.
+
+### Digital voice
+
+Both digital voice modes in the Radio module have a **Protocols** dropdown. Leave everything ticked and it auto-detects; untick a protocol to stop it syncing on that one.
 
 * **DSD** - P25p1, DMR
 * **oldDSD** - P25p1, DMR, NXDN48, NXDN96, D-STAR, X2-TDMA, ProVoice
 
 Your selection is saved per VFO, so NXDN96 (which is off by default) stays on once you enable it.
+Both have a readable status panel and a **call log** that keeps who was talking across fades,
+including D-STAR callsigns and the short radio message.
+
+### Looking at signals
+
+* **Signal ID** measures the signal under the VFO: peak, width, shape, SNR, timing, drift and
+  modulation measurements. It reports numbers only and never guesses what the signal is. It can
+  also **follow** a drifting signal and keep the VFO on it.
+* **Display > Panels** puts extra views in the strip along the bottom of the window:
+  * **SNR chart** - SNR history, no noise reduction needed.
+  * **Occupancy** - how busy each channel in view has been. Click a busy channel to tune to it.
+  * **IQ plot** - I against Q, or I and Q against time, with DC offset, imbalance and clipping readouts.
+  * **Signal analyzer** - instantaneous frequency, eye and constellation views of the signal in the
+    VFO, or of what the DSD decoders actually sampled. **Pause** freezes the view so you can
+    change the span and look at what you caught.
+* **Min hold** and **Persistence** sit beside **Peak hold** in the Display menu.
+
+### Frequency manager and scanner
+
+* Bookmarks keep **notes**, their **mode**, their **tone** and their own **skip** flag, can be moved
+  between lists, and round-trip through **CSV** so a list can be edited in a spreadsheet.
+* **Prev/Next** steps through the bookmarks in a list.
+* The **scanner** was rebuilt, and a **channel activity history** shows when each channel was heard,
+  hour by hour, across restarts.
+
+### Recording and decoders
+
+* The **Recorder** panel was redone: one big Record button, a proper peak meter with clip light,
+  and audio in **WAV, FLAC or MP3**. Baseband stays WAV.
+* **Radiosonde** decoder, including iMet-54, with a flight graph, burst marker and tropopause estimate.
+* **MSK144** in the FT8 decoder, for meteor scatter.
+
+### Safety and robustness
+
+* Switching on **Bias-T** or a **HackRF RF amp** asks first. The RTL-SDR bias-T and the HackRF amp
+  are switched off when the radio stops.
+* If the SDR stops sending samples the radio is stopped with a notice, and repeated dropouts
+  suggest checking the cable or port.
+* A lot of crash, hang and teardown fixes, several of them found by stress testing module
+  add/remove under a debugger.
+
+### Phone and tablet
+
+* **Display > Big controls** gives a touch layout with larger controls.
+* **Auto** interface size on Android follows the device's screen density and font size.
 
 ## Themes
 

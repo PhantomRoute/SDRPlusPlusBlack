@@ -332,6 +332,9 @@ namespace ImGui {
         ImGuiWindow* window;
 
         std::recursive_mutex buf_mtx;
+        // Set by getFFTBuffer when it hands back a buffer with buf_mtx held, and
+        // cleared by the pushFFT that releases it. Only read or written under buf_mtx.
+        bool fftBufferHeld = false;
         std::recursive_mutex latestFFTMtx;
         std::mutex texMtx;
         std::mutex smoothingBufMtx;

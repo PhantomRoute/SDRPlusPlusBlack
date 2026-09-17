@@ -147,7 +147,7 @@ namespace server {
         if (core::configManager.conf.contains("moduleBlacklist")) {
             moduleBlacklist = core::configManager.conf["moduleBlacklist"].get<std::vector<std::string>>();
         }
-        auto modList = core::configManager.conf["moduleInstances"].items();
+        json modList = core::configManager.conf["moduleInstances"];
         std::string sourceName = core::configManager.conf["source"];
         core::configManager.release();
         modulesDir = std::filesystem::absolute(modulesDir).string();
@@ -209,9 +209,13 @@ namespace server {
             core::moduleManager.loadModule(path);
         }
         // Create module instances
-        for (auto const& [name, _module] : modList) {
+        for (auto const& [name, _module] : modList.items()) {
+            if (!_module.is_object() || !_module.contains("module") || !_module["module"].is_string()) {
+                flog::error("Module instance '{0}' in config does not name its module, skipping it", name);
+                continue;
+            }
             std::string mod = _module["module"];
-            bool enabled = _module["enabled"];
+            bool enabled = _module.value("enabled", true);
             if (core::moduleManager.modules.find(mod) == core::moduleManager.modules.end()) { continue; }
             flog::info("Initializing {0} ({1})", name, mod);
             core::moduleManager.createInstance(name, mod);

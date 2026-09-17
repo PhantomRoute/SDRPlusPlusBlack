@@ -4,6 +4,7 @@
 #include "imgui_impl_opengl3.h"
 #include "implot/implot.h"
 #include <GLFW/glfw3.h>
+#include <algorithm>
 #include <utils/flog.h>
 #include <utils/opengl_include_code.h>
 #include <version.h>
@@ -78,10 +79,14 @@ namespace backend {
     int init(std::string resDir) {
         // Load config
         core::configManager.acquire();
-        winWidth = core::configManager.conf["windowSize"]["w"];
-        winHeight = core::configManager.conf["windowSize"]["h"];
-        maximized = core::configManager.conf["maximized"];
-        fullScreen = core::configManager.conf["fullscreen"];
+        // Read defensively: a window that cannot be created is no UI to fix it from.
+        const json& size = core::configManager.conf["windowSize"];
+        double w = size.is_object() && size.contains("w") && size["w"].is_number() ? size["w"].get<double>() : 1280.0;
+        double h = size.is_object() && size.contains("h") && size["h"].is_number() ? size["h"].get<double>() : 720.0;
+        winWidth = (int)std::clamp(w, 320.0, 16384.0);
+        winHeight = (int)std::clamp(h, 240.0, 16384.0);
+        maximized = core::configManager.conf["maximized"].is_boolean() ? (bool)core::configManager.conf["maximized"] : false;
+        fullScreen = core::configManager.conf["fullscreen"].is_boolean() ? (bool)core::configManager.conf["fullscreen"] : false;
         core::configManager.release();
 
         // Setup window
@@ -370,7 +375,7 @@ namespace backend {
                 core::configManager.acquire();
                 core::configManager.conf["maximized"] = _maximized;
                 if (!maximized) {
-                    glfwSetWindowSize(window, core::configManager.conf["windowSize"]["w"], core::configManager.conf["windowSize"]["h"]);
+                    glfwSetWindowSize(window, winWidth, winHeight);
                 }
                 core::configManager.release(true);
             }

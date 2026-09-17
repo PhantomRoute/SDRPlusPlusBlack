@@ -1363,8 +1363,14 @@ namespace ImGui {
     }
 
     float* WaterFall::getFFTBuffer() {
-        if (rawFFTs == NULL) { return NULL; }
         MEASURE_LOCK(buf_mtx);
+        // Checked under the lock: onResize replaces rawFFTs from the UI thread.
+        if (rawFFTs == NULL) {
+            buf_mtx.unlock();
+            return NULL;
+        }
+        // pushFFT owes exactly one unlock for this lock, whichever way it returns.
+        fftBufferHeld = true;
         if (waterfallVisible && waterfallHeight != 0) {
             currentFFTLine--;
             fftLines++;
@@ -1379,7 +1385,15 @@ namespace ImGui {
      * rawFFTs -> (doZoom) -> lastFFT -> (palletizing) -> waterfallFb[current]
      */
     void WaterFall::pushFFT() {
-        if (rawFFTs == NULL) { return; }
+        // Every early return below used to leave buf_mtx locked by the FFT thread,
+        // which then froze the UI thread the next time it touched the waterfall - a
+        // retune or a sample rate change while the window was not yet laid out.
+        if (!fftBufferHeld) { return; }
+        fftBufferHeld = false;
+        struct Unlock {
+            std::recursive_mutex& m;
+            ~Unlock() { m.unlock(); }
+        } releaseBuffer{ buf_mtx };
         MEASURE_LOCK_GUARD(latestFFTMtx);
 
         // onResize gives up on a widget under 100x100 and leaves waterfallHeight at 0
@@ -1487,8 +1501,6 @@ namespace ImGui {
         }
 
         updatePersistence();
-
-        buf_mtx.unlock();
     }
 
     inline void WaterFall::setTextureStatus(int index, int value) {

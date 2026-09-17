@@ -60,14 +60,14 @@ public:
 
         // Load config
         config.acquire();
-        if (!config.conf.contains(name) || !config.conf[name].contains("mode")) {
-            config.conf[name]["mode"] = decoder_mode;
-            config.conf[name]["hostname"] = "localhost";
-            config.conf[name]["port"] = 8355;
-            config.conf[name]["sending"] = false;
-        }
+        json def;
+        def["mode"] = decoder_mode;
+        def["hostname"] = "localhost";
+        def["port"] = 8355;
+        def["sending"] = false;
+        ConfigManager::fillDefaults(config.conf[name], def, name);
         decoder_mode = config.conf[name]["mode"];
-        strcpy(hostname, std::string(config.conf[name]["hostname"]).c_str());
+        snprintf(hostname, sizeof(hostname), "%s", std::string(config.conf[name]["hostname"]).c_str());
         port = config.conf[name]["port"];
         bool startNow = config.conf[name]["sending"];
         config.release(true);

@@ -147,11 +147,62 @@ void ConfigManager::load(json def, bool lock) {
     }
     catch (const std::exception& e) {
         flog::error("Config file '{}' with size={} is corrupted ({}), resetting it", path, (int64_t)filesize, e.what());
-        usleep(3000000);
+        keepCorruptCopy();
         conf = def;
         save(false);
     }
+    // Valid JSON but not a settings object at all - "null", a bare number, a list.
+    if (def.is_object() && !conf.is_object()) {
+        flog::error("Config file '{}' does not hold settings, resetting it", path);
+        keepCorruptCopy();
+        conf = def;
+        save(false);
+    }
+    else if (fillDefaults(conf, def, std::filesystem::path(path).filename().string(), false)) {
+        save(false);
+    }
     if (lock) { mtx.unlock(); }
+}
+
+void ConfigManager::keepCorruptCopy() {
+    // Resetting overwrites the file, and whatever settings could still be read out
+    // of it by hand would go with it. Keep the damaged one beside it instead.
+    std::error_code ec;
+    std::filesystem::copy_file(wstr::str2wstr(path), wstr::str2wstr(path + ".corrupt"),
+                               std::filesystem::copy_options::overwrite_existing, ec);
+    if (ec) {
+        flog::error("Could not keep a copy of '{}': {}", path, ec.message());
+    }
+    else {
+        flog::warn("The damaged file was kept as '{}.corrupt'", path);
+    }
+}
+
+bool ConfigManager::fillDefaults(json& target, const json& defaults, const std::string& what, bool fixTypes) {
+    if (!defaults.is_object()) { return false; }
+    if (!target.is_object()) {
+        target = defaults;
+        return true;
+    }
+    bool changed = false;
+    for (auto it = defaults.begin(); it != defaults.end(); ++it) {
+        const json& def = it.value();
+        if (!target.contains(it.key())) {
+            flog::warn("Setting '{}' missing from {}, using the default", it.key(), what);
+            target[it.key()] = def;
+            changed = true;
+            continue;
+        }
+        const json& cur = target[it.key()];
+        // Integer and floating point are both just a number to a setting.
+        bool sameKind = cur.type() == def.type() || (cur.is_number() && def.is_number());
+        if (fixTypes && !def.is_null() && !sameKind) {
+            flog::warn("Setting '{}' in {} has the wrong type, using the default", it.key(), what);
+            target[it.key()] = def;
+            changed = true;
+        }
+    }
+    return changed;
 }
 
 void ConfigManager::save(bool lock) {

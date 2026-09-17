@@ -85,7 +85,15 @@ namespace displaymenu {
     }
 
     float resolveUiScale(float configured) {
-        return (configured == UI_SCALE_AUTO) ? autoUiScale() : configured;
+        if (configured == UI_SCALE_AUTO) { return autoUiScale(); }
+        // Checked here as well as in init: the style is scaled with this long before
+        // init runs, and a negative scale makes every widget size negative, which
+        // the first waterfall to lay itself out turns into a negative allocation.
+        if (!(configured >= 0.1f && configured <= 8.0f)) {
+            flog::warn("uiScale of {0} is out of range, using 1.0", configured);
+            return 1.0f;
+        }
+        return configured;
     }
     bool snrSmoothing = false;
     int snrSmoothingSpeed = 20;
@@ -217,7 +225,9 @@ namespace displaymenu {
         enableAcceleratedFFT = accel;
         sigpath::iqFrontEnd.setFFTSize(FFTSizes[fftSizeId % std::size(FFTSizes)]);
 
-        fftRate = core::configManager.conf["fftRate"];
+        // The rate divides several speeds below and sizes the FFT's sample skip; zero or
+        // negative corrupted the heap. The menu only offers 1 and up.
+        fftRate = std::clamp<int>(core::configManager.conf["fftRate"], 1, 200);
         sigpath::iqFrontEnd.setFFTRate(fftRate);
 
         selectedWindow = std::clamp<int>((int)core::configManager.conf["fftWindow"], 0, (sizeof(fftWindowList) / sizeof(IQFrontEnd::FFTWindow)) - 1);
@@ -612,7 +622,7 @@ namespace displaymenu {
         ImGui::LeftLabel("Framerate");
         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - (32.0f * style::uiScale));
         if (ImGui::InputInt("##sdrpp_fft_rate", &fftRate, 1, 10)) {
-            fftRate = std::max<int>(1, fftRate);
+            fftRate = std::clamp<int>(fftRate, 1, 200);
             sigpath::iqFrontEnd.setFFTRate(fftRate);
             updateFFTSpeeds();
             core::configManager.acquire();

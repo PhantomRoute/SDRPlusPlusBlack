@@ -104,17 +104,17 @@ public:
         this->name = name;
 
         config.acquire();
-        if (!config.conf.contains(name)) {
-            config.conf[name]["host"] = "127.0.0.1";
-            config.conf[name]["port"] = 50001;
-            config.conf[name]["tuning"] = true;
-            config.conf[name]["recording"] = false;
-            config.conf[name]["autoStart"] = false;
-            config.conf[name]["vfo"] = "";
-            config.conf[name]["recorder"] = "";
-        }
+        json def;
+        def["host"] = "127.0.0.1";
+        def["port"] = 50001;
+        def["tuning"] = true;
+        def["recording"] = false;
+        def["autoStart"] = false;
+        def["vfo"] = "";
+        def["recorder"] = "";
+        ConfigManager::fillDefaults(config.conf[name], def, name);
         std::string host = config.conf[name]["host"];
-        strcpy(hostname, host.c_str());
+        snprintf(hostname, sizeof(hostname), "%s", host.c_str());
         port = config.conf[name]["port"];
         tuningEnabled = config.conf[name]["tuning"];
         recordingEnabled = config.conf[name]["recording"];

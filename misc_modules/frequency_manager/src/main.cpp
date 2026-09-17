@@ -2037,7 +2037,14 @@ private:
     void importBookmarks(std::string path) {
         std::ifstream fs(wstr::str2wstr(path));
         json importBookmarks;
-        fs >> importBookmarks;
+        try {
+            fs >> importBookmarks;
+        }
+        catch (const std::exception& e) {
+            // Called from the UI thread; an exception here would close the app.
+            flog::error("Could not read bookmarks from '{0}': {1}", path, e.what());
+            return;
+        }
 
         auto radio = (RadioModuleInterface *)core::moduleManager.getInterface(gui::waterfall.selectedVFO, "RadioModuleInterface");
 
@@ -2057,9 +2064,13 @@ private:
                 flog::warn("Bookmark with the name '{0}' already exists in list, skipping", _name);
                 continue;
             }
+            if (!bm.is_object() || !bm.contains("frequency") || !bm["frequency"].is_number()) {
+                flog::warn("Bookmark '{0}' in the file has no frequency, skipping it", _name);
+                continue;
+            }
             FrequencyBookmark fbm;
             fbm.frequency = bm["frequency"];
-            fbm.bandwidth = bm["bandwidth"];
+            fbm.bandwidth = bm.contains("bandwidth") && bm["bandwidth"].is_number() ? bm["bandwidth"].get<double>() : 0.0;
             // The file says what mode it is, so the mode survives an import made with
             // no radio loaded rather than arriving as "unknown" and saving as NFM.
             setBookmarkMode(fbm, storedDemodId(bm), radio);
@@ -2396,12 +2407,38 @@ MOD_EXPORT void _INIT_() {
         config.conf["bookmarkDisplayMode"] = BOOKMARK_DISP_MODE_TOP;
     }
     for (auto [listName, list] : config.conf["lists"].items()) {
-        if (list.contains("bookmarks") && list.contains("showOnWaterfall") && list["showOnWaterfall"].is_boolean()) { continue; }
-        json newList;
-        newList = json::object();
-        newList["showOnWaterfall"] = true;
-        newList["bookmarks"] = list;
-        config.conf["lists"][listName] = newList;
+        if (!list.is_object()) {
+            flog::error("Bookmark list '{0}' is not a list, emptying it", listName);
+            list = json::object();
+        }
+        // The old type is the bookmarks themselves, with neither key. A current list
+        // that has only lost one of them is repaired instead: converting it would
+        // turn "showOnWaterfall" into a bookmark, and reading that one crashes.
+        if (!list.contains("bookmarks") && !list.contains("showOnWaterfall")) {
+            json newList = json::object();
+            newList["showOnWaterfall"] = true;
+            newList["bookmarks"] = list;
+            list = newList;
+        }
+        if (!list.contains("showOnWaterfall") || !list["showOnWaterfall"].is_boolean()) { list["showOnWaterfall"] = true; }
+        if (!list.contains("bookmarks") || !list["bookmarks"].is_object()) { list["bookmarks"] = json::object(); }
+
+        // Every reader takes a bookmark's frequency and bandwidth as numbers.
+        std::vector<std::string> broken;
+        for (auto [bmName, bm] : list["bookmarks"].items()) {
+            if (!bm.is_object() || !bm.contains("frequency") || !bm["frequency"].is_number()) {
+                broken.push_back(bmName);
+                continue;
+            }
+            if (!bm.contains("bandwidth") || !bm["bandwidth"].is_number()) {
+                list["bookmarks"][bmName]["bandwidth"] = 0.0;
+            }
+        }
+        for (auto& bmName : broken) {
+            flog::error("Bookmark '{0}' in list '{1}' has no frequency, removing it", bmName, listName);
+            list["bookmarks"].erase(bmName);
+        }
+        config.conf["lists"][listName] = list;
     }
     config.release(true);
 }

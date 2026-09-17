@@ -174,7 +174,10 @@ namespace flog {
     }
 
     void __log__(Type type, const char* fmt, const std::vector<std::string>& args) {
-        std::string out = formatString(fmt, args);
+        // log() hands over text it has already formatted, with no arguments. Formatting
+        // that a second time ate every backslash in a Windows path and any "{...}" in
+        // the logged values - JSON, exception messages, request bodies.
+        std::string out = args.empty() ? std::string(fmt) : formatString(fmt, args);
         
         // Get output stream depending on type
         FILE* outStream = (type == TYPE_ERROR) ? stderr : stdout;

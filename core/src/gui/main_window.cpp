@@ -145,7 +145,7 @@ void MainWindow::init() {
     // Read module config
     core::configManager.acquire();
     std::vector<std::string> modules = core::configManager.conf["modules"];
-    auto modList = core::configManager.conf["moduleInstances"].items();
+    json modList = core::configManager.conf["moduleInstances"];
     core::configManager.release();
 
     // Load additional modules specified through config
@@ -161,9 +161,15 @@ void MainWindow::init() {
     }
 
     // Create module instances
-    for (auto const& [name, _module] : modList) {
+    for (auto const& [name, _module] : modList.items()) {
+        // An entry that does not say which module it is can't be created. It stays
+        // in the config, so its settings are not forgotten as an orphan either.
+        if (!_module.is_object() || !_module.contains("module") || !_module["module"].is_string()) {
+            flog::error("Module instance '{0}' in config does not name its module, skipping it", name);
+            continue;
+        }
         std::string mod = _module["module"];
-        bool enabled = _module["enabled"];
+        bool enabled = _module.value("enabled", true);
         flog::info("Initializing {0} ({1})", name, mod);
         LoadingScreen::show("Initializing " + name + " (" + mod + ")");
         core::moduleManager.createInstance(name, mod);

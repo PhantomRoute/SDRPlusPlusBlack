@@ -213,12 +213,17 @@ void readQSOList() {
                 continue;
             }
             if (line[0] == '{') {
-                json j;
-                std::stringstream ss(line);
-                ss >> j;
-                auto r = QSORecord();
-                if (r.initFrom(j)) {
-                    qsoRecords.emplace_back(r);
+                // A line cut short - the app closed or the power went mid write - is
+                // skipped rather than taking every later start down with it.
+                try {
+                    json j = json::parse(line);
+                    auto r = QSORecord();
+                    if (r.initFrom(j)) {
+                        qsoRecords.emplace_back(r);
+                    }
+                }
+                catch (const std::exception& e) {
+                    flog::warn("Skipping unreadable QSO log line: {}", e.what());
                 }
             } else {
                 splitStringV(line, " ", f);
@@ -2659,6 +2664,8 @@ void MobileMainWindow::init() {
     getConfig("buttonsWidthScale", buttonsWidthScale);
     getConfig("encoderWidth", encoderWidth);
     getConfig("glSleepTime", glSleepTime);
+    // Slept once per frame: out of the slider's range it either spins or freezes the UI.
+    glSleepTime = std::clamp(glSleepTime, 0, 200);
 
 
     displaymenu::onPanelsDraw.bindHandler(&panelsDrawHandler);

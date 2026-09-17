@@ -63,10 +63,8 @@ public:
         // Initialize the config if it doesn't exist
         bool created = false;
         config.acquire();
-        if (!config.conf.contains(name)) {
-            config.conf[name]["selectedDemodId"] = 1;
-            created = true;
-        }
+        if (!config.conf.contains(name)) { created = true; }
+        created |= ConfigManager::fillDefaults(config.conf[name], json({ { "selectedDemodId", 1 } }), name);
         selectedDemodID = config.conf[name]["selectedDemodId"];
         config.release(created);
 

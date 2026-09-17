@@ -51,7 +51,7 @@ void FolderSelect::setPath(std::string path, bool markChanged) {
     std::string expandedPath = expandString(path);
     pathValid = std::filesystem::is_directory(wstr::str2wstr(expandedPath));
     if (markChanged) { pathChanged = true; }
-    strcpy(strPath, path.c_str());
+    snprintf(strPath, sizeof(strPath), "%s", path.c_str());
 }
 
 std::string FolderSelect::expandString(std::string input) {
@@ -69,7 +69,7 @@ void FolderSelect::worker() {
 
     if (res != "") {
         path = res;
-        strcpy(strPath, path.c_str());
+        snprintf(strPath, sizeof(strPath), "%s", path.c_str());
         pathChanged = true;
     }
 
