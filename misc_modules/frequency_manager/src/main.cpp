@@ -2353,6 +2353,27 @@ private:
             return false;
         }
 
+        // A byte order mark, but only for a list that has something outside ASCII in
+        // it. Excel reads a UTF-8 file without one as the local code page, so a station
+        // called Cafe Radio spelled properly comes out as mojibake in the cell - and
+        // this is the program that just spent the import working out what the accents
+        // were. A plain ASCII list is written exactly as before, since a mark it does
+        // not need is one more thing to confuse a reader that does not expect it.
+        bool nonAscii = false;
+        for (const auto& n : names) {
+            auto it = bookmarks.find(n);
+            if (it == bookmarks.end()) { continue; }
+            auto hasHighByte = [](const std::string& v) {
+                for (unsigned char c : v) { if (c >= 0x80) { return true; } }
+                return false;
+            };
+            if (hasHighByte(n) || hasHighByte(it->second.notes) || hasHighByte(it->second.fullName)) {
+                nonAscii = true;
+                break;
+            }
+        }
+        if (nonAscii) { fs << (char)0xEF << (char)0xBB << (char)0xBF; }
+
         fs << csv::row(bmcsv::columns());
         for (const auto& n : names) {
             auto it = bookmarks.find(n);
@@ -2414,6 +2435,11 @@ private:
         res.opened = true;
         std::string text((std::istreambuf_iterator<char>(fs)), std::istreambuf_iterator<char>());
         fs.close();
+
+        // A spreadsheet asked for "CSV" rather than "CSV UTF-8" writes the local code
+        // page, so every accented station name arrives as bytes this program cannot
+        // store. Converted here, once, at the only door such a file comes through.
+        text = csv::toUtf8(text);
 
         std::vector<std::vector<std::string>> rows = csv::parse(text);
 

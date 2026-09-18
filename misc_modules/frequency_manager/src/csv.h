@@ -52,6 +52,67 @@ namespace csv {
         return out;
     }
 
+    // Whether the bytes are valid UTF-8. Not a full validator - no check for the
+    // overlong forms or the surrogate range - but enough to tell a UTF-8 file from
+    // one saved in a code page, which is the only question asked here.
+    inline bool isUtf8(const std::string& text) {
+        size_t i = 0;
+        while (i < text.size()) {
+            unsigned char c = (unsigned char)text[i];
+            int extra = 0;
+            if (c < 0x80) { extra = 0; }
+            else if ((c & 0xE0) == 0xC0) { extra = 1; }
+            else if ((c & 0xF0) == 0xE0) { extra = 2; }
+            else if ((c & 0xF8) == 0xF0) { extra = 3; }
+            else { return false; }
+            if (i + extra >= text.size()) { return false; }
+            for (int k = 1; k <= extra; k++) {
+                if (((unsigned char)text[i + k] & 0xC0) != 0x80) { return false; }
+            }
+            i += extra + 1;
+        }
+        return true;
+    }
+
+    // Windows-1252 to UTF-8. What Excel writes when it is asked for "CSV" rather than
+    // "CSV UTF-8", which is the default in most of Europe and the Americas - so a list
+    // with Cafe Radio or Muller spelled properly arrives as bytes that are not UTF-8 at
+    // all. Read as 1252 they are the letters that were meant; left alone they are a row
+    // of replacement characters in the name of every station with an accent in it.
+    //
+    // 0x80 to 0x9F are the part that is not Latin-1: the quotes, dashes and the euro
+    // sign a word processor inserts. Everything above that is its own code point.
+    inline std::string cp1252ToUtf8(const std::string& in) {
+        static const unsigned short high[32] = {
+            0x20AC, 0x0081, 0x201A, 0x0192, 0x201E, 0x2026, 0x2020, 0x2021,
+            0x02C6, 0x2030, 0x0160, 0x2039, 0x0152, 0x008D, 0x017D, 0x008F,
+            0x0090, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2013, 0x2014,
+            0x02DC, 0x2122, 0x0161, 0x203A, 0x0153, 0x009D, 0x017E, 0x0178
+        };
+        std::string out;
+        out.reserve(in.size() + in.size() / 8);
+        for (unsigned char c : in) {
+            unsigned int cp = (c >= 0x80 && c <= 0x9F) ? high[c - 0x80] : c;
+            if (cp < 0x80) { out.push_back((char)cp); }
+            else if (cp < 0x800) {
+                out.push_back((char)(0xC0 | (cp >> 6)));
+                out.push_back((char)(0x80 | (cp & 0x3F)));
+            }
+            else {
+                out.push_back((char)(0xE0 | (cp >> 12)));
+                out.push_back((char)(0x80 | ((cp >> 6) & 0x3F)));
+                out.push_back((char)(0x80 | (cp & 0x3F)));
+            }
+        }
+        return out;
+    }
+
+    // The file's text as UTF-8, whichever of the two it was saved as. Everything past
+    // this point - the program, its config file, its own export - is UTF-8 only.
+    inline std::string toUtf8(const std::string& text) {
+        return isUtf8(text) ? text : cp1252ToUtf8(text);
+    }
+
     // Splits a whole file into records. Tolerant on purpose - this is fed files that
     // have been through a spreadsheet, a mail client and someone's text editor:
     //
