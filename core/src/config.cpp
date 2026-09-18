@@ -1,6 +1,12 @@
 #include <config.h>
 #include <utils/flog.h>
 #include <fstream>
+#include <cstdio>
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
 
 #include <algorithm>
 #include <chrono>
@@ -243,24 +249,59 @@ bool ConfigManager::fillDefaults(json& target, const json& defaults, const std::
 
 void ConfigManager::save(bool lock) {
     if (lock) { mtx.lock(); }
-    auto justpath = wstr::str2wstr(path);
-    auto newpath = wstr::str2wstr(path + ".new");
-    std::ofstream file(newpath);
-    if (file.is_open()) {
-        file << conf.dump(4);
-        file.close();
+
+    // Text that is not valid UTF-8 makes dump() throw, and this runs on the autosave
+    // thread, where an escaping exception ends the process without a word. Settings
+    // pick such text up from outside the program - a CSV of bookmarks written in a
+    // Windows code page, a device or path name from the system - so it is replaced
+    // rather than thrown over. A mangled character in a name beats losing the app and
+    // every setting that had not been written yet.
+    std::string data;
+    try {
+        data = conf.dump(4, ' ', false, json::error_handler_t::replace);
     }
-    if (!file) {
+    catch (const std::exception& e) {
+        flog::error("Could not write config file '{}' ({}), keeping the previous one", path, e.what());
+        if (lock) { mtx.unlock(); }
+        return;
+    }
+
+    std::string newPath = path + ".new";
+    bool written = false;
+#ifdef _WIN32
+    FILE* f = _wfopen(wstr::str2wstr(newPath).c_str(), L"wb");
+#else
+    FILE* f = fopen(newPath.c_str(), "wb");
+#endif
+    if (f) {
+        written = data.empty() || fwrite(data.data(), 1, data.size(), f) == data.size();
+        // Written, flushed by the library, and on the disk - in that order, before the
+        // rename below makes it the config. Without this last step the rename can
+        // reach the disk before the contents do, and a power cut in between leaves an
+        // empty file where the settings were. That is the phone case, where the power
+        // does go without warning.
+        if (written && fflush(f) != 0) { written = false; }
+        if (written) {
+#ifdef _WIN32
+            if (_commit(_fileno(f)) != 0) { written = false; }
+#else
+            if (fsync(fileno(f)) != 0) { written = false; }
+#endif
+        }
+        fclose(f);
+    }
+
+    if (!written) {
         // A full disk or a read-only directory must not take the application
         // with it: keep the config we already have on disk and carry on.
         flog::error("Could not write config file '{}.new', keeping the previous one", path);
         std::error_code rmec;
-        std::filesystem::remove(newpath, rmec);
+        std::filesystem::remove(wstr::str2wstr(newPath), rmec);
     }
     else {
         // Throwing overload would escape the autosave thread and terminate.
         std::error_code ec;
-        std::filesystem::rename(newpath, justpath, ec);
+        std::filesystem::rename(wstr::str2wstr(newPath), wstr::str2wstr(path), ec);
         if (ec) {
             flog::error("Could not replace config file '{}': {}", path, ec.message());
         }
