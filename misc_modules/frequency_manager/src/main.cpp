@@ -18,6 +18,9 @@
 #include "frequency_manager.h"
 #include "scanner.h"
 #include "bookmark_csv.h"
+#include "station_fields.h"
+#include <ctime>
+#include <map>
 #include "../../radio/src/radio_module_interface.h"
 #include "../../radio/src/tone_tables.h"
 #include <algorithm>
@@ -669,6 +672,169 @@ private:
         ImGui::Checkbox(("##freq_manager_edit_tonetail" + name).c_str(), &t.tailCloseEnabled);
     }
 
+    // What is on the channel, as opposed to how to receive it: the rows above are the
+    // radio's settings, these are the station's. Kept in a section of its own, since a
+    // bookmark of a repeater needs none of it and a logged broadcast station needs all
+    // of it, and the two should not read as one list of things to fill in.
+    void drawStationSection() {
+        ImGui::Spacing();
+        ImGui::SectionHeader("STATION");
+
+        ImGui::BeginTable(("freq_manager_station_table" + name).c_str(), 2);
+
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::LeftLabel("Full name");
+        if (ImGui::IsItemHovered()) {
+            style::tooltip("The station's full name. The bookmark's own name is the short\n"
+                           "label the list shows, which is usually not the whole thing.");
+        }
+        ImGui::TableSetColumnIndex(1);
+        ImGui::SetNextItemWidth(200);
+        {
+            char buf[512];
+            snprintf(buf, sizeof buf, "%s", editedBookmark.fullName.c_str());
+            if (ImGui::InputText(("##freq_manager_edit_fcn" + name).c_str(), buf, sizeof(buf))) {
+                editedBookmark.fullName = buf;
+            }
+        }
+
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::LeftLabel("Language");
+        ImGui::TableSetColumnIndex(1);
+        ImGui::SetNextItemWidth(200);
+        {
+            static const std::string items = station::itemsFor(station::languages());
+            int idx = station::indexOf(station::languages(), editedBookmark.language);
+            if (ImGui::Combo(("##freq_manager_edit_lang" + name).c_str(), &idx, items.c_str())) {
+                editedBookmark.language = station::languages()[idx].code;
+            }
+        }
+
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::LeftLabel("Service");
+        ImGui::TableSetColumnIndex(1);
+        ImGui::SetNextItemWidth(200);
+        {
+            static const std::string items = station::itemsFor(station::services());
+            int idx = station::indexOf(station::services(), editedBookmark.service);
+            if (ImGui::Combo(("##freq_manager_edit_service" + name).c_str(), &idx, items.c_str())) {
+                editedBookmark.service = station::services()[idx].code;
+            }
+        }
+
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        ImGui::LeftLabel("On all the time");
+        if (ImGui::IsItemHovered()) {
+            style::tooltip("A 24 hour service. Leave it off to give the hours it is on air.");
+        }
+        ImGui::TableSetColumnIndex(1);
+        ImGui::Checkbox(("##freq_manager_edit_24h" + name).c_str(), &editedBookmark.active24h);
+
+        if (!editedBookmark.active24h) {
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::LeftLabel("Active from (UTC)");
+            if (ImGui::IsItemHovered()) {
+                style::tooltip("The hours the channel is worth listening to, in UTC.\n"
+                               "UTC because schedules are published in it, and because a\n"
+                               "list sent to someone else has to mean the same thing there.\n"
+                               "An end before the start runs through midnight.");
+            }
+            ImGui::TableSetColumnIndex(1);
+            ImGui::SetNextItemWidth(95);
+            drawTimeField("##freq_manager_edit_from" + name, editedBookmark.activeStart);
+            ImGui::SameLine();
+            ImGui::TextUnformatted("to");
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(95);
+            drawTimeField("##freq_manager_edit_to" + name, editedBookmark.activeEnd);
+        }
+
+        if (editedBookmark.lastHeard > 0 || editedBookmark.timesHeard > 0) {
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            ImGui::LeftLabel("Heard");
+            ImGui::TableSetColumnIndex(1);
+            ImGui::TextUnformatted(heardText(editedBookmark).c_str());
+        }
+
+        ImGui::EndTable();
+    }
+
+    // Typed as "HH:MM", kept as minutes past midnight. The text is held while it is
+    // being typed, because "09" is not a time yet and throwing it away on the way to
+    // "09:30" would make the field impossible to type into.
+    void drawTimeField(const std::string& id, int& minutes) {
+        char buf[16];
+        auto& pending = timeFieldText[id];
+        if (pending.empty()) { pending = station::fmtTime(minutes); }
+        snprintf(buf, sizeof buf, "%s", pending.c_str());
+        if (ImGui::InputTextWithHint(id.c_str(), "HH:MM", buf, sizeof(buf))) {
+            pending = buf;
+            int parsed = station::parseTime(pending);
+            if (parsed >= 0) { minutes = parsed; }
+            if (pending.empty()) { minutes = -1; }
+        }
+        if (ImGui::IsItemDeactivatedAfterEdit()) {
+            // Tidied to HH:MM when the field is left, so what is stored and what is
+            // shown are the same thing.
+            pending = station::fmtTime(minutes);
+        }
+    }
+
+    static bool hasStationInfo(const FrequencyBookmark& bm) {
+        return !bm.fullName.empty() || !bm.language.empty() || !bm.service.empty() ||
+               bm.active24h || bm.activeStart >= 0 || bm.activeEnd >= 0 || bm.lastHeard > 0 || bm.timesHeard > 0;
+    }
+
+    // The station's side of a bookmark, for a tooltip. Only the parts that are filled
+    // in: a repeater with nothing but a tone should not read as a station with every
+    // field empty.
+    static void drawStationInfo(const FrequencyBookmark& bm) {
+        if (!bm.fullName.empty()) { ImGui::TextUnformatted(bm.fullName.c_str()); }
+        std::string line;
+        if (!bm.language.empty()) {
+            int idx = station::indexOf(station::languages(), bm.language);
+            line = idx > 0 ? station::languages()[idx].label : bm.language;
+        }
+        if (!bm.service.empty()) {
+            int idx = station::indexOf(station::services(), bm.service);
+            if (!line.empty()) { line += ", "; }
+            line += idx > 0 ? station::services()[idx].label : bm.service;
+        }
+        if (!line.empty()) { ImGui::TextUnformatted(line.c_str()); }
+
+        if (bm.active24h) {
+            ImGui::TextUnformatted("On all the time");
+        }
+        else if (bm.activeStart >= 0 || bm.activeEnd >= 0) {
+            ImGui::Text("Active %s - %s UTC",
+                        bm.activeStart >= 0 ? station::fmtTime(bm.activeStart).c_str() : "?",
+                        bm.activeEnd >= 0 ? station::fmtTime(bm.activeEnd).c_str() : "?");
+        }
+        std::string heard = heardText(bm);
+        if (!heard.empty()) { ImGui::Text("Heard: %s", heard.c_str()); }
+    }
+
+    static std::string heardText(const FrequencyBookmark& bm) {
+        std::string out;
+        if (bm.lastHeard > 0) {
+            std::time_t t = (std::time_t)bm.lastHeard;
+            std::tm* gm = std::gmtime(&t);
+            char buf[64];
+            if (gm != NULL && strftime(buf, sizeof buf, "%Y-%m-%d %H:%M UTC", gm) > 0) { out = buf; }
+        }
+        if (bm.timesHeard > 0) {
+            if (!out.empty()) { out += ", "; }
+            out += std::to_string(bm.timesHeard) + (bm.timesHeard == 1 ? " time" : " times");
+        }
+        return out;
+    }
+
     bool bookmarkEditDialog() {
         bool open = true;
         gui::mainWindow.lockWaterfallControls = true;
@@ -724,6 +890,8 @@ private:
             drawToneRows();
 
             ImGui::EndTable();
+
+            drawStationSection();
 
             // Outside the table and full width: a two column layout gives a note about
             // forty characters of room, which is not enough to be worth typing into.
@@ -990,6 +1158,7 @@ private:
                                 storedDemodId(config.conf["lists"][listName]["bookmarks"][bookmarkName]),
                                 radio);
                 wbm.bookmark.vfoName = config.conf["lists"][listName]["bookmarks"][bookmarkName].value("vfo", "");
+                loadStation(config.conf["lists"][listName]["bookmarks"][bookmarkName], wbm.bookmark);
                 wbm.bookmark.hasTone = hasTone(config.conf["lists"][listName]["bookmarks"][bookmarkName]);
                 wbm.bookmark.tone = loadTone(config.conf["lists"][listName]["bookmarks"][bookmarkName]);
                 wbm.bookmark.selected = false;
@@ -1133,6 +1302,7 @@ private:
             fbm.tone = loadTone(bm);
             fbm.notes = bm.value("notes", "");
             fbm.skip = bm.value("skip", false);
+            loadStation(bm, fbm);
             fbm.selected = false;
             bookmarks[bmName] = fbm;
         }
@@ -1171,6 +1341,45 @@ private:
     // recalled without touching the radio's tone settings. Individual keys are
     // optional too, so a block written by a future version that drops one still
     // loads.
+    // Written only when it holds something, so a list of plain bookmarks does not
+    // grow a block of empty station fields apiece, and a file stays readable by hand.
+    static void saveStation(json& bm, const FrequencyBookmark& b) {
+        bm.erase("fullName");
+        bm.erase("language");
+        bm.erase("service");
+        bm.erase("activeStart");
+        bm.erase("activeEnd");
+        bm.erase("active24h");
+        bm.erase("lastHeard");
+        bm.erase("timesHeard");
+        if (!b.fullName.empty()) { bm["fullName"] = b.fullName; }
+        if (!b.language.empty()) { bm["language"] = b.language; }
+        if (!b.service.empty()) { bm["service"] = b.service; }
+        if (b.active24h) { bm["active24h"] = true; }
+        if (b.activeStart >= 0) { bm["activeStart"] = b.activeStart; }
+        if (b.activeEnd >= 0) { bm["activeEnd"] = b.activeEnd; }
+        if (b.lastHeard > 0) { bm["lastHeard"] = b.lastHeard; }
+        if (b.timesHeard > 0) { bm["timesHeard"] = b.timesHeard; }
+    }
+
+    // Every field checked rather than trusted: this file is hand editable, and a value
+    // of the wrong type here would throw out of loading the whole list.
+    static void loadStation(const json& bm, FrequencyBookmark& b) {
+        if (!bm.is_object()) { return; }
+        if (bm.contains("fullName") && bm["fullName"].is_string()) { b.fullName = bm["fullName"]; }
+        if (bm.contains("language") && bm["language"].is_string()) { b.language = bm["language"]; }
+        if (bm.contains("service") && bm["service"].is_string()) { b.service = bm["service"]; }
+        if (bm.contains("active24h") && bm["active24h"].is_boolean()) { b.active24h = bm["active24h"]; }
+        if (bm.contains("activeStart") && bm["activeStart"].is_number_integer()) { b.activeStart = bm["activeStart"]; }
+        if (bm.contains("activeEnd") && bm["activeEnd"].is_number_integer()) { b.activeEnd = bm["activeEnd"]; }
+        if (bm.contains("lastHeard") && bm["lastHeard"].is_number_integer()) { b.lastHeard = bm["lastHeard"]; }
+        if (bm.contains("timesHeard") && bm["timesHeard"].is_number_integer()) { b.timesHeard = bm["timesHeard"]; }
+        if (b.activeStart > 23 * 60 + 59) { b.activeStart = -1; }
+        if (b.activeEnd > 23 * 60 + 59) { b.activeEnd = -1; }
+        if (b.timesHeard < 0) { b.timesHeard = 0; }
+        if (b.lastHeard < 0) { b.lastHeard = 0; }
+    }
+
     static bool hasTone(const json& bm) {
         return bm.contains("tone") && bm["tone"].is_object();
     }
@@ -1256,6 +1465,7 @@ private:
             config.conf["lists"][listName]["bookmarks"][bmName]["vfo"] = bm.vfoName;
             config.conf["lists"][listName]["bookmarks"][bmName]["notes"] = bm.notes;
             config.conf["lists"][listName]["bookmarks"][bmName]["skip"] = bm.skip;
+            saveStation(config.conf["lists"][listName]["bookmarks"][bmName], bm);
             if (demodId == RADIO_DEMOD_NFM) {
                 saveTone(config.conf["lists"][listName]["bookmarks"][bmName], bm.tone);
             }
@@ -1384,6 +1594,20 @@ private:
                             (radio != nullptr) ? radio->getSelectedDemodId() : 0, radio);
             _this->editedBookmark.vfoName = gui::waterfall.selectedVFO;
             _this->editedBookmark.selected = false;
+            // Everything that belongs to a particular channel rather than to the radio.
+            // Without this the notes, the skip flag and the station details of whatever
+            // was edited last came up already filled in on the new bookmark.
+            _this->editedBookmark.notes.clear();
+            _this->editedBookmark.skip = false;
+            _this->editedBookmark.fullName.clear();
+            _this->editedBookmark.language.clear();
+            _this->editedBookmark.service.clear();
+            _this->editedBookmark.activeStart = -1;
+            _this->editedBookmark.activeEnd = -1;
+            _this->editedBookmark.active24h = false;
+            _this->editedBookmark.lastHeard = 0;
+            _this->editedBookmark.timesHeard = 0;
+            _this->timeFieldText.clear();
             // Take the tone the radio is set to right now, so bookmarking a repeater
             // you have just tuned in captures its tone without retyping it.
             _this->editedBookmark.tone = RadioToneSettings();
@@ -1426,6 +1650,7 @@ private:
             auto radio = (RadioModuleInterface *)core::moduleManager.getInterface(gui::waterfall.selectedVFO, "RadioModuleInterface");
             _this->updateModeList(radio);
             _this->editOpen = true;
+            _this->timeFieldText.clear();
             _this->editedBookmark = _this->bookmarks[selectedNames[0]];
             _this->editedBookmarkName = selectedNames[0];
             _this->firstEditedBookmarkName = selectedNames[0];
@@ -1515,10 +1740,16 @@ private:
                 if (vfoMissing) { style::endDisabled(); }
                 // One tooltip for the row, so a bookmark that is both missing its radio
                 // and carries notes says both rather than whichever was checked first.
-                if (ImGui::IsItemHovered() && (vfoMissing || !bm.notes.empty())) {
+                if (ImGui::IsItemHovered() && (vfoMissing || hasStationInfo(bm) || !bm.notes.empty())) {
                     if (style::beginTooltip()) {
                         if (vfoMissing) {
                             ImGui::Text("Radio \"%s\" is not available", bm.vfoName.c_str());
+                            if (hasStationInfo(bm) || !bm.notes.empty()) { ImGui::Separator(); }
+                        }
+                        // The station, so what is on the channel can be read off the
+                        // list without opening the bookmark to look.
+                        if (hasStationInfo(bm)) {
+                            drawStationInfo(bm);
                             if (!bm.notes.empty()) { ImGui::Separator(); }
                         }
                         if (!bm.notes.empty()) {
@@ -1534,6 +1765,7 @@ private:
                 if (ImGui::TableGetHoveredColumn() >= 0 && ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
                     _this->setNavBookmark(name);
                     applyBookmark(bm, gui::waterfall.selectedVFO);
+                    _this->markHeard(_this->selectedListName, name);
                 }
 
                 ImGui::TableSetColumnIndex(1);
@@ -1675,6 +1907,7 @@ private:
             _this->setNavBookmark(selectedNames[0]);
             applyBookmark(bm, gui::waterfall.selectedVFO);
             bm.selected = false;
+            _this->markHeard(_this->selectedListName, selectedNames[0]);
         }
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
             style::tooltip("Puts the radio on the selected bookmark - frequency, mode, bandwidth\n"
@@ -2002,6 +2235,9 @@ private:
         if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
             _this->mouseClickedInLabel = true;
             applyBookmark(hoveredBookmark.bookmark, gui::waterfall.selectedVFO);
+            // Its own list, which is not always the one on show: the waterfall draws
+            // the bookmarks of every list that is set to appear on it.
+            _this->markHeard(hoveredBookmark.listName, hoveredBookmark.bookmarkName);
         }
 
         if (style::beginTooltip()) {
@@ -2077,6 +2313,7 @@ private:
             fbm.vfoName = bm.value("vfo", "");
             fbm.notes = bm.value("notes", "");
             fbm.skip = bm.value("skip", false);
+            loadStation(bm, fbm);
             fbm.selected = false;
             bookmarks[_name] = fbm;
         }
@@ -2138,6 +2375,14 @@ private:
                 bmcsv::fmtBool(t.tailCloseEnabled),
                 bmcsv::encodeToneList(t),
                 bmcsv::fmtBool(bm.skip),
+                bm.fullName,
+                bm.language,
+                bm.service,
+                bmcsv::fmtBool(bm.active24h),
+                bmcsv::fmtTimeOfDay(bm.activeStart),
+                bmcsv::fmtTimeOfDay(bm.activeEnd),
+                bm.timesHeard > 0 ? std::to_string(bm.timesHeard) : std::string(),
+                bmcsv::fmtDateTime(bm.lastHeard),
                 bm.notes
             };
             fs << csv::row(f);
@@ -2247,6 +2492,21 @@ private:
             t.tailCloseEnabled = bmcsv::parseBool(field(row, "tonetailclose"), true);
             bmcsv::decodeToneList(field(row, "tonelist"), t);
 
+            // The station columns. A file from somewhere else has none of them, which
+            // leaves the bookmark with nothing said about the station - the same as
+            // every bookmark made before these existed.
+            fbm.fullName = field(row, "fullname");
+            fbm.language = field(row, "language");
+            fbm.service = field(row, "service");
+            fbm.active24h = bmcsv::parseBool(field(row, "alwayson"), false);
+            fbm.activeStart = bmcsv::parseTimeOfDay(field(row, "activefromutc"));
+            fbm.activeEnd = bmcsv::parseTimeOfDay(field(row, "activetoutc"));
+            double heardCount = 0.0;
+            if (bmcsv::parseNumber(field(row, "timesheard"), &heardCount) && heardCount > 0.0) {
+                fbm.timesHeard = (int)heardCount;
+            }
+            fbm.lastHeard = bmcsv::parseDateTime(field(row, "lastheardutc"));
+
             if (bookmarks.find(bmName) != bookmarks.end()) { res.updated++; }
             else { res.added++; }
             bookmarks[bmName] = fbm;
@@ -2309,6 +2569,13 @@ private:
     std::string editedBookmarkName = "";
     std::string firstEditedBookmarkName = "";
     FrequencyBookmark editedBookmark;
+    // What is in each time field while it is being typed, keyed by the field's id.
+    std::map<std::string, std::string> timeFieldText;
+
+public:
+    void markHeard(const std::string& listName, const std::string& bmName);
+
+private:
     // What the accept list's pickers are showing, which is not part of the bookmark
     // until it is added.
     RadioToneListEntry editedToneAdd;
@@ -2334,6 +2601,33 @@ private:
 
     int bookmarkDisplayMode = 0;
 };
+
+// Counted when someone tunes to a channel themselves. The scanner calls
+// applyBookmark too, which is why this is separate from it: a scan hops over every
+// channel in the list, and running the count up for all of them would say a lot about
+// the scanner and nothing about what was heard.
+void FrequencyManagerModule::markHeard(const std::string& listName, const std::string& bmName) {
+    config.acquire();
+    json& lists = config.conf["lists"];
+    bool changed = false;
+    if (lists.contains(listName) && lists[listName].is_object() &&
+        lists[listName]["bookmarks"].contains(bmName)) {
+        json& bm = lists[listName]["bookmarks"][bmName];
+        long long now = (long long)std::time(NULL);
+        int times = (bm.contains("timesHeard") && bm["timesHeard"].is_number_integer()) ? (int)bm["timesHeard"] : 0;
+        bm["timesHeard"] = times + 1;
+        bm["lastHeard"] = now;
+        changed = true;
+        if (listName == selectedListName) {
+            auto it = bookmarks.find(bmName);
+            if (it != bookmarks.end()) {
+                it->second.timesHeard = times + 1;
+                it->second.lastHeard = now;
+            }
+        }
+    }
+    config.release(changed);
+}
 
 void applyBookmark(FrequencyBookmark bm, std::string vfoName) {
     // A bookmark may remember the radio/VFO it was saved for. If it does, apply

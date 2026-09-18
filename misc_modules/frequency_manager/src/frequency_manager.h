@@ -49,6 +49,24 @@ struct FrequencyBookmark {
     // 0 is RADIO_DEMOD_NFM, which is the right default for a bookmark that never got
     // told what it was.
     int demodId = 0;
+    // The station side of the channel: what is on it, rather than how to receive it.
+    // All optional, all empty or zero on bookmarks saved before this existed, and only
+    // written to the file when they hold something - so a list of plain bookmarks does
+    // not grow a block of empty fields apiece.
+    std::string fullName;      // The full name; the bookmark's own name is the short label
+    std::string language;      // ISO 639-1 code, or "other"; empty = not set
+    std::string service;       // What kind of station; see station::services()
+    // Minutes past midnight UTC, -1 when not set. UTC because that is what broadcast
+    // schedules, nets and logs use, and because a list sent to someone in another
+    // country has to mean the same thing there.
+    int activeStart = -1;
+    int activeEnd = -1;
+    bool active24h = false;    // On all the time; start and end are then ignored
+    // Filled in when the bookmark is tuned to by hand, so the list doubles as a record
+    // of what has actually been received. The scanner passing over a channel does not
+    // count - it would run the count up without anyone listening.
+    long long lastHeard = 0;   // Unix seconds, 0 = never
+    int timesHeard = 0;
 };
 
 struct WaterfallBookmark {

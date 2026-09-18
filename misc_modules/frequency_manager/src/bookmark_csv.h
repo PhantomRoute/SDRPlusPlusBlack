@@ -4,6 +4,7 @@
 #include "../../../decoder_modules/radio/src/radio_interface.h"
 #include <cmath>
 #include <cstdio>
+#include <ctime>
 #include <cstdlib>
 #include <string>
 #include <vector>
@@ -30,6 +31,12 @@ namespace bmcsv {
             // pruned in a spreadsheet, and "which of these am I not interested in"
             // is exactly the kind of decision made there.
             "skip",
+            // The station: what is on the channel rather than how to receive it. A
+            // spreadsheet is where a list like this is usually built, so these are
+            // columns like any other and round trip the same way.
+            "full_name", "language", "service",
+            "always_on", "active_from_utc", "active_to_utc",
+            "times_heard", "last_heard_utc",
             // Last on purpose: it is the one field with no length limit, and a long
             // free text column in the middle pushes everything else off the screen in
             // a spreadsheet.
@@ -115,6 +122,63 @@ namespace bmcsv {
         if (s == "any" || s == "anytone") { return 3; }
         if (s == "list" || s == "customlist") { return 4; }
         return 0;
+    }
+
+    // "HH:MM" in the cell, minutes past midnight in the bookmark. Empty for a time
+    // that is not set, which a spreadsheet shows as an empty cell rather than a zero
+    // that would read as midnight.
+    inline std::string fmtTimeOfDay(int minutes) {
+        if (minutes < 0 || minutes > 23 * 60 + 59) { return ""; }
+        char buf[8];
+        snprintf(buf, sizeof buf, "%02d:%02d", minutes / 60, minutes % 60);
+        return buf;
+    }
+
+    // Takes what a spreadsheet is likely to hand back as well as what was written:
+    // "09:30", "9:30", "0930", and Excel's habit of turning a time into "09:30:00".
+    inline int parseTimeOfDay(const std::string& in) {
+        int digits[6];
+        int n = 0;
+        for (char c : in) {
+            if (c >= '0' && c <= '9') {
+                if (n >= 6) { break; }
+                digits[n++] = c - '0';
+            }
+        }
+        if (n == 0) { return -1; }
+        int h = 0, m = 0;
+        if (n <= 2) { h = (n == 1) ? digits[0] : digits[0] * 10 + digits[1]; }
+        else if (n == 3) { h = digits[0]; m = digits[1] * 10 + digits[2]; }
+        else { h = digits[0] * 10 + digits[1]; m = digits[2] * 10 + digits[3]; }
+        if (h > 23 || m > 59) { return -1; }
+        return h * 60 + m;
+    }
+
+    // A date and time a person and a spreadsheet can both read, in UTC like everything
+    // else here. Stored as a Unix time, which no one wants to see in a cell.
+    inline std::string fmtDateTime(long long unixSeconds) {
+        if (unixSeconds <= 0) { return ""; }
+        std::time_t t = (std::time_t)unixSeconds;
+        std::tm* gm = std::gmtime(&t);
+        if (gm == NULL) { return ""; }
+        char buf[32];
+        if (strftime(buf, sizeof buf, "%Y-%m-%d %H:%M", gm) == 0) { return ""; }
+        return buf;
+    }
+
+    inline long long parseDateTime(const std::string& in) {
+        int y = 0, mo = 0, d = 0, h = 0, mi = 0;
+        if (sscanf(in.c_str(), "%d-%d-%d %d:%d", &y, &mo, &d, &h, &mi) < 3) { return 0; }
+        if (y < 1970 || mo < 1 || mo > 12 || d < 1 || d > 31) { return 0; }
+        // Days since the epoch, worked out directly: timegm is not portable and mktime
+        // would read the cell as local time, which is the one thing it is not.
+        static const int cumulative[12] = { 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334 };
+        long long days = (long long)(y - 1970) * 365 + ((y - 1969) / 4) - ((y - 1901) / 100) + ((y - 1601) / 400);
+        days += cumulative[mo - 1];
+        bool leap = (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0);
+        if (leap && mo > 2) { days += 1; }
+        days += d - 1;
+        return days * 86400LL + h * 3600LL + mi * 60LL;
     }
 
     // The accept list in one cell, semicolon separated: "100.0;D023N;123.0". A CTCSS
