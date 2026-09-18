@@ -161,6 +161,7 @@ Scanner::Scanner(FrequencyManagerModule* module) : module(module) {
     noiseFloor = num("noiseFloor", 3.0f);
     signalMarginDb = num("signalMarginDb", 4.0f);
     squelchEnabled = flag("squelchEnabled", false);
+    logHeard = flag("logHeard", false);
     carrierHoldMode = flag("carrierHoldMode", false);
     // An earlier default put -120 in the noise floor, an absolute dBFS level, where
     // the rest of the scanner works in dB over the local noise. Every measurement
@@ -281,6 +282,7 @@ int Scanner::findScannable(int from, int dir) const {
 void Scanner::enterState(State newState) {
     state = newState;
     stateTime = 0.0f;
+    if (newState != SCAN_LISTENING) { heardLogged = false; }
 }
 
 void Scanner::gotoStation(size_t index) {
@@ -570,6 +572,12 @@ void Scanner::update(float deltaTime) {
         }
         // Still on the air: last heard is now, not when the scan first stopped here.
         if (haveLevel && level >= (trigger - 2.0f)) { noteHeard(false); }
+        // The bookmark's own log, once the stop has lasted long enough to be a
+        // listen. A channel the scan touches and leaves is not something heard.
+        if (logHeard && !heardLogged && stateTime >= HEARD_AFTER_SECONDS && onHeard && !currentStation.empty()) {
+            heardLogged = true;
+            onHeard(currentStation);
+        }
         if (stateTime >= listenTimeSec) {
             step(1);
         }
@@ -970,6 +978,15 @@ void Scanner::drawSettings() {
         if (!squelchEnabled) { setMuted(false); }
     }
     ImGui::HelpMarker("Mute the audio while the scan is hopping, so you only hear the channels it stops on.");
+
+    if (ImGui::Checkbox("Log what it stops on##scanner_log_heard", &logHeard)) {
+        saveSetting("logHeard", logHeard);
+    }
+    ImGui::HelpMarker("Count a channel as heard on its bookmark when the scan stays on it for a few\n"
+                      "seconds, the same as tuning to it yourself.\n\n"
+                      "Leave this off until the trigger level is set for the band you are on. A scan\n"
+                      "that is stopping on noise would write every one of those stops into the log as\n"
+                      "a station heard, and there is no way to tell them apart afterwards.");
 
     std::vector<std::string> skipList = skippedNames();
     if (!skipList.empty()) {

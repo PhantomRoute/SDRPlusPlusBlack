@@ -50,6 +50,10 @@ public:
     // A mode's name from its DemodID, for the history rows. The table of names lives
     // in the frequency manager. May be empty, in which case no mode is shown.
     std::function<std::string(int)> modeName;
+    // How the scanner tells the frequency manager it has actually listened to a
+    // channel, so the bookmark's own heard count and last heard are kept up. Only
+    // called when the operator has asked for it - see logHeard.
+    std::function<void(const std::string&)> onHeard;
 
     // The level a channel has to beat to count as busy.
     float getTriggerLevel() const { return noiseFloor + signalMarginDb; }
@@ -83,6 +87,17 @@ private:
     float signalMarginDb = 4.0f;   // how far over the floor a channel has to be
     bool squelchEnabled = false;
     bool carrierHoldMode = false;
+    // Whether a stop also counts as hearing the channel on its bookmark. Off until
+    // the operator switches it on, because the trigger level has to be set against
+    // the band before it means anything: a scan left at the default on a noisy band
+    // stops on noise, and every one of those stops would be written into the log as
+    // a station heard. The scanner's own history is kept either way - that is a
+    // record of the scan, which is a different thing from a log of what was heard.
+    bool logHeard = false;
+    // One count per stop, and only once the scan has stayed long enough to be
+    // listening rather than passing through.
+    bool heardLogged = false;
+    static constexpr float HEARD_AFTER_SECONDS = 3.0f;
 
     // ---- Scan state
     State state = SCAN_IDLE;

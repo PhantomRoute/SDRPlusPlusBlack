@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 #include "config.h"
 // Relative, not <radio_interface.h>: core builds mobile_main_window.cpp, which
 // includes this header, and core has no include path into the decoder modules.
@@ -54,7 +55,10 @@ struct FrequencyBookmark {
     // written to the file when they hold something - so a list of plain bookmarks does
     // not grow a block of empty fields apiece.
     std::string fullName;      // The full name; the bookmark's own name is the short label
-    std::string language;      // ISO 639-1 code, or "other"; empty = not set
+    // ISO 639-1 codes, or "other". More than one because a station is often more
+    // than one: a regional broadcaster carrying two languages is the normal case, not
+    // the exception. Empty = nothing said about the language.
+    std::vector<std::string> languages;
     std::string service;       // What kind of station; see station::services()
     // Minutes past midnight UTC, -1 when not set. UTC because that is what broadcast
     // schedules, nets and logs use, and because a list sent to someone in another

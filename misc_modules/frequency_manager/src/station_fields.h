@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cctype>
 #include <string>
 #include <vector>
 
@@ -65,6 +66,27 @@ namespace station {
         return list;
     }
 
+    // The codes as names, in the order they were chosen: "English, Afrikaans". A code
+    // that is not in the list is shown as it was stored rather than dropped, so a file
+    // from a newer version still says something.
+    inline std::string labelsFor(const std::vector<Entry>& list, const std::vector<std::string>& codes) {
+        std::string out;
+        for (const auto& code : codes) {
+            if (code.empty()) { continue; }
+            if (!out.empty()) { out += ", "; }
+            bool found = false;
+            for (auto& e : list) {
+                if (code == e.code) {
+                    out += e.label;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) { out += code; }
+        }
+        return out;
+    }
+
     // The index of a stored code, or 0 ("Not set") for anything unrecognised - a code
     // from a newer version, or a hand edit. The value itself is left alone in the
     // bookmark, so opening and closing the dialog does not quietly discard it.
@@ -81,6 +103,42 @@ namespace station {
         for (auto& e : list) {
             out += e.label;
             out.push_back('\0');
+        }
+        return out;
+    }
+
+    // Several codes in one cell, semicolon separated: "en;af". A comma would be the
+    // CSV's own separator, and quoting the cell to get round that makes it harder to
+    // edit by hand, which is the whole point of the column.
+    inline std::string joinCodes(const std::vector<std::string>& codes) {
+        std::string out;
+        for (const auto& c : codes) {
+            if (c.empty()) { continue; }
+            if (!out.empty()) { out.push_back(';'); }
+            out += c;
+        }
+        return out;
+    }
+
+    // Takes a semicolon or a comma between them, and the spaces someone will leave
+    // after typing "en, af".
+    inline std::vector<std::string> splitCodes(const std::string& in) {
+        std::vector<std::string> out;
+        std::string cur;
+        for (size_t i = 0; i <= in.size(); i++) {
+            char c = (i < in.size()) ? in[i] : ';';
+            if (c == ';' || c == ',') {
+                size_t a = cur.find_first_not_of(" \t");
+                size_t b = cur.find_last_not_of(" \t");
+                if (a != std::string::npos) {
+                    std::string code = cur.substr(a, b - a + 1);
+                    for (char& ch : code) { ch = (char)tolower((unsigned char)ch); }
+                    if (!code.empty()) { out.push_back(code); }
+                }
+                cur.clear();
+                continue;
+            }
+            cur.push_back(c);
         }
         return out;
     }

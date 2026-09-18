@@ -117,6 +117,7 @@ public:
         scanner.onSetSkip = [this](const std::string& bmName, bool skip) { setBookmarkSkip(bmName, skip); };
         scanner.onClearSkips = [this]() { clearBookmarkSkips(); };
         scanner.modeName = [](int demodId) { return demodModeName(demodId); };
+        scanner.onHeard = [this](const std::string& bmName) { markHeard(selectedListName, bmName); };
 
         migrateScannerSkipList();
 
@@ -705,10 +706,28 @@ private:
         ImGui::TableSetColumnIndex(1);
         ImGui::SetNextItemWidth(200);
         {
-            static const std::string items = station::itemsFor(station::languages());
-            int idx = station::indexOf(station::languages(), editedBookmark.language);
-            if (ImGui::Combo(("##freq_manager_edit_lang" + name).c_str(), &idx, items.c_str())) {
-                editedBookmark.language = station::languages()[idx].code;
+            // Tick boxes rather than a dropdown, because a station can be in more than
+            // one language and a dropdown can only say one thing.
+            std::string shown = station::labelsFor(station::languages(), editedBookmark.languages);
+            if (shown.empty()) { shown = "Not set"; }
+            if (ImGui::Button((shown + "##freq_manager_edit_lang" + name).c_str(), ImVec2(200.0f, 0.0f))) {
+                ImGui::OpenPopup(("##freq_manager_lang_popup" + name).c_str());
+            }
+            if (ImGui::BeginPopup(("##freq_manager_lang_popup" + name).c_str())) {
+                ImGui::BeginChild(("##freq_manager_lang_list" + name).c_str(),
+                                  ImVec2(220.0f * style::uiScale, 260.0f * style::uiScale));
+                for (auto& e : station::languages()) {
+                    std::string code = e.code;
+                    if (code.empty()) { continue; } // "Not set" is no languages ticked
+                    auto it = std::find(editedBookmark.languages.begin(), editedBookmark.languages.end(), code);
+                    bool on = it != editedBookmark.languages.end();
+                    if (ImGui::Checkbox((std::string(e.label) + "##freq_manager_lang_" + code + name).c_str(), &on)) {
+                        if (on) { editedBookmark.languages.push_back(code); }
+                        else { editedBookmark.languages.erase(it); }
+                    }
+                }
+                ImGui::EndChild();
+                ImGui::EndPopup();
             }
         }
 
@@ -787,7 +806,7 @@ private:
     }
 
     static bool hasStationInfo(const FrequencyBookmark& bm) {
-        return !bm.fullName.empty() || !bm.language.empty() || !bm.service.empty() ||
+        return !bm.fullName.empty() || !bm.languages.empty() || !bm.service.empty() ||
                bm.active24h || bm.activeStart >= 0 || bm.activeEnd >= 0 || bm.lastHeard > 0 || bm.timesHeard > 0;
     }
 
@@ -797,10 +816,7 @@ private:
     static void drawStationInfo(const FrequencyBookmark& bm) {
         if (!bm.fullName.empty()) { ImGui::TextUnformatted(bm.fullName.c_str()); }
         std::string line;
-        if (!bm.language.empty()) {
-            int idx = station::indexOf(station::languages(), bm.language);
-            line = idx > 0 ? station::languages()[idx].label : bm.language;
-        }
+        if (!bm.languages.empty()) { line = station::labelsFor(station::languages(), bm.languages); }
         if (!bm.service.empty()) {
             int idx = station::indexOf(station::services(), bm.service);
             if (!line.empty()) { line += ", "; }
@@ -1210,6 +1226,26 @@ private:
         return gui::waterfall.getCenterFrequency() + sigpath::vfoManager.getOffset(gui::waterfall.selectedVFO);
     }
 
+    // The channel the radio is sitting on, whether it was tuned from this panel or by
+    // hand. The nav position is preferred when it matches, so that stepping through a
+    // list of channels that share a frequency stays where it was put.
+    std::string bookmarkAtCurrentFrequency() {
+        double tuned = currentTunedFrequency();
+        if (!std::isfinite(tuned)) { return ""; }
+        auto matches = [&](const std::string& bmName) {
+            auto it = bookmarks.find(bmName);
+            // Within a hertz: a frequency typed in and a frequency stored are the same
+            // number, and anything looser would claim a neighbouring channel.
+            return it != bookmarks.end() && bookmarkIsTunable(it->second) &&
+                   fabs(it->second.frequency - tuned) < 1.0;
+        };
+        if (!navBookmarkName.empty() && matches(navBookmarkName)) { return navBookmarkName; }
+        for (auto& [bmName, bm] : bookmarks) {
+            if (matches(bmName)) { return bmName; }
+        }
+        return "";
+    }
+
     // Remembered by name, so that editing the list around it does not leave the
     // position pointing at a different channel than the one being listened to.
     void setNavBookmark(const std::string& bmName) {
@@ -1353,7 +1389,7 @@ private:
         bm.erase("lastHeard");
         bm.erase("timesHeard");
         if (!b.fullName.empty()) { bm["fullName"] = b.fullName; }
-        if (!b.language.empty()) { bm["language"] = b.language; }
+        if (!b.languages.empty()) { bm["language"] = b.languages; }
         if (!b.service.empty()) { bm["service"] = b.service; }
         if (b.active24h) { bm["active24h"] = true; }
         if (b.activeStart >= 0) { bm["activeStart"] = b.activeStart; }
@@ -1367,7 +1403,19 @@ private:
     static void loadStation(const json& bm, FrequencyBookmark& b) {
         if (!bm.is_object()) { return; }
         if (bm.contains("fullName") && bm["fullName"].is_string()) { b.fullName = bm["fullName"]; }
-        if (bm.contains("language") && bm["language"].is_string()) { b.language = bm["language"]; }
+        // Written as a list since stations carry more than one. A single string is
+        // what every bookmark saved before that holds, and is read as a list of one.
+        if (bm.contains("language")) {
+            if (bm["language"].is_string()) {
+                std::string one = bm["language"];
+                if (!one.empty()) { b.languages.push_back(one); }
+            }
+            else if (bm["language"].is_array()) {
+                for (const auto& l : bm["language"]) {
+                    if (l.is_string() && !l.get<std::string>().empty()) { b.languages.push_back(l); }
+                }
+            }
+        }
         if (bm.contains("service") && bm["service"].is_string()) { b.service = bm["service"]; }
         if (bm.contains("active24h") && bm["active24h"].is_boolean()) { b.active24h = bm["active24h"]; }
         if (bm.contains("activeStart") && bm["activeStart"].is_number_integer()) { b.activeStart = bm["activeStart"]; }
@@ -1600,7 +1648,7 @@ private:
             _this->editedBookmark.notes.clear();
             _this->editedBookmark.skip = false;
             _this->editedBookmark.fullName.clear();
-            _this->editedBookmark.language.clear();
+            _this->editedBookmark.languages.clear();
             _this->editedBookmark.service.clear();
             _this->editedBookmark.activeStart = -1;
             _this->editedBookmark.activeEnd = -1;
@@ -1891,8 +1939,13 @@ private:
 
             // Which channel the buttons will step from. Without it the first press
             // after tuning by hand looks like it came from nowhere.
-            if (!_this->navBookmarkName.empty() && _this->bookmarks.count(_this->navBookmarkName)) {
-                ImGui::TextDisabled("On %s", _this->navBookmarkName.c_str());
+            // Whatever the radio is actually on. It used to name the last channel tuned
+            // from this panel, so tuning to a bookmark's frequency by hand - typing it,
+            // or clicking the waterfall - said "Not on a channel" while sitting exactly
+            // on one.
+            std::string on = _this->bookmarkAtCurrentFrequency();
+            if (!on.empty()) {
+                ImGui::TextDisabled("On %s", on.c_str());
             }
             else {
                 ImGui::TextDisabled("Not on a channel");
@@ -2397,7 +2450,7 @@ private:
                 bmcsv::encodeToneList(t),
                 bmcsv::fmtBool(bm.skip),
                 bm.fullName,
-                bm.language,
+                station::joinCodes(bm.languages),
                 bm.service,
                 bmcsv::fmtBool(bm.active24h),
                 bmcsv::fmtTimeOfDay(bm.activeStart),
@@ -2522,7 +2575,7 @@ private:
             // leaves the bookmark with nothing said about the station - the same as
             // every bookmark made before these existed.
             fbm.fullName = field(row, "fullname");
-            fbm.language = field(row, "language");
+            fbm.languages = station::splitCodes(field(row, "language"));
             fbm.service = field(row, "service");
             fbm.active24h = bmcsv::parseBool(field(row, "alwayson"), false);
             fbm.activeStart = bmcsv::parseTimeOfDay(field(row, "activefromutc"));
