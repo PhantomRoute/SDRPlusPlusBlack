@@ -240,6 +240,14 @@ namespace dsp {
             }
 
             mbe_status.mbe_status_errorbar += std::string(mbe_errStr);
+            // What mbelib actually reported, kept as numbers. errs is the first
+            // protected block on its own, which is the one it gives up on past three;
+            // errs2 counts the whole frame. The average is eased over frames so the
+            // panel can show a level rather than whichever frame happened to land
+            // while it was drawing.
+            mbe_status.mbe_status_errs = errs;
+            mbe_status.mbe_status_errs2 = errs2;
+            mbe_status.mbe_status_errsAvg += ((float)errs2 - mbe_status.mbe_status_errsAvg) * 0.1f;
 
             *outcnt += 160;
         }

@@ -244,7 +244,14 @@ namespace dsp {
                     dibit = dibitBuf[dmr_dibitBuffP++];
                 }
                 //TODO: use signaling data
-                dmrv_sync[i] = (dibit | 1) + 48;
+                // Indexed by the position in the sync word, not by the position in
+                // the block of dibits this call happens to have been handed. Those
+                // are the same thing only when the whole 24 symbol field arrives in
+                // one block; when it straddles two the field was assembled out of
+                // order, and what the comparison below then saw was partly whatever
+                // the last frame had left in the buffer. It decides whether the rest
+                // of the superframe is voice or a data burst to be muted.
+                dmrv_sync[dmrv_ctr] = (dibit | 1) + 48;
                 dmrv_ctr++;
                 if(dmrv_ctr == 24) {
                     dmrv_ctr = 0;

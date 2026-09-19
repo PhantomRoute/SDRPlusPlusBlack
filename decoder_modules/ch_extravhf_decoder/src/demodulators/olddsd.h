@@ -61,6 +61,9 @@ namespace demod {
             if (_config->conf[name][getName()].contains("trackLevelsForGfsk")) {
                 dsdDec.trackLevelsForGfsk = _config->conf[name][getName()]["trackLevelsForGfsk"];
             }
+            if (_config->conf[name][getName()].contains("invertedDmr")) {
+                dsdDec.invertedDmr = _config->conf[name][getName()]["invertedDmr"];
+            }
             _config->release();
 
             dsdDec.setDemodMode(getSelectedMode());
@@ -88,23 +91,24 @@ namespace demod {
 
         // Who is transmitting right now, in the form the log records.
         void tickCallLog() {
-            const std::string& proto = dsdDec.status_last_proto;
+            dsp::DSD::Status st = dsdDec.getStatus();
+            const std::string& proto = st.lastProto;
             std::string label;
             std::string who;
             char buf[96];
 
             if (proto.find("P25") != std::string::npos) {
                 label = "P25";
-                if (dsdDec.status_last_tg != 0 || dsdDec.status_last_src != 0) {
-                    snprintf(buf, sizeof(buf), "TG %d  SRC %d", dsdDec.status_last_tg, dsdDec.status_last_src);
+                if (st.lastTg != 0 || st.lastSrc != 0) {
+                    snprintf(buf, sizeof(buf), "TG %d  SRC %d", st.lastTg, st.lastSrc);
                     who = buf;
                 }
             }
             else if (proto.find("D-STAR") != std::string::npos) {
                 label = "D-STAR";
-                if (!dsdDec.status_last_dstar_my.empty()) {
-                    who = dsdDec.status_last_dstar_my;
-                    if (!dsdDec.status_last_dstar_ur.empty()) { who += " > " + dsdDec.status_last_dstar_ur; }
+                if (!st.lastDstarMy.empty()) {
+                    who = st.lastDstarMy;
+                    if (!st.lastDstarUr.empty()) { who += " > " + st.lastDstarUr; }
                 }
             }
             else if (proto.find("DMR") != std::string::npos) {
@@ -120,7 +124,7 @@ namespace demod {
             // on: a control channel is in sync all day, and was logged as one call
             // lasting as long as the panel was open. The log's own hold carries a call
             // across the data frames between voice.
-            callLog.observe(dsdDec.status_sync && carryingVoice(), label, who, false);
+            callLog.observe(st.sync && carryingVoice(st), label, who, false);
         }
 
         void start() {
@@ -144,6 +148,7 @@ namespace demod {
         }
 
         void showMenu() {
+            dsp::DSD::Status st = dsdDec.getStatus();
             std::string protoSummary = getProtocolSummary();
             ImGui::LeftLabel("Protocols");
             ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
@@ -170,57 +175,70 @@ namespace demod {
 
             // Input level as a bar rather than a bare percentage - the useful
             // question is "is it in range", which a number makes you work out.
-            drawLevelBar(dsdDec.status_lvl, levelSmoothed);
+            drawLevelBar(st.lvl, levelSmoothed);
 
-            drawSyncLine(dsdDec.status_sync, dsdDec.status_last_proto);
+            drawSyncLine(st.sync, st.lastProto);
 
             // Only the protocol actually being decoded. The old panel listed P25, DMR
             // and NXDN at once, so two thirds of it was always stale zeroes in red.
-            const std::string& proto = dsdDec.status_last_proto;
+            const std::string& proto = st.lastProto;
             if (proto.find("P25") != std::string::npos) {
-                ImGui::Text("NAC %d   SRC %d   TG %d", dsdDec.status_last_nac, dsdDec.status_last_src, dsdDec.status_last_tg);
-                if (!dsdDec.status_last_p25_duid.empty()) { ImGui::Text("DUID %s", dsdDec.status_last_p25_duid.c_str()); }
+                ImGui::Text("NAC %d   SRC %d   TG %d", st.lastNac, st.lastSrc, st.lastTg);
+                if (!st.lastP25Duid.empty()) { ImGui::Text("DUID %s", st.lastP25Duid.c_str()); }
             } else if (proto.find("DMR") != std::string::npos) {
-                ImGui::Text("Slot 0  %s", dsdDec.status_last_dmr_slot0_burst.c_str());
-                ImGui::Text("Slot 1  %s", dsdDec.status_last_dmr_slot1_burst.c_str());
+                ImGui::Text("Slot 0  %s", st.lastDmrSlot0Burst.c_str());
+                ImGui::Text("Slot 1  %s", st.lastDmrSlot1Burst.c_str());
             } else if (proto.find("NXDN") != std::string::npos) {
-                ImGui::Text("Frame   %s", dsdDec.status_last_nxdn_type.c_str());
+                ImGui::Text("Frame   %s", st.lastNxdnType.c_str());
             } else if (proto.find("D-STAR") != std::string::npos) {
                 // All of this comes from the radio header, which is only sent at the
                 // start of a transmission - tune in halfway through one and there is
                 // nothing to show until the next.
-                if (dsdDec.status_last_dstar_my.empty()) {
+                if (st.lastDstarMy.empty()) {
                     ImGui::TextDisabled("Waiting for the header");
                 }
                 else {
-                    ImGui::Text("From    %s", dsdDec.status_last_dstar_my.c_str());
-                    ImGui::Text("To      %s", dsdDec.status_last_dstar_ur.c_str());
-                    if (!dsdDec.status_last_dstar_rpt1.empty() || !dsdDec.status_last_dstar_rpt2.empty()) {
-                        ImGui::Text("Via     %s %s", dsdDec.status_last_dstar_rpt1.c_str(), dsdDec.status_last_dstar_rpt2.c_str());
+                    ImGui::Text("From    %s", st.lastDstarMy.c_str());
+                    ImGui::Text("To      %s", st.lastDstarUr.c_str());
+                    if (!st.lastDstarRpt1.empty() || !st.lastDstarRpt2.empty()) {
+                        ImGui::Text("Via     %s %s", st.lastDstarRpt1.c_str(), st.lastDstarRpt2.c_str());
                     }
                 }
-                if (!dsdDec.status_last_dstar_message.empty()) {
+                if (!st.lastDstarMessage.empty()) {
                     ImGui::PushTextWrapPos(0.0f);
-                    ImGui::TextColored(ImVec4(0.6f, 0.85f, 1.0f, 1.0f), "\"%s\"", dsdDec.status_last_dstar_message.c_str());
+                    ImGui::TextColored(ImVec4(0.6f, 0.85f, 1.0f, 1.0f), "\"%s\"", st.lastDstarMessage.c_str());
                     ImGui::PopTextWrapPos();
                 }
             }
 
-            drawVoiceQuality();
+            drawVoiceQuality(st);
 
             const char* modNames[] = { "C4FM", "QPSK", "GFSK" };
-            int rfMod = dsdDec.getRfMod();
+            int rfMod = st.rfMod;
             ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "%s  %d sps  sync %s",
                                (rfMod >= 0 && rfMod <= 2) ? modNames[rfMod] : "?",
-                               dsdDec.getSamplesPerSymbol(),
-                               getSyncTypeName(dsdDec.getLastSyncType()));
+                               st.samplesPerSymbol,
+                               getSyncTypeName(st.lastSyncType));
 
-            // Tuning knobs for the NXDN work, collapsed by default and only shown
-            // when they apply - the same way the main window tucks its debug section
-            // away. Nobody needs these to listen to a channel.
-            if (dsdDec.frameNxdn48 == 1 || dsdDec.frameNxdn96 == 1) {
-                ImGui::Spacing();
-                if (ImGui::CollapsingHeader(("Advanced##_olddsd_adv_" + name).c_str())) {
+            // Tuning knobs, collapsed by default - the same way the main window tucks
+            // its debug section away. Nobody needs these to listen to a channel.
+            ImGui::Spacing();
+            if (ImGui::CollapsingHeader(("Advanced##_olddsd_adv_" + name).c_str())) {
+                bool dmrInv = dsdDec.invertedDmr == 1;
+                if (ImGui::Checkbox(("Inverted DMR##_olddsd_dmrinv_" + name).c_str(), &dmrInv)) {
+                    dsdDec.invertedDmr = dmrInv ? 1 : 0;
+                    _config->acquire();
+                    _config->conf[name][getName()]["invertedDmr"] = dsdDec.invertedDmr;
+                    _config->release(true);
+                }
+                ImGui::HelpMarker("Turn this on if the receiver is handing the signal over with I and Q\n"
+                                  "swapped, which turns the deviation upside down.\n\n"
+                                  "DMR's data and voice frame sync words are exact inversions of each\n"
+                                  "other, so an upside down signal still syncs and still says DMR - it\n"
+                                  "just reads every burst as the opposite kind and every dibit inverted.\n"
+                                  "P25, D-STAR and NXDN are worked out on their own and need no switch.");
+
+                if (dsdDec.frameNxdn48 == 1 || dsdDec.frameNxdn96 == 1) {
                     // Off is szechyjs's exact compare, on is what dsdcc and dsd-fme do.
                     // Only for staying on a signal already being decoded: finding one
                     // always takes an exact match, so this cannot make it sync on noise.
@@ -249,19 +267,19 @@ namespace demod {
         // frame they last had - on a live DMR control channel the voice row sat on
         // the bit errors of a voice frame long gone while both slots carried CSBK and
         // idle bursts. Everything else is taken as voice, as before.
-        bool carryingVoice() {
-            const std::string& proto = dsdDec.status_last_proto;
+        bool carryingVoice(const dsp::DSD::Status& st) {
+            const std::string& proto = st.lastProto;
             if (proto.find("NXDN") != std::string::npos) {
-                return dsdDec.status_last_nxdn_type != "DATA";
+                return st.lastNxdnType != "DATA";
             }
             if (proto.find("DMR") != std::string::npos) {
-                return dsdDec.status_last_dmr_slot0_burst == "VOICE" || dsdDec.status_last_dmr_slot1_burst == "VOICE";
+                return st.lastDmrSlot0Burst == "VOICE" || st.lastDmrSlot1Burst == "VOICE";
             }
             return true;
         }
 
-        void drawVoiceQuality() {
-            drawVoiceQualityBar(dsdDec.status_errorbar, dsdDec.status_sync, voiceQualitySmoothed, name, carryingVoice());
+        void drawVoiceQuality(const dsp::DSD::Status& st) {
+            drawVoiceQualityBar(st.errorbar, st.errs2, st.errsAvg, st.sync, voiceQualitySmoothed, name, carryingVoice(st));
         }
 
         // Names getFrameSync's return codes. A protocol showing up here without

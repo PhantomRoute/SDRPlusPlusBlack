@@ -42,23 +42,26 @@ namespace demod {
         ImGui::PopStyleColor();
     }
 
-    // mbelib writes one '=' per corrected bit error, then a letter if the frame was
-    // an erasure (E), a tone (T), repeated because it had more than three errors (R),
-    // or muted after too many repeats (M). A lengthening row of '=' carries all of
-    // that and shows none of it, so read the count out as a quality bar - full and
-    // green is clean - and say what the letter meant. The raw string stays on the
+    // mbelib reports, per voice frame, how many bit errors it had to correct and
+    // whether it gave up: a letter for an erasure (E), a tone (T), a frame repeated
+    // because the first protected block had more than three errors (R), or muted
+    // after too many repeats (M).
+    //
+    // frameErrors and avgErrors are those counts for the last frame and eased over
+    // frames. They used to be recovered by counting '=' out of the error string,
+    // which is appended to for a whole superframe - so the figure grew through the
+    // superframe and reset, and stood for a different number of frames in each
+    // protocol. The string is still what carries the letters, and still goes on the
     // tooltip for anyone who reads mbelib output directly.
     //
     // carryingVoice is false while the frames coming in are not voice at all - an
-    // NXDN data frame, say. The error bar is whatever the last voice frame left,
-    // so without it the row went on reporting that frame's bit errors against a
-    // Frame row that said DATA.
-    inline void drawVoiceQualityBar(const std::string& errorbar, bool synced, float& smoothed, const std::string& idSuffix, bool carryingVoice = true) {
-        int errors = 0;
+    // NXDN data frame, say. The counts are whatever the last voice frame left, so
+    // without it the row went on reporting that frame's bit errors against a Frame
+    // row that said DATA.
+    inline void drawVoiceQualityBar(const std::string& errorbar, int frameErrors, float avgErrors, bool synced, float& smoothed, const std::string& idSuffix, bool carryingVoice = true) {
         char flag = 0;
         for (char c : errorbar) {
-            if (c == '=') { errors++; }
-            else if (c != ' ') { flag = c; }
+            if (c != '=' && c != ' ') { flag = c; }
         }
 
         const char* verdict;
@@ -69,7 +72,6 @@ namespace demod {
         } else if (!carryingVoice) {
             verdict = "no voice in these frames";
             color = ImVec4(0.5f, 0.5f, 0.5f, 1.0f);
-            errors = 0;
         } else if (flag == 'M') {
             verdict = "muted, too many bad frames";
             color = ImVec4(1.0f, 0.3f, 0.3f, 1.0f);
@@ -82,13 +84,13 @@ namespace demod {
         } else if (flag == 'T') {
             verdict = "tone";
             color = ImVec4(0.4f, 0.7f, 1.0f, 1.0f);
-        } else if (errors == 0) {
+        } else if (avgErrors < 0.25f) {
             verdict = "clean";
             color = ImVec4(0.3f, 1.0f, 0.3f, 1.0f);
-        } else if (errors <= 4) {
+        } else if (avgErrors < 1.0f) {
             verdict = "good";
             color = ImVec4(0.5f, 1.0f, 0.4f, 1.0f);
-        } else if (errors <= 10) {
+        } else if (avgErrors < 3.0f) {
             verdict = "fair";
             color = ImVec4(1.0f, 0.9f, 0.3f, 1.0f);
         } else {
@@ -96,26 +98,29 @@ namespace demod {
             color = ImVec4(1.0f, 0.4f, 0.3f, 1.0f);
         }
 
-        // Full bar is clean. The scale is a rough one: mbelib repeats a frame past
-        // three errors and a voice frame carries a handful of them, so 16 stands in
-        // for "every frame at the repeat threshold". Protocols pack different numbers
-        // of AMBE frames per voice frame, so this is an indicator, not a measurement.
-        float quality = 1.0f - ((float)errors / 16.0f);
+        // Full bar is clean. mbelib gives up on a frame past three errors in its
+        // first protected block, so six errors a frame stands in for "twice as bad as
+        // the point where it stops trying".
+        float quality = 1.0f - (avgErrors / 6.0f);
         if (quality < 0.0f) { quality = 0.0f; }
+        if (quality > 1.0f) { quality = 1.0f; }
         if (!synced || !carryingVoice) { quality = 0.0f; }
         smoothed = approachValue(smoothed, quality, 6.0f);
 
         char overlay[64];
-        if (errors > 0) { snprintf(overlay, sizeof(overlay), "%s - %d bit errors", verdict, errors); }
-        else { snprintf(overlay, sizeof(overlay), "%s", verdict); }
+        if (!synced || !carryingVoice) { snprintf(overlay, sizeof(overlay), "%s", verdict); }
+        else { snprintf(overlay, sizeof(overlay), "%s - %.1f bit errors per frame", verdict, avgErrors); }
 
         ImGui::LeftLabel("Voice");
         ImGui::PushStyleColor(ImGuiCol_PlotHistogram, color);
         ImGui::ProgressBar(smoothed, ImVec2(ImGui::GetContentRegionAvail().x, 0), overlay);
         ImGui::PopStyleColor();
         if (ImGui::IsItemHovered()) {
-            style::tooltip("mbelib: %s\n'=' corrected bit error, E erasure, T tone, R repeat, M muted",
-                              errorbar.empty() ? "(none)" : errorbar.c_str());
+            style::tooltip("Last frame: %d bit errors corrected%s\n\n"
+                           "mbelib: %s\n"
+                           "'=' corrected bit error, E erasure, T tone, R repeat, M muted",
+                           frameErrors, (flag ? " (and it gave up on it)" : ""),
+                           errorbar.empty() ? "(none)" : errorbar.c_str());
         }
         (void)idSuffix;
     }

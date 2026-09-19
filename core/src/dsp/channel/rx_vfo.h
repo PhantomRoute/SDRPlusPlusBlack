@@ -117,6 +117,13 @@ namespace dsp::channel {
         void generateTaps() {
             taps::free(ftaps);
             double filterWidth = _bandwidth / 2.0;
+            // A cutoff above half the output rate does not give a wider filter, it
+            // gives a wrong one: the sinc is sampled past the Nyquist point and its
+            // image folds back, so a 12.5 kHz channel asked for on a 9.6 kHz stream
+            // came out 6.7 kHz wide. Hold it inside the band, where the resampler in
+            // front has already limited the signal anyway.
+            double nyquist = _outSamplerate / 2.0;
+            if (filterWidth > nyquist) { filterWidth = nyquist; }
             ftaps = taps::lowPass(filterWidth, filterWidth * 0.1, _outSamplerate);
         }
 

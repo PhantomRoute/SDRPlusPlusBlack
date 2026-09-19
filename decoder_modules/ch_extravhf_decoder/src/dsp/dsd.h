@@ -19,6 +19,7 @@
 
 #include <dsp/processor.h>
 #include <utils/flog.h>
+#include <mutex>
 #include <string>
 #include <vector>
 extern "C" {
@@ -76,6 +77,7 @@ namespace dsp {
             if (count < 0) { return -1; }
 
             int outCount = process(count, base_type::_in->readBuf, base_type::out.writeBuf);
+            publishStatus();
             // Swap if some data was generated
             base_type::_in->flush();
             if (outCount) {
@@ -95,6 +97,14 @@ namespace dsp {
         struct MBE_status {
             bool mbe_status_decoding = false;
             std::string mbe_status_errorbar = "";
+            // What mbelib reported for the last voice frame, as numbers rather than
+            // as a row of '=' to be counted back out of the string above. The string
+            // is appended to for a whole superframe, so counting it gave a total over
+            // however many frames had gone by rather than a rate, and a different
+            // number of frames for each protocol.
+            int mbe_status_errs = 0;   // corrected in the frame's first protected block
+            int mbe_status_errs2 = 0;  // corrected in the frame altogether
+            float mbe_status_errsAvg = 0.0f;  // errs2, eased, so the panel shows a level
         };
         struct DMR_status {
             uint8_t dmr_status_s0_lastburstt = 0;
@@ -124,17 +134,26 @@ namespace dsp {
             bool p25_status_irr_err = false;
         };
 
+        // The status structs below are written by the DSP thread as it decodes and
+        // read by the UI thread while it draws. Copying them out from under it meant
+        // copying half-written std::strings, which is a crash waiting for a long
+        // enough transmission. The DSP thread keeps its own working copies and
+        // publishes them once per block; these hand back that published copy.
         Frame_status getFrameSyncStatus() {
-            return frame_status;
+            std::lock_guard<std::mutex> lck(statusMtx);
+            return pub_frame_status;
         }
         MBE_status getMBEStatus() {
-            return mbe_status;
+            std::lock_guard<std::mutex> lck(statusMtx);
+            return pub_mbe_status;
         }
         DMR_status getDMRStatus() {
-            return dmr_status;
+            std::lock_guard<std::mutex> lck(statusMtx);
+            return pub_dmr_status;
         }
         P25_status getP25Status() {
-            return p25_status;
+            std::lock_guard<std::mutex> lck(statusMtx);
+            return pub_p25_status;
         }
 
         // Frame syncs the decoder will search for. Both enabled (the default) is
@@ -145,6 +164,19 @@ namespace dsp {
         int frameDmr = 1;
 
     private:
+        void publishStatus() {
+            std::lock_guard<std::mutex> lck(statusMtx);
+            pub_frame_status = frame_status;
+            pub_mbe_status = mbe_status;
+            pub_dmr_status = dmr_status;
+            pub_p25_status = p25_status;
+        }
+
+        std::mutex statusMtx;
+        Frame_status pub_frame_status;
+        MBE_status pub_mbe_status;
+        DMR_status pub_dmr_status;
+        P25_status pub_p25_status;
 
         int inSymsCtr = 0;
         int outSymsCtr = 0;
@@ -488,6 +520,7 @@ namespace dsp {
                     processFrame();
                 }
             }
+            publishStatus();
             int requiredOut = inSymsCtr * 8000 / 48000;
             int remainingOut = requiredOut - outSymsCtr;
 //            printf("in %d out %d req %d\n", inSymsCtr, outSymsCtr, requiredOut);
@@ -497,6 +530,42 @@ namespace dsp {
             }
             inSymsCtr -= requiredOut * 48000 / 8000;
             return finflag;
+        }
+
+        // Everything the panel shows, in one piece. The status_ fields below are the
+        // DSP thread's working copies and it is the only thread that touches them;
+        // this is the copy the UI thread gets, taken while the DSP thread is between
+        // frames. Reading the live fields meant copying std::strings while they were
+        // being written, which is a crash waiting for a long enough transmission.
+        struct Status {
+            bool sync = false;
+            std::string lastProto;
+            int lastNac = 0;
+            int lastSrc = 0;
+            int lastTg = 0;
+            std::string lastP25Duid;
+            std::string lastDmrSlot0Burst;
+            std::string lastDmrSlot1Burst;
+            std::string lastNxdnType;
+            std::string lastDstarMy;
+            std::string lastDstarUr;
+            std::string lastDstarRpt1;
+            std::string lastDstarRpt2;
+            std::string lastDstarMessage;
+            std::string errorbar;
+            bool mbeDecoding = false;
+            int lvl = 0;
+            int errs = 0;
+            int errs2 = 0;
+            float errsAvg = 0.0f;
+            int rfMod = 0;
+            int samplesPerSymbol = 0;
+            int lastSyncType = -1;
+        };
+
+        Status getStatus() {
+            std::lock_guard<std::mutex> lck(statusMtx);
+            return publishedStatus;
         }
 
         bool status_sync = false;
@@ -520,6 +589,11 @@ namespace dsp {
         std::string status_errorbar = "";
         bool status_mbedecoding = false;
         int status_lvl = 0;
+        // mbelib's own count of what it had to correct in the last voice frame, kept
+        // as numbers rather than left to be counted back out of the bar string.
+        int status_errs = 0;
+        int status_errs2 = 0;
+        float status_errsAvg = 0.0f;
 
         // Slow data arrives three bytes per voice frame and a message is spread over
         // eight of them, so it has to be reassembled across frames.
@@ -528,6 +602,37 @@ namespace dsp {
 
 
     private:
+        void publishStatus() {
+            Status st;
+            st.sync = status_sync;
+            st.lastProto = status_last_proto;
+            st.lastNac = status_last_nac;
+            st.lastSrc = status_last_src;
+            st.lastTg = status_last_tg;
+            st.lastP25Duid = status_last_p25_duid;
+            st.lastDmrSlot0Burst = status_last_dmr_slot0_burst;
+            st.lastDmrSlot1Burst = status_last_dmr_slot1_burst;
+            st.lastNxdnType = status_last_nxdn_type;
+            st.lastDstarMy = status_last_dstar_my;
+            st.lastDstarUr = status_last_dstar_ur;
+            st.lastDstarRpt1 = status_last_dstar_rpt1;
+            st.lastDstarRpt2 = status_last_dstar_rpt2;
+            st.lastDstarMessage = status_last_dstar_message;
+            st.errorbar = status_errorbar;
+            st.mbeDecoding = status_mbedecoding;
+            st.lvl = status_lvl;
+            st.errs = status_errs;
+            st.errs2 = status_errs2;
+            st.errsAvg = status_errsAvg;
+            st.rfMod = rfMod;
+            st.samplesPerSymbol = samplesPerSymbol;
+            st.lastSyncType = lastsynctype;
+            std::lock_guard<std::mutex> lck(statusMtx);
+            publishedStatus = std::move(st);
+        }
+
+        std::mutex statusMtx;
+        Status publishedStatus;
 
         // Working state for the reassembly above: the bytes seen so far in this
         // transmission, the message being built out of them, and which of its four
@@ -609,7 +714,6 @@ namespace dsp {
         int p25kid = 0;
         int lastDibit = 0;
         int invertedX2tdma = 1;
-        int invertedDmr = 0;
 
         int onesymbol = 10;
         int errorbars = 1;
@@ -700,6 +804,15 @@ namespace dsp {
             nxdnRecentSync[p][nxdnRecentNext[p]] = symbolClock;
             nxdnRecentNext[p] = (nxdnRecentNext[p] + 1) % NXDN_RECENT;
         }
+
+        // Whether a DMR signal arrives with its deviation the wrong way round, from
+        // I and Q being swapped ahead of the receiver. It has to be told, because
+        // DMR's data and voice frame sync words are exact inversions of each other:
+        // an upside down signal matches the opposite one, so the decoder syncs and
+        // reports DMR either way and only the burst type and the dibits come out
+        // swapped. P25, D-STAR and NXDN carry sync words that are not each other's
+        // inverse, so those are detected on their own and need no switch.
+        int invertedDmr = 0;
 
         // Whether the slicer levels are tracked continuously in GFSK, or left on the
         // estimate taken when the frame synced - see use_symbol. Off restores
@@ -933,6 +1046,12 @@ namespace dsp {
 //                printf ("%s", errStr);
                 status_errorbar += errStr;
             }
+            // errs is the first protected block on its own, which is the one mbelib
+            // gives up on past three; errs2 counts the whole frame. Eased over frames
+            // so the panel shows a level rather than whichever frame it caught.
+            status_errs = errs;
+            status_errs2 = errs2;
+            status_errsAvg += ((float)errs2 - status_errsAvg) * 0.1f;
 
             base_type::out.swap(160);
             outSymsCtr+=160;

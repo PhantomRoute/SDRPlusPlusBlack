@@ -17,7 +17,7 @@
 #include "dsd_status_ui.h"
 #include "gui/style.h"
 #include <gui/gui.h>
-#include <dsp/clock_recovery/fd.h>
+#include <dsp/clock_recovery/gardner.h>
 #include <dsp/clock_recovery/mm.h>
 #include <chrono>
 #include <mutex>
@@ -29,8 +29,14 @@
 #define CONCAT(a, b) ((std::string(a) + b).c_str())
 
 #define INSR                   (4800.0f * 2)
-#define CLOCK_RECOVERY_BW      0.1f
-#define CLOCK_RECOVERY_DAMPN_F 1.0f
+// Timing loop. 0.1 with a damping factor of 1.0 came with the FD detector this
+// used to run, which needed a fast loop to sit still on a signal whose inner
+// symbols it was being pushed off. Gardner does not, and measured on a live DMR
+// channel a loop this wide only adds jitter: 0.02 critically damped read the
+// frame sync symbols three to four times more accurately on a clean signal and
+// no worse once there was noise on it.
+#define CLOCK_RECOVERY_BW      0.02f
+#define CLOCK_RECOVERY_DAMPN_F 0.707f
 #define CLOCK_RECOVERY_REL_LIM 0.001f
 #define RRC_TAP_COUNT          65
 #define RRC_ALPHA              0.23f
@@ -97,6 +103,10 @@ namespace demod {
                     decoder.*proto.flag = enabled ? 1 : 0;
                 }
             }
+            bool invertedSignal = false;
+            if (_config->conf[name][getName()].contains("inverted")) {
+                invertedSignal = _config->conf[name][getName()]["inverted"];
+            }
             _config->release();
 
             // Define structure
@@ -119,6 +129,7 @@ namespace demod {
             constDiagSink.init(&constDiagReshaper.out, _constDiagSinkHandler, this);
 
             slicer.init(&demodStream);
+            slicer.inverted = invertedSignal;
 
             decoder.init(&slicer.out);
             outputConv.init(&decoder.out);
@@ -278,11 +289,12 @@ namespace demod {
 
             ImGui::Spacing();
 
-            // Full scale is the +-1.3 the slicer clamps its references at, not 1.0.
-            // Against 1.0 a properly tuned signal read 116% and sat red, because the
-            // RRC and the recovery loop carry a little gain of their own. Measured
-            // against what the slicer will actually follow, the same signal reads
-            // around 90% and the bar only goes red when it is genuinely past that.
+            // 100% is 1.3, a little above the 1.0 that the quadrature demodulator
+            // maps 1944 Hz of deviation to, because the RRC and the recovery loop
+            // carry a little gain of their own and a correctly deviated signal peaks
+            // around there. Over 100% means the transmitter is running wider than
+            // nominal rather than anything being wrong - the slicer follows the
+            // levels now, so it is a reading rather than a warning.
             drawLevelBar((int)(symbolPeak.load(std::memory_order_relaxed) * (100.0f / 1.3f)), levelSmoothed);
 
             // The constellation sits under it: the bar says how strong, this says
@@ -348,7 +360,23 @@ namespace demod {
             // Synced and not decoding voice is a data or idle frame, not a missing
             // signal. Folding the two into one "synced" said "no signal" under a
             // green SYNC line on every DMR control channel.
-            drawVoiceQualityBar(mbe_st.mbe_status_errorbar, fr_st.sync, voiceQualitySmoothed, name, mbe_st.mbe_status_decoding);
+            drawVoiceQualityBar(mbe_st.mbe_status_errorbar, mbe_st.mbe_status_errs2, mbe_st.mbe_status_errsAvg,
+                                fr_st.sync, voiceQualitySmoothed, name, mbe_st.mbe_status_decoding);
+
+            ImGui::Spacing();
+            if (ImGui::CollapsingHeader(("Advanced##_dsd_adv_" + name).c_str())) {
+                if (ImGui::Checkbox(("Inverted signal##_dsd_inv_" + name).c_str(), &slicer.inverted)) {
+                    _config->acquire();
+                    _config->conf[name][getName()]["inverted"] = slicer.inverted;
+                    _config->release(true);
+                }
+                ImGui::HelpMarker("Turn this on if the receiver is handing the signal over with I and Q\n"
+                                  "swapped, which turns the deviation upside down.\n\n"
+                                  "Worth trying when SYNC is green and steady but there is no audio and\n"
+                                  "the fields above read nonsense: a 4FSK sync word matches upside down\n"
+                                  "as well as the right way up, so the decoder locks on either way and\n"
+                                  "only the dibits after it come out wrong.");
+            }
 
             ImGui::Spacing();
             callLog.draw(name);
@@ -369,7 +397,7 @@ namespace demod {
         double getAFSampleRate() { return 8000.0; }
         double getDefaultBandwidth() { return bw; }
         double getMinBandwidth() { return 3000.0; }
-        double getMaxBandwidth() { return 12500.0; }
+        double getMaxBandwidth() { return 6700.0; }
         bool getBandwidthLocked() { return true; }
         double getMaxAFBandwidth() { return 4000.0; }
         double getDefaultSnapInterval() { return 500.0; }
@@ -425,7 +453,16 @@ namespace demod {
             return summary;
         }
 
-        float bw = 12500.0;
+        // The channel this decoder actually receives. It runs a 9600 Hz IF, so it
+        // cannot be handed anything wider than that: the VFO builds its channel
+        // filter at the IF rate, and a cutoff past half of it does not widen the
+        // filter, it folds back. Asking for 12500 Hz here produced a filter 6.7 kHz
+        // wide and called it 12.5, so the figure in the menu, the marker on the
+        // waterfall and the filter itself all disagreed. 6700 Hz is what the chain
+        // was really giving, now asked for plainly - and on a live DMR channel it
+        // reads the frame sync symbols more accurately than the wider settings do,
+        // so it is also the right width to ask for.
+        float bw = 6700.0;
 
         inline static std::mutex registryMtx;
         inline static std::unordered_map<std::string, DSD*> instances;
@@ -434,7 +471,7 @@ namespace demod {
         dsp::correction::DCBlocker<float> dcBlock;
         dsp::filter::FIR<float, float> rrcFilt;
         dsp::tap<float> rrcTaps;
-        dsp::clock_recovery::FD clockRecov;
+        dsp::clock_recovery::Gardner clockRecov;
         dsp::routing::Splitter<float> constDiagSplitter;
         dsp::stream<float> constDiagStream;
         dsp::buffer::Reshaper<float> constDiagReshaper;
